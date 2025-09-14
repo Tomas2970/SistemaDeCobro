@@ -50,15 +50,3 @@ def obtener_productos():
     resultados = cursor.fetchall()
     conexion.close()
     return resultados
-
-
-# PRUEBA RÁPIDA
-
-if __name__ == "__main__":
-    # Insertar un cliente de prueba
-    insertar_cliente("Juan Pérez", "San Martín 123", "3412345678", "juan@mail.com")
-
-    # Listar clientes
-    clientes = obtener_clientes()
-    for c in clientes:
-        print(c)
