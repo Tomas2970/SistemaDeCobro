@@ -1,8 +1,8 @@
 -- =====================================
 -- CREACIÓN DE BASE DE DATOS
 -- =====================================
-CREATE DATABASE IF NOT EXISTS supermercado_don_atilio 
-CHARACTER SET utf8mb4 
+CREATE DATABASE IF NOT EXISTS supermercado_don_atilio
+CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 
 USE supermercado_don_atilio;
@@ -282,7 +282,7 @@ AFTER UPDATE ON Venta
 FOR EACH ROW
 BEGIN
     -- Solo si es venta a cuenta corriente y tiene cliente
-    IF NEW.tipo_pago = 'cuenta_corriente' AND NEW.id_cliente IS NOT NULL THEN
+    IF NEW.tipo_pago = 'cuenta_corriente' AND NEW.id_cliente IS NOT NULL AND NEW.id_cliente != 0 THEN
         -- Si el total cambió, ajustar la diferencia
         IF NEW.total != OLD.total THEN
             UPDATE CuentaCorriente 
@@ -312,6 +312,10 @@ INSERT INTO Categoria (nombre, descripcion) VALUES
 ('Carnes', 'Carnes y embutidos'),
 ('Limpieza', 'Productos de limpieza e higiene'),
 ('Panadería', 'Productos de panadería y pastelería');
+
+-- Cliente genérico para ventas esporádicas (sin cliente registrado)
+INSERT INTO Cliente (id_cliente, nombre, direccion, telefono, email, activo) 
+VALUES (0, 'Consumidor Final', NULL, NULL, NULL, TRUE);
 
 -- =====================================
 -- VISTAS ÚTILES
@@ -409,7 +413,7 @@ BEGIN
     COMMIT;
     
     SELECT nuevo_id_producto as id_producto_creado;
-END$
+END$$
 
 -- Procedimiento para procesar venta completa
 CREATE PROCEDURE procesar_venta(
@@ -431,7 +435,7 @@ BEGIN
     COMMIT;
     
     SELECT nuevo_id_venta as id_venta_creada;
-END$
+END$$
 
 -- Procedimiento para registrar pago y actualizar cuenta corriente
 CREATE PROCEDURE registrar_pago_cuenta(
@@ -462,7 +466,7 @@ BEGIN
     COMMIT;
     
     SELECT 'Pago registrado exitosamente' as mensaje;
-END$
+END$$
 
 DELIMITER ;
 
@@ -478,13 +482,3 @@ CREATE INDEX idx_producto_categoria_activo ON Producto(id_categoria, activo);
 
 -- Para auditoría de inventario
 CREATE INDEX idx_auditoria_producto_fecha ON AuditoriaInventario(id_producto, fecha);
-
-
-
-
-
-
-
-
-
-

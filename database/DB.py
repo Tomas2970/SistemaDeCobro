@@ -3,6 +3,7 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 import logging
+from datetime import datetime, date
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -236,8 +237,13 @@ def obtener_inventario():
 # =====================================
 # Funciones para VENTAS (con transacciones)
 # =====================================
-def insertar_venta(id_usuario, id_cliente):
-    """Inserta una nueva venta"""
+def insertar_venta(id_usuario, id_cliente=0):
+    """Inserta una nueva venta
+    
+    Args:
+        id_usuario: ID del usuario que realiza la venta
+        id_cliente: ID del cliente (0 = Consumidor Final para ventas esporádicas)
+    """
     try:
         conn = conectar()
         cursor = conn.cursor()
@@ -246,7 +252,8 @@ def insertar_venta(id_usuario, id_cliente):
         conn.commit()
         id_venta = cursor.lastrowid
         
-        logger.info(f"Venta registrada con ID: {id_venta}")
+        cliente_info = "Consumidor Final" if id_cliente == 0 else f"Cliente ID {id_cliente}"
+        logger.info(f"Venta registrada con ID: {id_venta} - {cliente_info}")
         return id_venta
         
     except mysql.connector.Error as e:
@@ -710,6 +717,49 @@ def buscar_producto_por_nombre(nombre):
         if 'conn' in locals():
             conn.close()
 
+def buscar_producto_por_codigo_barras(codigo_barras):
+    """Busca un producto por su código de barras (para lector de código de barras)"""
+    try:
+        conn = conectar()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Validar que el código no esté vacío
+        if not codigo_barras or not codigo_barras.strip():
+            raise ValueError("El código de barras no puede estar vacío")
+        
+        sql = """
+            SELECT 
+                p.*,
+                c.nombre as categoria,
+                i.cantidad as stock,
+                i.stock_minimo
+            FROM Producto p
+            LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
+            LEFT JOIN Inventario i ON p.id_producto = i.id_producto
+            WHERE p.codigo_barras = %s AND p.activo = TRUE
+        """
+        cursor.execute(sql, (codigo_barras.strip(),))
+        resultado = cursor.fetchone()
+        
+        if resultado:
+            logger.info(f"Producto encontrado por código de barras: {resultado['nombre']}")
+        else:
+            logger.warning(f"No se encontró producto con código de barras: {codigo_barras}")
+        
+        return resultado
+        
+    except mysql.connector.Error as e:
+        logger.error(f"Error al buscar por código de barras: {e}")
+        return None
+    except ValueError as e:
+        logger.error(f"Error de validación: {e}")
+        return None
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
 def obtener_productos_por_categoria(id_categoria):
     """Obtiene todos los productos de una categoría"""
     try:
@@ -949,6 +999,239 @@ def obtener_estadisticas_generales():
     except mysql.connector.Error as e:
         logger.error(f"Error al obtener estadísticas: {e}")
         return {}
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+# =====================================
+# Funciones de INFORMES ADICIONALES
+# =====================================
+def obtener_ventas_por_vendedor(fecha_inicio=None, fecha_fin=None):
+    """Obtiene un informe de ventas agrupadas por vendedor
+    
+    Args:
+        fecha_inicio: Fecha de inicio del periodo (opcional)
+        fecha_fin: Fecha de fin del periodo (opcional)
+    
+    Returns:
+        Lista de diccionarios con información de ventas por vendedor
+    """
+    try:
+        conn = conectar()
+        cursor = conn.cursor(dictionary=True)
+        
+        sql = """
+            SELECT 
+                u.id_usuario,
+                u.nombre as vendedor,
+                r.nombre as rol,
+                COUNT(v.id_venta) as total_ventas,
+                COALESCE(SUM(v.total), 0) as monto_total,
+                COALESCE(AVG(v.total), 0) as promedio_venta,
+                MIN(v.fecha) as primera_venta,
+                MAX(v.fecha) as ultima_venta
+            FROM Usuario u
+            LEFT JOIN Rol r ON u.id_rol = r.id_rol
+            LEFT JOIN Venta v ON u.id_usuario = v.id_usuario AND v.estado = 'completada'
+        """
+        
+        parametros = []
+        
+        # Agregar filtro de fechas si se proporcionan
+        if fecha_inicio and fecha_fin:
+            sql += " WHERE v.fecha BETWEEN %s AND %s"
+            parametros.extend([fecha_inicio, fecha_fin])
+        elif fecha_inicio:
+            sql += " WHERE v.fecha >= %s"
+            parametros.append(fecha_inicio)
+        elif fecha_fin:
+            sql += " WHERE v.fecha <= %s"
+            parametros.append(fecha_fin)
+        
+        sql += """
+            GROUP BY u.id_usuario, u.nombre, r.nombre
+            ORDER BY monto_total DESC
+        """
+        
+        cursor.execute(sql, parametros)
+        resultados = cursor.fetchall()
+        
+        logger.info(f"Informe de ventas por vendedor generado: {len(resultados)} vendedores")
+        return resultados
+        
+    except mysql.connector.Error as e:
+        logger.error(f"Error al obtener ventas por vendedor: {e}")
+        return []
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+def obtener_cierre_caja(fecha=None, id_usuario=None):
+    """Genera un informe de cierre de caja
+    
+    Args:
+        fecha: Fecha del cierre (por defecto: hoy)
+        id_usuario: ID del usuario/vendedor (opcional, para cierre individual)
+    
+    Returns:
+        Diccionario con información del cierre de caja
+    """
+    try:
+        conn = conectar()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Si no se proporciona fecha, usar hoy
+        if not fecha:
+            from datetime import date
+            fecha = date.today()
+        
+        cierre = {}
+        
+        # Query base
+        sql_base = """
+            FROM Venta v
+            WHERE DATE(v.fecha) = %s
+            AND v.estado = 'completada'
+        """
+        parametros = [fecha]
+        
+        # Agregar filtro de usuario si se proporciona
+        if id_usuario:
+            sql_base += " AND v.id_usuario = %s"
+            parametros.append(id_usuario)
+        
+        # 1. Total general
+        sql = f"SELECT COUNT(*) as total_ventas, COALESCE(SUM(v.total), 0) as monto_total {sql_base}"
+        cursor.execute(sql, parametros)
+        resultado = cursor.fetchone()
+        cierre['total_ventas'] = resultado['total_ventas']
+        cierre['monto_total'] = resultado['monto_total']
+        
+        # 2. Ventas por tipo de pago
+        sql = f"""
+            SELECT 
+                v.tipo_pago,
+                COUNT(*) as cantidad,
+                COALESCE(SUM(v.total), 0) as monto
+            {sql_base}
+            GROUP BY v.tipo_pago
+        """
+        cursor.execute(sql, parametros)
+        cierre['por_tipo_pago'] = cursor.fetchall()
+        
+        # 3. Detalle por vendedor (solo si no se filtró por usuario)
+        if not id_usuario:
+            sql = f"""
+                SELECT 
+                    u.nombre as vendedor,
+                    COUNT(*) as total_ventas,
+                    COALESCE(SUM(v.total), 0) as monto_total
+                {sql_base}
+                LEFT JOIN Usuario u ON v.id_usuario = u.id_usuario
+                GROUP BY u.id_usuario, u.nombre
+                ORDER BY monto_total DESC
+            """
+            cursor.execute(sql, parametros)
+            cierre['por_vendedor'] = cursor.fetchall()
+        else:
+            # Si se filtró por usuario, obtener nombre
+            cursor.execute("SELECT nombre FROM Usuario WHERE id_usuario = %s", (id_usuario,))
+            usuario = cursor.fetchone()
+            cierre['vendedor'] = usuario['nombre'] if usuario else 'Desconocido'
+        
+        # 4. Productos más vendidos del día
+        sql = f"""
+            SELECT 
+                p.nombre as producto,
+                SUM(dv.cantidad) as cantidad_vendida,
+                COALESCE(SUM(dv.subtotal), 0) as total_vendido
+            FROM DetalleVenta dv
+            JOIN Producto p ON dv.id_producto = p.id_producto
+            JOIN Venta v ON dv.id_venta = v.id_venta
+            WHERE DATE(v.fecha) = %s
+            AND v.estado = 'completada'
+        """
+        params_productos = [fecha]
+        
+        if id_usuario:
+            sql += " AND v.id_usuario = %s"
+            params_productos.append(id_usuario)
+        
+        sql += """
+            GROUP BY p.id_producto, p.nombre
+            ORDER BY cantidad_vendida DESC
+            LIMIT 10
+        """
+        cursor.execute(sql, params_productos)
+        cierre['top_productos'] = cursor.fetchall()
+        
+        # 5. Información adicional
+        cierre['fecha'] = fecha
+        cierre['fecha_generacion'] = datetime.now()
+        
+        logger.info(f"Cierre de caja generado para fecha: {fecha}")
+        return cierre
+        
+    except mysql.connector.Error as e:
+        logger.error(f"Error al generar cierre de caja: {e}")
+        return {}
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+def obtener_ventas_por_periodo(fecha_inicio, fecha_fin, agrupar_por='dia'):
+    """Obtiene ventas agrupadas por periodo
+    
+    Args:
+        fecha_inicio: Fecha de inicio
+        fecha_fin: Fecha de fin
+        agrupar_por: 'dia', 'semana', 'mes' (por defecto: 'dia')
+    
+    Returns:
+        Lista de ventas agrupadas por el periodo especificado
+    """
+    try:
+        conn = conectar()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Determinar el formato de agrupación
+        if agrupar_por == 'semana':
+            fecha_format = "DATE_FORMAT(v.fecha, '%Y-%u')"
+            fecha_label = "semana"
+        elif agrupar_por == 'mes':
+            fecha_format = "DATE_FORMAT(v.fecha, '%Y-%m')"
+            fecha_label = "mes"
+        else:  # dia
+            fecha_format = "DATE(v.fecha)"
+            fecha_label = "fecha"
+        
+        sql = f"""
+            SELECT 
+                {fecha_format} as {fecha_label},
+                COUNT(*) as total_ventas,
+                COALESCE(SUM(v.total), 0) as monto_total,
+                COALESCE(AVG(v.total), 0) as promedio_venta
+            FROM Venta v
+            WHERE v.fecha BETWEEN %s AND %s
+            AND v.estado = 'completada'
+            GROUP BY {fecha_format}
+            ORDER BY {fecha_format}
+        """
+        
+        cursor.execute(sql, (fecha_inicio, fecha_fin))
+        resultados = cursor.fetchall()
+        
+        return resultados
+        
+    except mysql.connector.Error as e:
+        logger.error(f"Error al obtener ventas por periodo: {e}")
+        return []
     finally:
         if 'cursor' in locals():
             cursor.close()
