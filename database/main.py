@@ -1,13 +1,53 @@
-from DB import obtener_inventario, insertar_venta, insertar_detalle_venta
+import tkinter as tk
+from tkinter import messagebox
+from DB import verificar_contraseña  # Tu función de DB
 
-# Ver inventario antes
-print("Inventario inicial:", obtener_inventario())
+def intentar_login():
+    usuario = entry_usuario.get()
+    contraseña = entry_contraseña.get()
+    
+    if not usuario or not contraseña:
+        messagebox.showwarning("Error", "Por favor ingrese usuario y contraseña")
+        return
 
-# Registrar una venta de cliente 1 con usuario 2
-id_venta = insertar_venta(2, 1)
+    usuario_db = verificar_contraseña(usuario, contraseña)
+    if usuario_db:
+        messagebox.showinfo("Éxito", f"Bienvenido {usuario_db['nombre']} ({usuario_db['rol']})")
+        # Aquí podrías llamar a la siguiente pantalla, por ejemplo:
+        mostrar_frame(frame_menu_principal)
+    else:
+        messagebox.showerror("Error", "Usuario o contraseña incorrectos")
 
-# Vender 2 Yerbas (id_producto=1, precio=1800)
-insertar_detalle_venta(id_venta, 1, 2, 1800)
+def mostrar_frame(frame):
+    frame.tkraise()
 
-# Ver inventario después
-print("Inventario actualizado:", obtener_inventario())
+root = tk.Tk()
+root.title("Sistema de Cobro - Login")
+root.geometry("400x200")
+
+# --------------------- Frames ---------------------
+frame_login = tk.Frame(root)
+frame_menu_principal = tk.Frame(root)  # Frame siguiente, vacío por ahora
+
+for frame in (frame_login, frame_menu_principal):
+    frame.grid(row=0, column=0, sticky="nsew")
+
+# --------------------- Frame Login ---------------------
+tk.Label(frame_login, text="Usuario:").pack(pady=(20, 5))
+entry_usuario = tk.Entry(frame_login)
+entry_usuario.pack()
+
+tk.Label(frame_login, text="Contraseña:").pack(pady=(10, 5))
+entry_contraseña = tk.Entry(frame_login, show="*")
+entry_contraseña.pack()
+
+tk.Button(frame_login, text="Iniciar Sesión", command=intentar_login).pack(pady=20)
+
+# --------------------- Frame Menu Principal ---------------------
+tk.Label(frame_menu_principal, text="MENÚ PRINCIPAL").pack(pady=20)
+tk.Button(frame_menu_principal, text="Cerrar sesión", command=lambda: mostrar_frame(frame_login)).pack()
+
+# Mostrar frame inicial
+mostrar_frame(frame_login)
+
+root.mainloop()
