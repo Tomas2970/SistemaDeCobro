@@ -1,0 +1,45 @@
+# =====================================
+# DEPENDENCIAS DEL PROYECTO
+# Sistema de Cobro - Supermercado Don Atilio
+# =====================================
+
+# Base de datos
+mysql-connector-python==8.2.0
+pymysql==1.1.0
+
+# Framework web (si usas Flask)
+Flask==3.0.0
+Flask-CORS==4.0.0
+
+# Seguridad
+bcrypt==4.1.2
+python-dotenv==1.0.0
+
+# Utilidades
+python-dateutil==2.8.2
+
+# Impresión de tickets (Windows)
+pywin32==306
+
+# =====================================
+# INSTALACIÓN
+# =====================================
+# pip install -r requirements.txt
+#
+# Para actualizar todas las dependencias:
+# pip install --upgrade -r requirements.txt
+#
+# =====================================
+# ENTORNO VIRTUAL (RECOMENDADO)
+# =====================================
+# Crear entorno virtual:
+# python -m venv venv
+#
+# Activar (Windows):
+# venv\Scripts\activate
+#
+# Activar (Linux/Mac):
+# source venv/bin/activate
+#
+# Instalar dependencias:
+# pip install -r requirements.txt
