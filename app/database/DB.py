@@ -238,21 +238,17 @@ def obtener_inventario():
 # Funciones para VENTAS (con transacciones)
 # =====================================
 def insertar_venta(id_usuario, id_cliente=0):
-    """Inserta una nueva venta
-    
-    Args:
-        id_usuario: ID del usuario que realiza la venta
-        id_cliente: ID del cliente (0 = Consumidor Final para ventas esporádicas)
-    """
+    """Inserta nueva venta; id_cliente opcional (0/None -> NULL)."""
     try:
         conn = conectar()
         cursor = conn.cursor()
+        id_cliente_db = None if (id_cliente in (0, None)) else id_cliente
         sql = "INSERT INTO Venta (id_usuario, id_cliente) VALUES (%s, %s)"
-        cursor.execute(sql, (id_usuario, id_cliente))
+        cursor.execute(sql, (id_usuario, id_cliente_db))
         conn.commit()
         id_venta = cursor.lastrowid
         
-        cliente_info = "Consumidor Final" if id_cliente == 0 else f"Cliente ID {id_cliente}"
+        cliente_info = "SIN cliente (NULL)" if (id_cliente in (0, None)) else f"Cliente ID {id_cliente}"
         logger.info(f"Venta registrada con ID: {id_venta} - {cliente_info}")
         return id_venta
         
@@ -1237,3 +1233,72 @@ def obtener_ventas_por_periodo(fecha_inicio, fecha_fin, agrupar_por='dia'):
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+
+def obtener_vendedores():
+    """
+    Retorna lista de vendedores [{id_usuario, nombre}] para filtros en reportes.
+    """
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT id_usuario, nombre FROM Usuario ORDER BY nombre ASC")
+        rows = cur.fetchall() or []
+        return [{"id_usuario": r["id_usuario"], "nombre": r["nombre"]} for r in rows]
+    except mysql.connector.Error as e:
+        logger.error(f"Error en obtener_vendedores: {e}")
+        return []
+    finally:
+        try: cur.close()
+        except: pass
+        try: conn.close()
+        except: pass
+
+def reporte_ventas_por_vendedor(desde: str, hasta: str, id_vendedor: int | None = None):
+    """
+    Filas separadas por fecha y vendedor:
+    [{"Fecha": "YYYY-MM-DD", "Vendedor": "Nombre", "Cant. Ventas": int, "Monto Total": float}, ...]
+    """
+    where = []
+    params = []
+    if desde:
+        where.append("DATE(v.fecha) >= %s"); params.append(desde)
+    if hasta:
+        where.append("DATE(v.fecha) <= %s"); params.append(hasta)
+    if id_vendedor is not None:
+        where.append("v.id_usuario = %s"); params.append(int(id_vendedor))
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"""
+        SELECT
+            DATE(v.fecha) AS Fecha,
+            COALESCE(u.nombre, 'Desconocido') AS Vendedor,
+            COUNT(v.id_venta) AS `Cant. Ventas`,
+            COALESCE(SUM(v.total), 0) AS `Monto Total`
+        FROM Venta AS v
+        LEFT JOIN Usuario AS u ON u.id_usuario = v.id_usuario
+        {where_sql}
+        GROUP BY DATE(v.fecha), u.nombre
+        ORDER BY DATE(v.fecha) ASC, u.nombre ASC
+    """
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall() or []
+        out = []
+        for r in rows:
+            out.append({
+                "Fecha": r.get("Fecha") or r.get("fecha"),
+                "Vendedor": r.get("Vendedor") or r.get("vendedor"),
+                "Cant. Ventas": r.get("Cant. Ventas") or r.get("Cant_Ventas") or r.get("cant_ventas") or 0,
+                "Monto Total": r.get("Monto Total") or r.get("Monto_Total") or r.get("monto_total") or 0.0,
+            })
+        return out
+    except mysql.connector.Error as e:
+        logger.error(f"Error en reporte_ventas_por_vendedor: {e}")
+        return []
+    finally:
+        try: cur.close()
+        except: pass
+        try: conn.close()
+        except: pass
