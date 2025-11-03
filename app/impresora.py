@@ -110,30 +110,47 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append(f"Ticket N°: {id_venta:06d}")
     ticket.append(f"Vendedor: {nombre_vendedor}")
     ticket.append(linea_separadora())
-    ticket.append("\n")
     
     # ========================================
-    # PRODUCTOS
+    # PRODUCTOS (¡SECCIÓN MODIFICADA!)
     # ========================================
-    ticket.append("PRODUCTO                  CANT  PRECIO")
+    
+    # --- ¡INICIO DE LA MODIFICACIÓN (Formato 4 Columnas)! ---
+    # Definir encabezados de 4 columnas
+    # Anchos: 17 (Prod) + 1 (sp) + 4 (Cant) + 1 (sp) + 9 (P.Unit) + 1 (sp) + 9 (Subt) = 42
+    head_prod = "PRODUCTO".ljust(17)
+    head_cant = "CANT".rjust(4)
+    head_punit = "P.UNIT".rjust(9)
+    head_subt = "SUBTOTAL".rjust(9)
+    
+    ticket.append(f"{head_prod} {head_cant} {head_punit} {head_subt}")
     ticket.append(linea_separadora())
     
     total = 0
     # items: (id_producto | None, nombre, cant, precio_unit, codigo_barras | "")
+    # El 4to item se llama 'precio' en la tupla (lo usamos como precio_unitario)
     for (id_prod, nombre, cantidad, precio, cod) in items:
         
-        nombre_corto = nombre[:25]  # Truncar si es muy largo
         subtotal = cantidad * precio
-        
-        # Línea 1: Nombre del producto
-        ticket.append(nombre_corto)
-        
-        # Línea 2: Cantidad, precio unitario y subtotal
-        linea = f"  {cantidad} x {formato_precio(precio)}"
-        linea = justificar_texto(linea, formato_precio(subtotal))
-        ticket.append(linea)
-        
         total += subtotal
+        
+        # Formatear datos para las columnas
+        nombre_col = nombre[:17].ljust(17) # Truncar nombre a 17
+        cantidad_col = str(cantidad).rjust(4)
+        p_unit_col = formato_precio(precio).rjust(9)
+        subtotal_col = formato_precio(subtotal).rjust(9)
+        
+        # Unir en una sola línea
+        linea = f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}"
+        ticket.append(linea)
+
+        # Si el nombre es más largo que 17, imprimir el resto abajo
+        if len(nombre) > 17:
+            resto_nombre = "  " + nombre[17:] # Indentado
+            # Truncar el resto al ancho del ticket
+            ticket.append(resto_nombre[:ANCHO_TICKET]) 
+    
+    # --- ¡FIN DE LA MODIFICACIÓN! ---
     
     ticket.append(linea_separadora())
     ticket.append("\n")
@@ -141,6 +158,7 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     # ========================================
     # TOTAL
     # ========================================
+    # Esta función alinea el total a la derecha, lo cual está perfecto.
     ticket.append(justificar_texto("TOTAL:", formato_precio(total)))
     ticket.append(linea_separadora('='))
     ticket.append("\n")
@@ -315,6 +333,32 @@ def imprimir_ticket_prueba():
     ticket.append("Si puedes leer esto,")
     ticket.append("la impresora funciona correctamente!")
     ticket.append("\n")
+    ticket.append(centrar_texto("Con el formato de 4 columnas:"))
+    
+    # --- Prueba del nuevo formato ---
+    head_prod = "PRODUCTO".ljust(17)
+    head_cant = "CANT".rjust(4)
+    head_punit = "P.UNIT".rjust(9)
+    head_subt = "SUBTOTAL".rjust(9)
+    ticket.append(f"\n{head_prod} {head_cant} {head_punit} {head_subt}")
+    ticket.append(linea_separadora('.'))
+    # Item 1
+    nombre_col = "Producto A".ljust(17)
+    cantidad_col = "1".rjust(4)
+    p_unit_col = "$100.00".rjust(9)
+    subtotal_col = "$100.00".rjust(9)
+    ticket.append(f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}")
+    # Item 2 (nombre largo)
+    nombre_col = "Producto B Nombre".ljust(17)
+    cantidad_col = "10".rjust(4)
+    p_unit_col = "$25.00".rjust(9)
+    subtotal_col = "$250.00".rjust(9)
+    ticket.append(f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}")
+    ticket.append("  Largo que continua") # Prueba de nombre largo
+    ticket.append(linea_separadora('.'))
+    # --- Fin Prueba ---
+    
+    ticket.append("\n")
     ticket.append(centrar_texto(f"Modelo: {NOMBRE_IMPRESORA}"))
     ticket.append(centrar_texto(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"))
     ticket.append("\n\n\n")
@@ -327,30 +371,3 @@ def imprimir_ticket_prueba():
     except Exception as e:
         print(f"❌ Error: {e}")
 
-# =====================================
-# Ejemplo de uso
-# =====================================
-if __name__ == "__main__":
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║     MÓDULO DE IMPRESIÓN DE TICKETS                      ║")
-    print("╚══════════════════════════════════════════════════════════╝")
-    print()
-    
-    # 1. Listar impresoras disponibles
-    listar_impresoras()
-    
-    # 2. Imprimir ticket de prueba
-    print("\n¿Desea imprimir un ticket de prueba? (s/n): ", end='')
-    respuesta = input().lower()
-    
-    if respuesta == 's':
-        imprimir_ticket_prueba()
-    
-    # 4. Ejemplo: Imprimir una venta real (requiere DB)
-    # (Esto es solo un ejemplo, la lógica real está en interfaz_venta.py)
-    # print("\nImprimiendo ticket de ejemplo...")
-    # items_ejemplo = [
-    #    (1, "Producto A", 2, 150.00, "123"),
-    #    (2, "Producto B", 1, 300.50, "456"),
-    # ]
-    # imprimir_ticket(id_venta=123, items_de_la_venta=items_ejemplo, nombre_vendedor="Admin")

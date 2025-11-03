@@ -90,8 +90,18 @@ def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: 
                 email.strip() or None
             ),
         )
+        
+        nuevo_id_cliente = cur.lastrowid
+        
+        # ✅ NUEVO: Crear cuenta corriente automáticamente para el cliente
+        cur.execute(
+            "INSERT IGNORE INTO CuentaCorriente (id_cliente, saldo, limite_credito) VALUES (%s, 0.00, 50000.00)",
+            (nuevo_id_cliente,)
+        )
+        
         conn.commit()
-        return cur.lastrowid
+        return nuevo_id_cliente
+        
     except mysql.connector.IntegrityError as e:
         logger.warning(f"insertar_cliente (IntegrityError): {e}")
         if conn: conn.rollback()

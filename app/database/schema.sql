@@ -317,19 +317,42 @@ BEGIN
   END IF;
 END $$
 
+-- ============================================
+-- === TRIGGER CORREGIDO (INICIO) ===
+-- ============================================
 DROP TRIGGER IF EXISTS trg_venta_au_cuentacorriente $$
 CREATE TRIGGER trg_venta_au_cuentacorriente
 AFTER UPDATE ON Venta
 FOR EACH ROW
 BEGIN
-  IF NEW.tipo_pago = 'cuenta_corriente' AND NEW.id_cliente IS NOT NULL THEN
-    IF NEW.total <> OLD.total THEN
+  -- Solo actuar si el cliente existe
+  IF NEW.id_cliente IS NOT NULL THEN
+
+    -- CASO 1: La venta se acaba de marcar como 'cuenta_corriente' (venía de otro estado)
+    IF NEW.tipo_pago = 'cuenta_corriente' AND OLD.tipo_pago <> 'cuenta_corriente' THEN
       UPDATE CuentaCorriente
-      SET saldo = saldo - (NEW.total - OLD.total)
+      SET saldo = saldo - NEW.total -- Aplicar el total COMPLETO
       WHERE id_cliente = NEW.id_cliente;
+
+    -- CASO 2: La venta YA ERA 'cuenta_corriente' y su total cambió (ej. edición/anulación)
+    ELSIF NEW.tipo_pago = 'cuenta_corriente' AND NEW.total <> OLD.total THEN
+      UPDATE CuentaCorriente
+      SET saldo = saldo - (NEW.total - OLD.total) -- Aplicar solo la DIFERENCIA
+      WHERE id_cliente = NEW.id_cliente;
+    
+    -- CASO 3 (Opcional pero recomendado): La venta DEJÓ de ser 'cuenta_corriente'
+    ELSIF OLD.tipo_pago = 'cuenta_corriente' AND NEW.tipo_pago <> 'cuenta_corriente' THEN
+      UPDATE CuentaCorriente
+      SET saldo = saldo + OLD.total -- Revertir (sumar) el total ANTERIOR
+      WHERE id_cliente = NEW.id_cliente;
+    
     END IF;
+  
   END IF;
 END $$
+-- ============================================
+-- === TRIGGER CORREGIDO (FIN) ===
+-- ============================================
 
 DELIMITER ;
 
@@ -442,4 +465,3 @@ CALL ensure_index('Producto',            'idx_producto_categoria_activo', 'id_ca
 CALL ensure_index('AuditoriaInventario', 'idx_auditoria_producto_fecha',  'id_producto, fecha');
 
 DROP PROCEDURE IF EXISTS ensure_index;
-
