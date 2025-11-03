@@ -2,36 +2,32 @@
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Optional
+from typing import Optional, Any, Dict
+try:
+    from app.frontend.stock_alerts import show_low_stock_alert
+except ImportError:
+    def show_low_stock_alert(*args, **kwargs):
+        print("Advertencia: Módulo 'stock_alerts' no encontrado.")
 
-def ui_productos(parent: tk.Misc, backend, usuario: dict) -> None:
+def ui_productos(
+    parent: tk.Misc, 
+    backend, 
+    usuario: dict, 
+    id_producto_a_cargar: int | None = None
+) -> None:
+    
     win = tk.Toplevel(parent)
     win.title("🧰 Productos (Alta / Edición / Stock)")
     win.geometry("900x600")
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
+    
+    # (La alerta de stock ya no se llama aquí)
 
-    # ---------- Alerta de stock bajo al abrir ----------
-    try:
-        bajos = backend.obtener_stock_bajo()
-        if bajos:
-            # mostrás un resumen (primeros 10)
-            líneas = []
-            for r in bajos[:10]:
-                líneas.append(f"[{r.get('id_producto')}] {r.get('nombre')} · stk {r.get('cantidad')} / min {r.get('stock_minimo')}")
-            resto = max(0, len(bajos) - 10)
-            msg = "Productos con stock bajo:\n" + "\n".join(líneas)
-            if resto:
-                msg += f"\n... y {resto} más."
-            messagebox.showwarning("Stock bajo", msg, parent=win)
-    except Exception:
-        pass
-
-    frm = tk.Frame(win, bg="#f4f4f8"); frm.pack(fill=tk.X, padx=16, pady=12)
-
-    tk.Label(frm, text="Código de barras o ID:", bg="#f4f4f8").grid(row=0, column=0, sticky="e", padx=6)
-    var_token = tk.StringVar()
-    tk.Entry(frm, textvariable=var_token, width=24).grid(row=0, column=1, sticky="w")
+    # ---------- Header búsqueda ----------
+    frm = tk.Frame(win, bg="#f4f4f8"); frm.pack(fill=tk.X, padx=16, pady=10)
+    tk.Label(frm, text="ID / Código / Nombre:", bg="#f4f4f8").grid(row=0, column=0, sticky="e", padx=6)
+    var_token = tk.StringVar(); tk.Entry(frm, textvariable=var_token, width=24).grid(row=0, column=1, sticky="w")
     tk.Button(frm, text="🔎 Buscar", width=12, command=lambda: cargar_por_token()).grid(row=0, column=2, padx=(12,4))
     tk.Button(frm, text="Nuevo", width=10, command=lambda: limpiar_form()).grid(row=0, column=3, padx=4)
 
@@ -50,64 +46,81 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict) -> None:
     var_stock = tk.StringVar(value="0"); add_row("Stock (absoluto):", tk.Entry(body, textvariable=var_stock, width=8))
     var_stock_min = tk.StringVar(value="10"); add_row("Stock mínimo:", tk.Entry(body, textvariable=var_stock_min, width=8))
 
-    actions = tk.Frame(win, bg="#f4f4f8"); actions.pack(fill=tk.X, padx=16, pady=10)
-    btn_guardar = tk.Button(actions, text="💾 Guardar (crear/editar)", bg="#4CAF50", fg="white", width=22, command=lambda: guardar())
-    btn_guardar.pack(side=tk.LEFT, padx=6)
-    btn_limpiar = tk.Button(actions, text="Limpiar", width=12, command=lambda: limpiar_form())
-    btn_limpiar.pack(side=tk.LEFT, padx=6)
-    btn_eliminar = tk.Button(actions, text="🗑 Eliminar", bg="#ef4444", fg="white", width=12, command=lambda: on_eliminar())
-    btn_eliminar.pack(side=tk.LEFT, padx=6)
+    # --- Frame de acciones centrado ---
+    actions = tk.Frame(win, bg="#f4f4f8")
+    actions.pack(pady=10, fill=tk.X) 
+    
+    btn_container = tk.Frame(actions, bg="#f4f4f8")
+    btn_container.pack() 
 
-    # ---------- categorías ----------
-    def cargar_categorias():
-        cats = backend.obtener_categorias() or []
-        nombres = ["(Sin categoría)"]; ids = [None]
-        for c in cats:
-            nombres.append(str(c.get("nombre") or c.get("categoria") or ""))
-            ids.append(int(c.get("id_categoria") or c.get("id") or 0) or None)
-        combo_cat["values"] = nombres; combo_cat.ids = ids  # type: ignore
-        combo_cat.current(0)
-
-    def _id_categoria_sel() -> Optional[int]:
-        idx = combo_cat.current()
-        return getattr(combo_cat, "ids", [None])[idx] if idx is not None and idx >= 0 else None  # type: ignore
+    # (Botones con íconos)
+    btn_guardar = tk.Button(btn_container, text="💾 Guardar (crear/editar)", bg="#4CAF50", fg="white", width=22, command=lambda: guardar())
+    btn_guardar.pack(side=tk.LEFT, padx=10) 
+    
+    btn_desactivar = tk.Button(btn_container, text="🗑 Desactivar", bg="#f44336", fg="white", width=18, command=lambda: desactivar())
+    btn_desactivar.pack(side=tk.LEFT, padx=10)
 
     # ---------- helpers ----------
-    def limpiar_form():
-        var_id.set(""); var_nombre.set(""); var_precio.set("0.00"); var_cod.set(""); var_stock.set("0"); var_stock_min.set("10"); var_token.set("")
-        if combo_cat["values"]: combo_cat.current(0)
+    def _norm(prod: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": prod.get("id_producto") or prod.get("id"),
+            "nombre": prod.get("nombre") or "",
+            "codigo": prod.get("codigo_barras") or prod.get("codigo") or prod.get("codigo_barra") or prod.get("cod_barras") or "",
+            "precio": float(prod.get("precio") or 0.0),
+            "stock": int(prod.get("stock") or 0),
+            "stock_minimo": int(prod.get("stock_minimo") or 0),
+            "categoria": prod.get("categoria") or prod.get("nombre_categoria") or "",
+            "id_categoria": prod.get("id_categoria") or prod.get("categoria_id") or None,
+        }
 
-    def _resolver_producto(token: str) -> dict | None:
+    def cargar_categorias():
+        cats = backend.obtener_categorias() or []
+        nombres = ["(Sin categoría)"]
+        ids = [None]
+        for c in cats:
+            nombres.append(str(c.get("nombre") or c.get("categoria") or ""))
+            ids.append(int(c.get("id_categoria") or 0))
+            
+        combo_cat["values"] = nombres
+        combo_cat.ids = ids  # type: ignore
+        combo_cat.current(0)
+
+    def _resolver_producto(token: str):
         token = token.strip()
         if not token: return None
         if token.isdigit():
-            prod = backend.buscar_producto_por_id(int(token))
-            if prod: return prod
-        prod = backend.buscar_producto_por_codigo_barras(token)
-        if prod: return prod
+            p = backend.buscar_producto_por_id(int(token))
+            if p: return p
+        
+        fn_cod = getattr(backend, "buscar_producto_por_codigo_barras", None)
+        if callable(fn_cod):
+            p = fn_cod(token)
+            if p: return p
+            
         res = backend.buscar_producto_por_nombre(token) or []
         return res[0] if res else None
 
-    def _norm(prod: dict) -> dict:
-        return {
-            "id": prod.get("id_producto") or prod.get("id") or "",
-            "nombre": prod.get("nombre") or "",
-            "categoria": prod.get("categoria") or prod.get("nombre_categoria") or "",
-            "id_categoria": prod.get("id_categoria") or prod.get("categoria_id") or None,
-            "precio": float(prod.get("precio") or 0.0),
-            "codigo": prod.get("codigo_barras") or prod.get("codigo") or "",
-            "stock": int(prod.get("stock") or prod.get("cantidad") or 0),
-            "stock_minimo": int(prod.get("stock_minimo") or 0),
-        }
+    def limpiar_form():
+        var_id.set(""); var_nombre.set(""); var_precio.set("0.00"); var_cod.set("")
+        var_stock.set("0"); var_stock_min.set("10")
+        if combo_cat["values"]: combo_cat.current(0)
+        var_token.set("")
 
     def cargar_por_token():
         token = var_token.get().strip()
+        if not token:
+            messagebox.showinfo("Búsqueda", "Ingrese un ID, código o nombre para buscar.", parent=win)
+            return
+            
         prod = _resolver_producto(token)
         if not prod:
-            messagebox.showinfo("Sin resultados", "No se encontró el producto."); return
+            messagebox.showinfo("Sin resultados", "No se encontró el producto.", parent=win); return
+        
         n = _norm(prod)
-        var_id.set(n["id"]); var_nombre.set(n["nombre"]); var_precio.set(f"{n['precio']:.2f}")
+        var_id.set("" if n["id"] in (None, "", "None") else str(n["id"]))
+        var_nombre.set(n["nombre"]); var_precio.set(f"{n['precio']:.2f}")
         var_cod.set(n["codigo"])
+        
         try:
             sid = int(n["id"])
             var_stock.set(str(backend.obtener_stock(sid)))
@@ -115,6 +128,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict) -> None:
         except Exception:
             var_stock.set(str(n["stock"]))
             var_stock_min.set(str(n["stock_minimo"]))
+            
         ids = getattr(combo_cat, "ids", [None])  # type: ignore
         if n["id_categoria"] and n["id_categoria"] in ids:
             combo_cat.current(ids.index(n["id_categoria"]))
@@ -124,72 +138,107 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict) -> None:
 
     def _validar_dup_codigo(codigo: str, except_id: Optional[int]) -> bool:
         if not codigo: return True
-        prod = backend.buscar_producto_por_codigo_barras(codigo)
+        prod = None
+        fn = getattr(backend, "buscar_producto_por_codigo_barras", None)
+        if callable(fn):
+            try:
+                prod = fn(codigo)
+            except Exception:
+                pass
         if not prod: return True
         pid = int(prod.get("id_producto") or prod.get("id") or 0)
         return except_id is not None and pid == except_id
 
-    # ---------- guardar ----------
     def guardar():
         try:
             nombre = var_nombre.get().strip()
             if not nombre:
-                messagebox.showwarning("Validación", "El nombre es obligatorio."); return
-            id_cat = _id_categoria_sel()
-            precio = float((var_precio.get() or "0").replace(",", "."))
-            codigo = (var_cod.get() or "").strip() or None
-            stock_abs = int(var_stock.get() or "0")
-            stock_min = int(var_stock_min.get() or "0")
-        except Exception:
-            messagebox.showerror("Validación", "Revisá precio/stock/stock mínimo."); return
+                messagebox.showwarning("Validación", "El nombre es obligatorio.", parent=win); return
+            
+            ids_meta = getattr(combo_cat, "ids", [None])  # type: ignore
+            id_cat = ids_meta[combo_cat.current()] if ids_meta and combo_cat.current() >= 0 else None
+            
+            precio = float(var_precio.get().replace(",", "."))
+            if precio < 0: raise ValueError("Precio negativo")
+            
+            stock_abs = int(var_stock.get().strip() or "0")
+            stock_min = int(var_stock_min.get().strip() or "0")
+            codigo = (var_cod.get().strip() or None) 
+
+        except Exception as e:
+            messagebox.showwarning("Validación", f"Verifique los datos (precio/stock). Error: {e}", parent=win); return
 
         pid = int(var_id.get()) if var_id.get().isdigit() else None
-        if not _validar_dup_codigo(codigo or "", pid):
-            messagebox.showerror("Código duplicado", "El código de barras ya existe en otro producto."); return
+        
+        if not _validar_dup_codigo(codigo, pid):
+            messagebox.showwarning("Código", "El código de barras ya existe en otro producto.", parent=win); return
 
         if pid is None:
-            nuevo_id = backend.crear_producto_completo(
-                nombre=nombre, categoria_id=id_cat, codigo_barras=codigo,
-                precio=precio, stock_inicial=stock_abs, stock_minimo=stock_min
-            )
-            if nuevo_id:
-                var_id.set(str(nuevo_id))
-                messagebox.showinfo("OK", f"Producto creado (ID {nuevo_id}).")
-                if stock_abs <= stock_min:
-                    messagebox.showwarning("Stock bajo", "El stock inicial es menor o igual al mínimo.")
-            else:
-                messagebox.showerror("Error", "No se pudo crear el producto.")
-            return
+            try:
+                nuevo_id = backend.crear_producto_completo(
+                    nombre=nombre,
+                    categoria_id=id_cat,
+                    codigo_barras=codigo,
+                    precio=precio,
+                    stock_inicial=stock_abs,
+                    stock_minimo=stock_min
+                )
+                if nuevo_id:
+                    var_id.set(str(nuevo_id))
+                    messagebox.showinfo("OK", f"Producto creado (ID {nuevo_id}).", parent=win)
+                else:
+                    messagebox.showerror("Error", "No se pudo crear el producto.", parent=win)
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo crear:\n{e}", parent=win)
 
-        ok = backend.actualizar_producto(
-            id_producto=pid, nombre=nombre, id_categoria=id_cat, precio=precio, codigo_barras=codigo
-        )
-        if not ok:
-            messagebox.showerror("Error", "No se pudieron guardar los cambios del producto."); return
-
-        if not backend.actualizar_inventario_absoluto(pid, stock_abs, stock_min):
-            messagebox.showwarning("Stock", "Se guardaron datos, pero no se pudo actualizar inventario.")
         else:
-            if stock_abs <= stock_min:
-                messagebox.showwarning("Stock bajo", "El stock quedó por debajo (o igual) al mínimo.")
-            messagebox.showinfo("OK", "Producto actualizado.")
+            try:
+                ok_prod = backend.actualizar_producto(
+                    id_producto=pid,
+                    nombre=nombre,
+                    id_categoria=id_cat,
+                    precio=precio,
+                    codigo_barras=codigo
+                )
+                
+                ok_inv = backend.actualizar_inventario_absoluto(
+                    id_producto=pid,
+                    stock_abs=stock_abs,
+                    stock_minimo=stock_min
+                )
+                
+                if ok_prod and ok_inv:
+                    messagebox.showinfo("OK", "Producto actualizado correctamente.", parent=win)
+                elif not ok_prod:
+                     messagebox.showerror("Error", "No se pudieron guardar los cambios del producto.", parent=win)
+                else:
+                    messagebox.showwarning("Atención", "Se guardaron los datos del producto, pero falló la actualización del stock.", parent=win)
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo actualizar:\s{e}", parent=win)
 
-    # ---------- eliminar ----------
-    def on_eliminar():
+    def desactivar():
         pid_txt = var_id.get().strip()
         if not pid_txt.isdigit():
-            messagebox.showwarning("Atención", "Primero cargá un producto existente."); return
+            messagebox.showwarning("Desactivar", "No hay un producto cargado.", parent=win); return
+        
         pid = int(pid_txt)
-        if not messagebox.askyesno("Confirmar", f"¿Eliminar el producto ID {pid}? Esta acción no se puede deshacer."):
+        if not messagebox.askyesno("Confirmar", f"¿Desactivar el producto ID {pid}?\nEl producto ya no aparecerá en ventas o inventario.", parent=win):
             return
         try:
             if backend.eliminar_producto(pid):
-                messagebox.showinfo("OK", f"Producto ID {pid} eliminado.")
+                messagebox.showinfo("OK", "Producto desactivado.", parent=win)
                 limpiar_form()
             else:
-                messagebox.showerror("Error", "No se pudo eliminar el producto (¿FK RESTRICT en ventas/compras?).")
+                 messagebox.showerror("Error", "No se pudo desactivar el producto.", parent=win)
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo eliminar el producto:\n{e}")
+            messagebox.showerror("Error", f"No se pudo desactivar:\n{e}", parent=win)
 
+    def cargar_producto_inicial():
+        if id_producto_a_cargar:
+            var_token.set(str(id_producto_a_cargar))
+            cargar_por_token()
+    
+    # Boot
     cargar_categorias()
+    win.after(10, cargar_producto_inicial) 
     win.grab_set()

@@ -1,0 +1,184 @@
+# app/frontend/interfaz_crear_usuario.py
+from __future__ import annotations
+import tkinter as tk
+# --- ¡AQUÍ ESTÁ LA CORRECCIÓN 1! ---
+from tkinter import ttk, messagebox, simpledialog
+from typing import Optional, Any
+import logging 
+
+# --- ¡AQUÍ ESTÁ LA CORRECCIÓN 2! ---
+logger = logging.getLogger(__name__)
+
+class CrearEditarUsuario:
+    def __init__(self, parent: tk.Misc, backend, usuario_existente: Optional[dict] = None):
+        """
+        Popup para crear o editar un usuario.
+        Si 'usuario_existente' es None, es modo CREAR.
+        Si 'usuario_existente' tiene datos, es modo EDITAR.
+        """
+        self.parent = parent
+        self.backend = backend
+        self.usuario_existente = usuario_existente
+        
+        self.win = tk.Toplevel(parent)
+        self.win.config(bg="#f4f4f8")
+        self.win.resizable(False, False)
+
+        self.roles_map: dict[str, int] = {} # Para mapear "admin" -> 1
+        
+        self.crear_widgets()
+        self.cargar_datos_iniciales()
+        
+        self.win.grab_set()
+        self.win.transient(parent)
+
+    def crear_widgets(self):
+        frame = tk.Frame(self.win, bg="#f4f4f8")
+        frame.pack(padx=20, pady=20, fill="both", expand=True)
+
+        row = 0
+        tk.Label(frame, text="Nombre (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
+        self.var_nombre = tk.StringVar()
+        self.entry_nombre = tk.Entry(frame, textvariable=self.var_nombre, width=40)
+        self.entry_nombre.grid(row=row, column=1, pady=5)
+        row += 1
+
+        tk.Label(frame, text="Rol (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
+        self.combo_rol = ttk.Combobox(frame, state="readonly", width=38)
+        self.combo_rol.grid(row=row, column=1, pady=5)
+        row += 1
+        
+        # --- Lógica de Contraseña ---
+        if self.usuario_existente:
+            # Modo EDITAR
+            self.win.title("Editar Usuario")
+            self.entry_nombre.config(state="readonly") # No se puede cambiar el nombre
+            
+            self.btn_reset_pass = tk.Button(frame, text="Resetear Contraseña", command=self.resetear_password, bg="#ff9800", fg="white")
+            self.btn_reset_pass.grid(row=row, column=1, pady=10, sticky="w")
+            row += 1
+        
+        else:
+            # Modo CREAR
+            self.win.title("Crear Nuevo Usuario")
+            tk.Label(frame, text="Contraseña (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
+            self.var_pass1 = tk.StringVar()
+            self.entry_pass1 = tk.Entry(frame, textvariable=self.var_pass1, width=40, show="*")
+            self.entry_pass1.grid(row=row, column=1, pady=5)
+            row += 1
+            
+            tk.Label(frame, text="Confirmar Contraseña (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
+            self.var_pass2 = tk.StringVar()
+            self.entry_pass2 = tk.Entry(frame, textvariable=self.var_pass2, width=40, show="*")
+            self.entry_pass2.grid(row=row, column=1, pady=5)
+            row += 1
+
+        # --- Botones ---
+        btn_frame = tk.Frame(frame, bg="#f4f4f8")
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=20)
+        
+        self.btn_guardar = tk.Button(btn_frame, text="Guardar", command=self.guardar, bg="#4CAF50", fg="white", width=15)
+        self.btn_guardar.pack(side=tk.LEFT, padx=10)
+        
+        self.btn_cancelar = tk.Button(btn_frame, text="Cancelar", command=self.win.destroy, bg="#f44336", fg="white", width=15)
+        self.btn_cancelar.pack(side=tk.LEFT, padx=10)
+
+    def cargar_datos_iniciales(self):
+        # Cargar roles
+        try:
+            roles = self.backend.obtener_roles()
+            self.roles_map = {r.get('nombre'): r.get('id_rol') for r in roles}
+            self.combo_rol["values"] = list(self.roles_map.keys())
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudieron cargar los roles: {e}", parent=self.win)
+            self.win.destroy()
+            return
+            
+        # Si es modo EDITAR, rellenar los campos
+        if self.usuario_existente:
+            self.var_nombre.set(self.usuario_existente.get('nombre', ''))
+            
+            # Seleccionar el rol en el combobox
+            rol_nombre_actual = self.usuario_existente.get('rol_nombre', '')
+            if rol_nombre_actual in self.roles_map:
+                self.combo_rol.set(rol_nombre_actual)
+            
+            # El botón guardar solo edita el ROL
+            self.btn_guardar.config(text="Actualizar Rol")
+        else:
+            self.combo_rol.current(0) # Poner el primer rol (ej: 'admin')
+
+    def guardar(self):
+        nombre = self.var_nombre.get().strip()
+        rol_nombre = self.combo_rol.get()
+        
+        if not nombre or not rol_nombre:
+            messagebox.showwarning("Campos vacíos", "Los campos Nombre y Rol son obligatorios.", parent=self.win)
+            return
+            
+        id_rol = self.roles_map.get(rol_nombre)
+        
+        try:
+            if self.usuario_existente:
+                # --- Lógica de ACTUALIZAR ---
+                id_usuario = self.usuario_existente.get('id_usuario')
+                ok = self.backend.actualizar_rol_usuario(id_usuario, id_rol)
+                if ok:
+                    messagebox.showinfo("Éxito", f"Rol de '{nombre}' actualizado a '{rol_nombre}'.", parent=self.win)
+                    self.win.destroy()
+                else:
+                    messagebox.showerror("Error", "No se pudo actualizar el rol.", parent=self.win)
+                
+            else:
+                # --- Lógica de CREAR ---
+                pass1 = self.var_pass1.get()
+                pass2 = self.var_pass2.get()
+                
+                if not pass1 or not pass2:
+                    messagebox.showwarning("Campos vacíos", "La contraseña es obligatoria.", parent=self.win)
+                    return
+                if pass1 != pass2:
+                    messagebox.showwarning("Error", "Las contraseñas no coinciden.", parent=self.win)
+                    return
+                
+                nuevo_id = self.backend.crear_usuario(nombre, pass1, id_rol)
+                if nuevo_id:
+                    messagebox.showinfo("Éxito", f"Usuario '{nombre}' creado con ID {nuevo_id}.", parent=self.win)
+                    self.win.destroy()
+                else:
+                    messagebox.showerror("Error", "No se pudo crear el usuario (quizás el nombre ya existe).", parent=self.win)
+
+        except Exception as e:
+            logger.exception("Error al guardar usuario")
+            messagebox.showerror("Error", f"Ocurrió un error inesperado:\n{e}", parent=self.win)
+
+    def resetear_password(self):
+        if not self.usuario_existente:
+            return
+            
+        id_usuario = self.usuario_existente.get('id_usuario')
+        nombre = self.usuario_existente.get('nombre')
+        
+        # Pedir nueva contraseña
+        nueva_pass = simpledialog.askstring("Resetear Contraseña", 
+                                            f"Ingrese la NUEVA contraseña para '{nombre}':", 
+                                            parent=self.win, show="*")
+        
+        if not nueva_pass:
+            messagebox.showinfo("Cancelado", "No se cambió la contraseña.", parent=self.win)
+            return
+            
+        try:
+            ok = self.backend.resetear_password_usuario(id_usuario, nueva_pass)
+            if ok:
+                messagebox.showinfo("Éxito", f"Contraseña de '{nombre}' actualizada.", parent=self.win)
+            else:
+                messagebox.showerror("Error", "No se pudo resetear la contraseña.", parent=self.win)
+        except Exception as e:
+            logger.exception("Error al resetear password")
+            messagebox.showerror("Error", f"Ocurrió un error inesperado:\n{e}", parent=self.win)
+
+
+# Wrapper unificado para llamar al popup
+def ui_crear_editar_usuario(parent: tk.Misc, backend, usuario_existente: Optional[dict] = None):
+    CrearEditarUsuario(parent, backend, usuario_existente)

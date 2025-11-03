@@ -6,50 +6,56 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ===== Imports de pantallas (con tolerancia a nombres distintos) =====
-# Inventario
+# --- ¡Importa la lógica de permisos! ---
+try:
+    # (Buscamos el archivo en app/permisos.py)
+    from app.database.permisos import tiene_permiso 
+except ImportError:
+    # (Si falla, probamos en app/database/permisos.py)
+    try:
+        from app.database.permisos import tiene_permiso
+    except ImportError:
+        messagebox.showerror("Error Crítico", "No se encontró 'permisos.py'. Los roles no funcionarán.")
+        def tiene_permiso(usuario, accion):
+            return True 
+
+# ===== Imports de pantallas =====
 try:
     from app.frontend.interfaz_inventario import ui_inventario
 except Exception:
     ui_inventario = None
-
-# Productos (ABM)
 try:
     from app.frontend.interfaz_productos import ui_productos
 except Exception:
     ui_productos = None
-
-# Venta
 try:
     from app.frontend.interfaz_venta import ui_venta
 except Exception:
     ui_venta = None
-
-# Reportes
 try:
     from app.frontend.interfaz_reportes import ui_reportes
 except Exception:
     ui_reportes = None
-
-# Registrar Cliente (tolerar nombres distintos)
-ui_registrar_cliente = None
 try:
-    from app.frontend.interfaz_registrarcliente import ui_registrarcliente as _u1
-    ui_registrar_cliente = _u1
+    from app.frontend.interfaz_gestion_clientes import ui_gestion_clientes
 except Exception:
-    try:
-        from app.frontend.interfaz_registrarcliente import ui_registrar_cliente as _u2
-        ui_registrar_cliente = _u2
-    except Exception:
-        ui_registrar_cliente = None
-
-# Cuenta Corriente (si no existe, mostramos mensaje)
-ui_cuenta_corriente = None
+    ui_gestion_clientes = None
 try:
-    from app.frontend.interfaz_cuentacorriente import ui_cuenta_corriente as _u3
-    ui_cuenta_corriente = _u3
+    from app.frontend.interfaz_cuenta_corriente import ui_cuenta_corriente
 except Exception:
     ui_cuenta_corriente = None
+try:
+    from app.frontend.interfaz_compra import ui_compra
+except Exception:
+    ui_compra = None
+try:
+    from app.frontend.interfaz_historiales import ui_historiales
+except Exception:
+    ui_historiales = None
+try:
+    from app.frontend.interfaz_gestion_usuarios import ui_gestion_usuarios
+except Exception:
+    ui_gestion_usuarios = None
 
 
 # ===== Helper para abrir ventanas sin romper =====
@@ -63,56 +69,53 @@ def _abrir_seguro(root: tk.Tk, backend, usuario: dict, fn, nombre: str):
         return
     try:
         try:
-            fn(root, backend, usuario)  # mayoría pide los 3
+            fn(root, backend, usuario) 
         except TypeError:
             try:
-                fn(root, backend)       # algunas no usan 'usuario'
+                fn(root, backend) 
             except TypeError:
-                fn(root)                # último intento
+                fn(root)
     except Exception as e:
         logger.exception("Error abriendo %s", nombre)
         messagebox.showerror("Error", f"No se pudo abrir '{nombre}':\n{e}", parent=root)
 
 
+# ===== Configuración de Estilos (Con colores) =====
 def _configurar_estilos(root: tk.Tk):
     style = ttk.Style(root)
     try:
         style.theme_use("clam")
     except Exception:
         pass
-
-    # Paleta
     primary = "#2563eb"
     success = "#16a34a"
     danger = "#ef4444"
     neutral = "#334155"
-
     style.configure("Title.TLabel", font=("Helvetica", 16, "bold"), foreground="white", background=primary)
     style.configure("Sub.TLabel", font=("Helvetica", 10), foreground="#111827", background="#f4f4f8")
-
-    # Botón base
     style.configure("Menu.TButton", font=("Segoe UI", 10, "bold"), padding=(12, 8), foreground="white", background=neutral)
     style.map("Menu.TButton",
-              background=[("active", "#475569")], foreground=[("disabled", "#cbd5e1")])
-
-    # Variantes
+              background=[("active", "#475569"), ("disabled", "#94a3b8")], 
+              foreground=[("disabled", "#e2e8f0")])
     style.configure("Primary.Menu.TButton", background=primary)
-    style.map("Primary.Menu.TButton", background=[("active", "#1d4ed8")])
-
+    style.map("Primary.Menu.TButton", background=[("active", "#1d4ed8"), ("disabled", "#94a3b8")])
     style.configure("Success.Menu.TButton", background=success)
-    style.map("Success.Menu.TButton", background=[("active", "#15803d")])
-
+    style.map("Success.Menu.TButton", background=[("active", "#15803d"), ("disabled", "#94a3b8")])
     style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"),
                     padding=(10, 6), foreground="white", background=danger)
     style.map("Danger.TButton", background=[("active", "#dc2626")])
 
 
 def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
-    # Ventana
-    root.title("🛒 Supermercado Don Atilio - Menú Principal")
-    root.geometry("760x560")
+    
+    try:
+        root.state('zoomed') # Inicia maximizado
+    except tk.TclError:
+        root.geometry("1024x768") 
+            
+    root.title(f"🛒 Supermercado Don Atilio - Menú Principal (Usuario: {usuario.get('nombre','')} - Rol: {usuario.get('id_rol','')})") 
     root.configure(bg="#f4f4f8")
-    root.resizable(False, False)
+    root.resizable(True, True)
 
     _configurar_estilos(root)
 
@@ -121,34 +124,69 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     header.pack(fill=tk.X)
     ttk.Label(header, text="Supermercado Don Atilio — Menú Principal", style="Title.TLabel").pack(pady=16)
 
-    # Info usuario
-    ttk.Label(
-        root,
-        text=f"Usuario: {usuario.get('nombre','')}  |  Rol: {usuario.get('id_rol','')}",
-        style="Sub.TLabel",
-    ).pack(pady=(8, 2))
-
-    # Contenedor botones
+    # Contenedor botones (centrado)
     cont = tk.Frame(root, bg="#f4f4f8")
-    cont.pack(expand=True, pady=8)
+    cont.pack(expand=True)
 
-    # Botones (grid 3×2)
-    btns = [
-        ("📦 Inventario", lambda: _abrir_seguro(root, backend, usuario, ui_inventario, "Inventario"), "Menu.TButton"),
-        ("🧰 Productos (ABM)", lambda: _abrir_seguro(root, backend, usuario, ui_productos, "Productos"), "Primary.Menu.TButton"),
-        ("🧾 Reportes", lambda: _abrir_seguro(root, backend, usuario, ui_reportes, "Reportes"), "Menu.TButton"),
-        ("💳 Venta", lambda: _abrir_seguro(root, backend, usuario, ui_venta, "Venta"), "Success.Menu.TButton"),
-        ("➕ Registrar cliente", lambda: _abrir_seguro(root, backend, usuario, ui_registrar_cliente, "Registrar cliente"), "Menu.TButton"),
-        ("🏦 Cuenta corriente", lambda: _abrir_seguro(root, backend, usuario, ui_cuenta_corriente, "Cuenta corriente"), "Menu.TButton"),
+    # Lista de botones
+    botones_config = [
+        ("📦 Inventario", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_inventario, "Inventario"), 
+         "Menu.TButton", 
+         'ver_inventario'),
+         
+        ("🧰 Productos (ABM)", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_productos, "Productos"), 
+         "Primary.Menu.TButton", 
+         'ver_productos'),
+         
+        ("💳 Venta", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_venta, "Venta"), 
+         "Success.Menu.TButton", 
+         'realizar_ventas'),
+         
+        ("🛒 Registrar Compra", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_compra, "Compra"), 
+         "Menu.TButton", 
+         'registrar_compras'),
+         
+        ("🧾 Reportes", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_reportes, "Reportes"), 
+         "Menu.TButton", 
+         'ver_reportes'),
+         
+        ("📋 Historiales (Venta/Compra)", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_historiales, "Historiales"), 
+         "Menu.TButton", 
+         'ver_ventas'),
+         
+        ("🧑‍🤝‍🧑 Gestión de Clientes", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_gestion_clientes, "Gestión de Clientes"), 
+         "Menu.TButton", 
+         'ver_clientes'),
+         
+        ("🏦 Cuenta corriente", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_cuenta_corriente, "Cuenta corriente"), 
+         "Menu.TButton", 
+         'gestionar_cuenta_corriente'),
+         
+        ("⚙️ Gestión de Usuarios", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_gestion_usuarios, "Gestión de Usuarios"), 
+         "Menu.TButton", 
+         'ver_usuarios'),
     ]
 
-    for i, (text, cmd, sty) in enumerate(btns):
+    for i, (text, cmd, sty, permiso) in enumerate(botones_config):
         r, c = divmod(i, 2)
-        ttk.Button(cont, text=text, style=sty, command=cmd, width=26).grid(row=r, column=c, padx=14, pady=12)
+        
+        estado_btn = "normal" if tiene_permiso(usuario, permiso) else "disabled"
+        
+        btn = ttk.Button(cont, text=text, style=sty, command=cmd, width=28, state=estado_btn)
+        btn.grid(row=r, column=c, padx=20, pady=15)
 
-    # Cerrar sesión
+    # Cerrar sesión (Vuelve al login)
     ttk.Button(root, text="⛔ Cerrar sesión", style="Danger.TButton",
-               command=lambda: root.destroy()).pack(pady=14)
+               command=root.destroy).pack(pady=20)
 
 
 # Alias compat para mains antiguos

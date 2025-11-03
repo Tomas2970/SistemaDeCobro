@@ -12,14 +12,16 @@ import os
 import win32print
 import win32api
 from datetime import datetime
-from database.DB import obtener_detalle_venta, obtener_clientes
+# (Asegúrate de que la importación de DB sea correcta para tu estructura)
+# from app.database.DB import obtener_detalle_venta 
 
 # =====================================
 # Configuración
 # =====================================
+# --- ¡CORREGIDO! ---
 # Nombre de la impresora térmica en Windows
 # Para ver el nombre exacto: Panel de Control → Impresoras
-NOMBRE_IMPRESORA = "POS-80"  # Cambiar por el nombre real de tu impresora
+NOMBRE_IMPRESORA = "sam4s giant 100s"
 # Ejemplos comunes: "POS-80", "TM-T20", "Ticket Printer", etc.
 
 # Ancho del ticket (caracteres)
@@ -49,32 +51,30 @@ def justificar_texto(izquierda, derecha, ancho=ANCHO_TICKET):
 # =====================================
 # Función Principal de Impresión
 # =====================================
-def imprimir_ticket(id_venta, nombre_vendedor="Vendedor"):
+def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor"):
     """
     Imprime un ticket de venta
     
     Args:
         id_venta: ID de la venta a imprimir
+        items_de_la_venta: Una LISTA de los productos vendidos
         nombre_vendedor: Nombre del vendedor (opcional)
     
     Returns:
         True si se imprimió correctamente, False si hubo error
     """
     try:
-        # Obtener datos de la venta
-        items = obtener_detalle_venta(id_venta)
-        
-        if not items:
-            print(f"❌ Error: No se encontró venta con ID {id_venta}")
+        if not items_de_la_venta:
+            print(f"❌ Error: No hay items para imprimir en la venta #{id_venta}")
             return False
         
         # Generar contenido del ticket
-        ticket = generar_contenido_ticket(id_venta, items, nombre_vendedor)
+        ticket = generar_contenido_ticket(id_venta, items_de_la_venta, nombre_vendedor)
         
         # Imprimir
         enviar_a_impresora(ticket)
         
-        print(f"✅ Ticket #{id_venta} impreso correctamente")
+        print(f"✅ Ticket #{id_venta} enviado a la impresora '{NOMBRE_IMPRESORA}'")
         return True
         
     except Exception as e:
@@ -96,7 +96,7 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append("\n")
     ticket.append(centrar_texto("SUPERMERCADO DON ATILIO"))
     ticket.append(centrar_texto("==============================="))
-    ticket.append(centrar_texto("Dirección del Local"))
+    ticket.append(centrar_texto("Direccion del Local"))
     ticket.append(centrar_texto("Tel: (381) 123-4567"))
     ticket.append(centrar_texto("CUIT: 20-12345678-9"))
     ticket.append(linea_separadora())
@@ -119,14 +119,14 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append(linea_separadora())
     
     total = 0
-    for item in items:
-        nombre = item['producto'][:25]  # Truncar si es muy largo
-        cantidad = item['cantidad']
-        precio = item['precio_unitario']
-        subtotal = item['subtotal']
+    # items: (id_producto | None, nombre, cant, precio_unit, codigo_barras | "")
+    for (id_prod, nombre, cantidad, precio, cod) in items:
+        
+        nombre_corto = nombre[:25]  # Truncar si es muy largo
+        subtotal = cantidad * precio
         
         # Línea 1: Nombre del producto
-        ticket.append(nombre)
+        ticket.append(nombre_corto)
         
         # Línea 2: Cantidad, precio unitario y subtotal
         linea = f"  {cantidad} x {formato_precio(precio)}"
@@ -151,7 +151,7 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append(centrar_texto("¡Gracias por su compra!"))
     ticket.append(centrar_texto("Vuelva pronto"))
     ticket.append("\n")
-    ticket.append(centrar_texto("Este ticket no es válido"))
+    ticket.append(centrar_texto("Este ticket no es valido"))
     ticket.append(centrar_texto("como factura fiscal"))
     ticket.append("\n\n\n")  # Espacio para cortar el ticket
     
@@ -173,7 +173,7 @@ def enviar_a_impresora(contenido):
         impresora = obtener_impresora()
         
         if not impresora:
-            print("⚠️  No se encontró impresora configurada")
+            print(f"⚠️  No se encontró impresora '{NOMBRE_IMPRESORA}' ni una por defecto.")
             # Guardar en archivo como alternativa
             guardar_ticket_txt(contenido)
             return
@@ -204,7 +204,8 @@ def imprimir_con_win32(contenido, impresora):
                 win32print.StartPagePrinter(hPrinter)
                 
                 # Enviar contenido
-                contenido_bytes = contenido.encode('cp850')  # Codificación para impresoras
+                # Usar 'cp850' es común para tickets para caracteres latinos como 'ñ'
+                contenido_bytes = contenido.encode('cp850', errors='replace')
                 win32print.WritePrinter(hPrinter, contenido_bytes)
                 
                 win32print.EndPagePrinter(hPrinter)
@@ -215,35 +216,11 @@ def imprimir_con_win32(contenido, impresora):
         finally:
             win32print.ClosePrinter(hPrinter)
         
-        print("✅ Impresión enviada correctamente")
+        print(f"✅ Impresión enviada correctamente a {impresora}")
         
     except Exception as e:
         print(f"❌ Error en win32print: {e}")
         raise
-
-def imprimir_con_comando_windows(contenido):
-    """
-    Alternativa: Imprime usando el comando PRINT de Windows
-    No requiere librerías adicionales
-    """
-    try:
-        # Crear archivo temporal
-        archivo_temp = "ticket_temp.txt"
-        
-        with open(archivo_temp, 'w', encoding='cp850') as f:
-            f.write(contenido)
-        
-        # Enviar a impresora usando comando de Windows
-        impresora = obtener_impresora()
-        os.system(f'PRINT /D:"{impresora}" {archivo_temp}')
-        
-        # Eliminar archivo temporal
-        os.remove(archivo_temp)
-        
-        print("✅ Ticket impreso con comando Windows")
-        
-    except Exception as e:
-        print(f"❌ Error al imprimir con comando: {e}")
 
 def guardar_ticket_txt(contenido):
     """
@@ -255,11 +232,9 @@ def guardar_ticket_txt(contenido):
         if not os.path.exists('tickets'):
             os.makedirs('tickets')
         
-        # Nombre del archivo con timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         nombre_archivo = f"tickets/ticket_{timestamp}.txt"
         
-        # Guardar
         with open(nombre_archivo, 'w', encoding='utf-8') as f:
             f.write(contenido)
         
@@ -284,7 +259,7 @@ def obtener_impresora():
     """
     try:
         # Intentar usar la impresora configurada
-        impresoras = win32print.EnumPrinters(2)
+        impresoras = win32print.EnumPrinters(2) # Nivel 2 da detalles
         nombres_impresoras = [imp[2] for imp in impresoras]
         
         # Buscar la impresora configurada
@@ -292,8 +267,9 @@ def obtener_impresora():
             return NOMBRE_IMPRESORA
         
         # Si no existe, usar la impresora por defecto
+        print(f"⚠️  Advertencia: No se encontró la impresora '{NOMBRE_IMPRESORA}'.")
         impresora_default = win32print.GetDefaultPrinter()
-        print(f"⚠️  Usando impresora por defecto: {impresora_default}")
+        print(f"    Usando la impresora por defecto: {impresora_default}")
         return impresora_default
         
     except Exception as e:
@@ -308,7 +284,7 @@ def listar_impresoras():
     try:
         impresoras = win32print.EnumPrinters(2)
         
-        print("\n📋 IMPRESORAS DISPONIBLES:")
+        print("\n📋 IMPRESORAS DISPONIBLES EN WINDOWS:")
         print("="*50)
         
         for i, impresora in enumerate(impresoras, 1):
@@ -316,22 +292,11 @@ def listar_impresoras():
             print(f"{i}. {nombre}")
         
         print("="*50)
-        print("\n💡 Copia el nombre exacto y ponlo en NOMBRE_IMPRESORA")
-        print(f"   Ejemplo: NOMBRE_IMPRESORA = \"{impresoras[0][2]}\"")
+        print(f"\n💡 Asegúrate de que el nombre en la línea 18 sea EXACTO:")
+        print(f"   NOMBRE_IMPRESORA = \"{NOMBRE_IMPRESORA}\"")
         
     except Exception as e:
         print(f"❌ Error al listar impresoras: {e}")
-
-def configurar_impresora(nombre):
-    """
-    Configura el nombre de la impresora a usar
-    
-    Args:
-        nombre: Nombre exacto de la impresora en Windows
-    """
-    global NOMBRE_IMPRESORA
-    NOMBRE_IMPRESORA = nombre
-    print(f"✅ Impresora configurada: {nombre}")
 
 # =====================================
 # Funciones de Prueba
@@ -350,6 +315,7 @@ def imprimir_ticket_prueba():
     ticket.append("Si puedes leer esto,")
     ticket.append("la impresora funciona correctamente!")
     ticket.append("\n")
+    ticket.append(centrar_texto(f"Modelo: {NOMBRE_IMPRESORA}"))
     ticket.append(centrar_texto(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}"))
     ticket.append("\n\n\n")
     
@@ -373,15 +339,18 @@ if __name__ == "__main__":
     # 1. Listar impresoras disponibles
     listar_impresoras()
     
-    # 2. Configurar impresora (opcional)
-    # configurar_impresora("TU_IMPRESORA_AQUI")
-    
-    # 3. Imprimir ticket de prueba
+    # 2. Imprimir ticket de prueba
     print("\n¿Desea imprimir un ticket de prueba? (s/n): ", end='')
     respuesta = input().lower()
     
     if respuesta == 's':
         imprimir_ticket_prueba()
     
-    # 4. Ejemplo: Imprimir una venta real
-    # imprimir_ticket(id_venta=1, nombre_vendedor="Admin")
+    # 4. Ejemplo: Imprimir una venta real (requiere DB)
+    # (Esto es solo un ejemplo, la lógica real está en interfaz_venta.py)
+    # print("\nImprimiendo ticket de ejemplo...")
+    # items_ejemplo = [
+    #    (1, "Producto A", 2, 150.00, "123"),
+    #    (2, "Producto B", 1, 300.50, "456"),
+    # ]
+    # imprimir_ticket(id_venta=123, items_de_la_venta=items_ejemplo, nombre_vendedor="Admin")

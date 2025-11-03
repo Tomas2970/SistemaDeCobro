@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS Rol (
 CREATE TABLE IF NOT EXISTS Usuario (
   id_usuario INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(50) NOT NULL UNIQUE,
-  contraseña VARCHAR(255) NOT NULL,        -- espacio para bcrypt/argon2
+  contraseña VARCHAR(255) NOT NULL,
   id_rol INT NOT NULL,
   activo BOOLEAN DEFAULT TRUE,
   fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS Usuario (
 CREATE TABLE IF NOT EXISTS Cliente (
   id_cliente INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(100) NOT NULL,
+  dni VARCHAR(15) NULL UNIQUE,
   direccion VARCHAR(200),
   telefono VARCHAR(20),
   email VARCHAR(255) UNIQUE,
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS Cliente (
   fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CHECK (email IS NULL OR email LIKE '%@%.%'),
   INDEX idx_cliente_nombre (nombre),
+  INDEX idx_cliente_dni (dni),
   INDEX idx_cliente_email (email),
   INDEX idx_cliente_activo (activo)
 ) ENGINE=InnoDB;
@@ -130,7 +132,7 @@ CREATE TABLE IF NOT EXISTS Inventario (
   CHECK (stock_maximo > stock_minimo),
   CONSTRAINT fk_inventario_producto
     FOREIGN KEY (id_producto) REFERENCES Producto(id_producto)
-    ON DELETE CASCADE,               -- si se borra producto, cae inventario
+    ON DELETE CASCADE,
   INDEX idx_inventario_cantidad (cantidad),
   INDEX idx_inventario_alerta (cantidad, stock_minimo)
 ) ENGINE=InnoDB;
@@ -141,7 +143,7 @@ CREATE TABLE IF NOT EXISTS Inventario (
 CREATE TABLE IF NOT EXISTS Proveedor (
   id_proveedor INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(100) NOT NULL,
-  direccion VARCHAR(200),
+  empresa VARCHAR(200),
   telefono VARCHAR(20),
   email VARCHAR(255) UNIQUE,
   contacto VARCHAR(100),
@@ -176,9 +178,9 @@ CREATE TABLE IF NOT EXISTS Compra (
 CREATE TABLE IF NOT EXISTS DetalleCompra (
   id_detalle_compra INT AUTO_INCREMENT PRIMARY KEY,
   id_compra INT NOT NULL,
-  id_producto INT NULL,                          -- NULL permitido para poder borrar productos
-  nombre_producto VARCHAR(120) NULL,             -- snapshot
-  codigo_barras   VARCHAR(32)  NULL,             -- snapshot
+  id_producto INT NULL,
+  nombre_producto VARCHAR(120) NULL,
+  codigo_barras   VARCHAR(32)  NULL,
   cantidad INT NOT NULL,
   precio_unitario DECIMAL(10,2) NOT NULL,
   subtotal DECIMAL(10,2) GENERATED ALWAYS AS (cantidad * precio_unitario) STORED,
@@ -202,8 +204,8 @@ CREATE TABLE IF NOT EXISTS Venta (
   fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
   total DECIMAL(10,2) DEFAULT 0.00,
   id_usuario INT,
-  id_cliente INT NULL,                            -- NULL = consumidor final
-  estado VARCHAR(20) DEFAULT 'completada',
+  id_cliente INT NULL,
+  estado VARCHAR(20) DEFAULT 'pendiente', 
   tipo_pago VARCHAR(20) DEFAULT 'efectivo',
   CHECK (total >= 0),
   CHECK (estado IN ('completada','cancelada','pendiente')),
@@ -223,9 +225,9 @@ CREATE TABLE IF NOT EXISTS Venta (
 CREATE TABLE IF NOT EXISTS DetalleVenta (
   id_detalle_venta INT AUTO_INCREMENT PRIMARY KEY,
   id_venta INT NOT NULL,
-  id_producto INT NULL,                           -- NULL permitido (SET NULL)
-  nombre_producto VARCHAR(120) NULL,              -- snapshot
-  codigo_barras   VARCHAR(32)  NULL,              -- snapshot
+  id_producto INT NULL, -- ¡ARREGLADO! AHORA PERMITE NULL
+  nombre_producto VARCHAR(120) NULL,
+  codigo_barras   VARCHAR(32)  NULL,
   cantidad INT NOT NULL,
   precio_unitario DECIMAL(10,2) NOT NULL,
   subtotal DECIMAL(10,2) GENERATED ALWAYS AS (cantidad * precio_unitario) STORED,
@@ -249,7 +251,7 @@ CREATE TABLE IF NOT EXISTS AuditoriaInventario (
   id_producto INT NOT NULL,
   cantidad_anterior INT NOT NULL,
   cantidad_nueva INT NOT NULL,
-  tipo_movimiento VARCHAR(50) NOT NULL,   -- 'venta','compra','ajuste','devolución'
+  tipo_movimiento VARCHAR(50) NOT NULL,
   id_referencia INT,
   id_usuario INT,
   fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -268,9 +270,11 @@ CREATE TABLE IF NOT EXISTS AuditoriaInventario (
 -- =========================================================
 -- 7) Triggers (totales / auditoría / cuenta corriente)
 -- =========================================================
+-- Triggers (Sección 7) — ejecutar este bloque SOLO
 DELIMITER $$
 
-CREATE TRIGGER IF NOT EXISTS trg_detalle_venta_ai_total
+DROP TRIGGER IF EXISTS trg_detalle_venta_ai_total $$
+CREATE TRIGGER trg_detalle_venta_ai_total
 AFTER INSERT ON DetalleVenta
 FOR EACH ROW
 BEGIN
@@ -281,9 +285,10 @@ BEGIN
     WHERE id_venta = NEW.id_venta
   )
   WHERE id_venta = NEW.id_venta;
-END$$
+END $$
 
-CREATE TRIGGER IF NOT EXISTS trg_detalle_compra_ai_total
+DROP TRIGGER IF EXISTS trg_detalle_compra_ai_total $$
+CREATE TRIGGER trg_detalle_compra_ai_total
 AFTER INSERT ON DetalleCompra
 FOR EACH ROW
 BEGIN
@@ -294,23 +299,26 @@ BEGIN
     WHERE id_compra = NEW.id_compra
   )
   WHERE id_compra = NEW.id_compra;
-END$$
+END $$
 
--- Auditoría de inventario en ventas (descuento)
-CREATE TRIGGER IF NOT EXISTS trg_auditoria_venta_inventario
+DROP TRIGGER IF EXISTS trg_auditoria_venta_inventario $$
+CREATE TRIGGER trg_auditoria_venta_inventario
 AFTER INSERT ON DetalleVenta
 FOR EACH ROW
 BEGIN
   DECLARE v_cant_anterior INT DEFAULT 0;
-  SELECT cantidad INTO v_cant_anterior FROM Inventario WHERE id_producto = NEW.id_producto;
-  INSERT INTO AuditoriaInventario
-    (id_producto, cantidad_anterior, cantidad_nueva, tipo_movimiento, id_referencia, id_usuario)
-  VALUES
-    (NEW.id_producto, v_cant_anterior, GREATEST(v_cant_anterior - NEW.cantidad, 0), 'venta', NEW.id_venta, NULL);
-END$$
+  IF NEW.id_producto IS NOT NULL THEN
+    SELECT cantidad INTO v_cant_anterior
+    FROM Inventario WHERE id_producto = NEW.id_producto;
+    INSERT INTO AuditoriaInventario
+      (id_producto, cantidad_anterior, cantidad_nueva, tipo_movimiento, id_referencia, id_usuario)
+    VALUES
+      (NEW.id_producto, v_cant_anterior, GREATEST(v_cant_anterior - NEW.cantidad, 0), 'venta', NEW.id_venta, NULL);
+  END IF;
+END $$
 
--- Ajuste automático de cuenta corriente cuando cambia el total de una venta CC
-CREATE TRIGGER IF NOT EXISTS trg_venta_au_cuentacorriente
+DROP TRIGGER IF EXISTS trg_venta_au_cuentacorriente $$
+CREATE TRIGGER trg_venta_au_cuentacorriente
 AFTER UPDATE ON Venta
 FOR EACH ROW
 BEGIN
@@ -321,9 +329,10 @@ BEGIN
       WHERE id_cliente = NEW.id_cliente;
     END IF;
   END IF;
-END$$
+END $$
 
 DELIMITER ;
+
 
 -- =========================================================
 -- 8) Datos iniciales (roles, categorías)
@@ -341,10 +350,8 @@ INSERT IGNORE INTO Categoria (id_categoria, nombre, descripcion) VALUES
   (5, 'Limpieza', 'Productos de limpieza e higiene'),
   (6, 'Panadería', 'Productos de panadería y pastelería');
 
--- (Nota) No insertamos Cliente id=0: ventas sin cliente usan id_cliente = NULL.
-
 -- =========================================================
--- 9) Vistas útiles
+-- 9) Vistas útiles (¡ACTUALIZADAS!)
 -- =========================================================
 CREATE OR REPLACE VIEW vista_stock_bajo AS
 SELECT
@@ -358,7 +365,7 @@ SELECT
 FROM Producto p
 JOIN Inventario i ON p.id_producto = i.id_producto
 LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
-WHERE i.cantidad <= i.stock_minimo
+WHERE i.cantidad <= i.stock_minimo AND p.activo = 1
 ORDER BY i.cantidad ASC;
 
 CREATE OR REPLACE VIEW vista_ventas_diarias AS
@@ -383,7 +390,7 @@ FROM Producto p
 JOIN DetalleVenta dv ON p.id_producto = dv.id_producto
 JOIN Venta v ON dv.id_venta = v.id_venta
 LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
-WHERE v.estado = 'completada'
+WHERE v.estado = 'completada' AND p.activo = 1
 GROUP BY p.id_producto
 ORDER BY total_vendido DESC;
 
@@ -391,6 +398,7 @@ CREATE OR REPLACE VIEW vista_clientes_deuda AS
 SELECT
   c.id_cliente,
   c.nombre,
+  c.dni,
   c.telefono,
   c.email,
   cc.saldo,
@@ -398,12 +406,40 @@ SELECT
   (cc.limite_credito + cc.saldo) AS credito_disponible
 FROM Cliente c
 JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
-WHERE cc.saldo < 0
+WHERE cc.saldo < 0 AND c.activo = 1
 ORDER BY cc.saldo ASC;
 
 -- =========================================================
 -- 10) Índices compuestos adicionales
 -- =========================================================
-CREATE INDEX IF NOT EXISTS idx_venta_fecha_cliente ON Venta(fecha, id_cliente);
-CREATE INDEX IF NOT EXISTS idx_producto_categoria_activo ON Producto(id_categoria, activo);
-CREATE INDEX IF NOT EXISTS idx_auditoria_producto_fecha ON AuditoriaInventario(id_producto, fecha);
+-- Índices idempotentes en MySQL
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS ensure_index $$
+CREATE PROCEDURE ensure_index(
+  IN p_table VARCHAR(64),
+  IN p_index VARCHAR(64),
+  IN p_cols  VARCHAR(255)
+)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name   = p_table
+      AND index_name   = p_index
+  ) THEN
+    SET @sql = CONCAT('CREATE INDEX ', p_index, ' ON ', p_table, ' (', p_cols, ')');
+    PREPARE stmt FROM @sql;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
+  END IF;
+END $$
+DELIMITER ;
+
+CALL ensure_index('Venta',               'idx_venta_fecha_cliente',       'fecha, id_cliente');
+CALL ensure_index('Producto',            'idx_producto_categoria_activo', 'id_categoria, activo');
+CALL ensure_index('AuditoriaInventario', 'idx_auditoria_producto_fecha',  'id_producto, fecha');
+
+DROP PROCEDURE IF EXISTS ensure_index;
+
