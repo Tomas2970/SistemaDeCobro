@@ -1,18 +1,16 @@
 # app/frontend/interfaz_historiales.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog # ¡Importado filedialog!
+from tkinter import ttk, messagebox, filedialog 
 from typing import Optional, Any
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta 
 import logging
-import csv # ¡Importado csv!
+import csv 
 
 logger = logging.getLogger(__name__)
 
 # --- Helpers de formato de fecha ---
-
 def _formatear_fecha_para_sql(fecha_str: str) -> str | None:
-    """Convierte DD/MM/YYYY a YYYY-MM-DD. Devuelve None si es inválida."""
     if not fecha_str:
         return None
     try:
@@ -20,9 +18,7 @@ def _formatear_fecha_para_sql(fecha_str: str) -> str | None:
         return fecha_obj.strftime("%Y-%m-%d")
     except ValueError:
         return None 
-
 def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
-    """Convierte AAAA-MM-DD HH:MM:SS a DD/MM/AAAA HH:MM"""
     if not fecha_sql:
         return ""
     try:
@@ -34,16 +30,17 @@ def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
             return fecha_obj.strftime("%d/%m/%Y")
         except Exception:
             return str(fecha_sql)
-
 def _fmt_mon(val: Any) -> str:
     try: return f"$ {float(val):,.2f}"
     except: return "$ 0.00"
 
 
 class Historiales:
-    def __init__(self, parent: tk.Misc, backend, usuario: dict):
+    def __init__(self, parent: tk.Misc, backend, usuario: dict, filtro_fecha: str | None = None):
         self.backend = backend
         self.usuario = usuario
+        self.filtro_fecha_default = filtro_fecha
+        
         self.win = tk.Toplevel(parent)
         self.win.title("📋 Historiales")
         self.win.geometry("980x720")
@@ -54,7 +51,6 @@ class Historiales:
         self.cliente_ids = [None]
         self.proveedor_ids = [None]
 
-        # Crear el contenedor de pestañas
         self.notebook = ttk.Notebook(self.win)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -68,9 +64,13 @@ class Historiales:
         self._crear_tab_compras()
 
         self.cargar_filtros_ventas()
-        self.buscar_ventas()
         self.cargar_filtros_compras()
+        
+        self.buscar_ventas()
         self.buscar_compras()
+        
+        if self.filtro_fecha_default:
+            self.notebook.select(self.tab_ventas)
         
         self.win.grab_set()
 
@@ -84,12 +84,17 @@ class Historiales:
         tk.Label(frm_filtros, text="Desde (DD/MM/YYYY):", bg="#f4f4f8").grid(row=0, column=0, padx=(5,2))
         self.ent_desde_v = tk.Entry(frm_filtros, width=12)
         self.ent_desde_v.grid(row=0, column=1, padx=2)
-        self.ent_desde_v.insert(0, f"01/{date.today().month:02d}/{date.today().year}")
 
         tk.Label(frm_filtros, text="Hasta (DD/MM/YYYY):", bg="#f4f4f8").grid(row=0, column=2, padx=(10,2))
         self.ent_hasta_v = tk.Entry(frm_filtros, width=12)
         self.ent_hasta_v.grid(row=0, column=3, padx=2)
-        self.ent_hasta_v.insert(0, date.today().strftime("%d/%m/%Y"))
+
+        if self.filtro_fecha_default:
+            self.ent_desde_v.insert(0, self.filtro_fecha_default)
+            self.ent_hasta_v.insert(0, self.filtro_fecha_default)
+        else:
+            self.ent_desde_v.insert(0, f"01/{date.today().month:02d}/{date.today().year}")
+            self.ent_hasta_v.insert(0, date.today().strftime("%d/%m/%Y"))
 
         tk.Label(frm_filtros, text="Vendedor:", bg="#f4f4f8").grid(row=0, column=4, padx=(10,2))
         self.cb_vendedor_v = ttk.Combobox(frm_filtros, state="readonly", width=20)
@@ -124,14 +129,14 @@ class Historiales:
         
         self.tree_maestro_v.bind("<<TreeviewSelect>>", self.mostrar_detalle_venta)
 
-        frm_detalle = tk.LabelFrame(self.tab_ventas, text="Detalle de la Venta Seleccionada", bg="#f4f4f8", padx=10, pady=10)
-        frm_detalle.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        self.frm_detalle_v = tk.LabelFrame(self.tab_ventas, text="Detalle de la Venta Seleccionada", bg="#f4f4f8", padx=10, pady=10)
+        self.frm_detalle_v.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
         cols_d = ("ID Prod", "Producto", "Código Barras", "Cant", "P. Unit", "Subtotal")
-        self.tree_detalle_v = ttk.Treeview(frm_detalle, columns=cols_d, show="headings", height=8)
+        self.tree_detalle_v = ttk.Treeview(self.frm_detalle_v, columns=cols_d, show="headings", height=8)
         self.tree_detalle_v.pack(side="left", fill="both", expand=True)
 
-        ys_d = ttk.Scrollbar(frm_detalle, orient="vertical", command=self.tree_detalle_v.yview)
+        ys_d = ttk.Scrollbar(self.frm_detalle_v, orient="vertical", command=self.tree_detalle_v.yview)
         ys_d.pack(side="right", fill="y")
         self.tree_detalle_v.configure(yscrollcommand=ys_d.set)
 
@@ -167,6 +172,7 @@ class Historiales:
     def buscar_ventas(self):
         for i in self.tree_maestro_v.get_children(): self.tree_maestro_v.delete(i)
         for i in self.tree_detalle_v.get_children(): self.tree_detalle_v.delete(i)
+        self.frm_detalle_v.config(text="Detalle de la Venta Seleccionada") 
             
         try:
             desde_sql = _formatear_fecha_para_sql(self.ent_desde_v.get().strip())
@@ -203,10 +209,14 @@ class Historiales:
     def mostrar_detalle_venta(self, event=None):
         for i in self.tree_detalle_v.get_children(): self.tree_detalle_v.delete(i)
         seleccion = self.tree_maestro_v.selection()
-        if not seleccion: return
+        if not seleccion: 
+            self.frm_detalle_v.config(text="Detalle de la Venta Seleccionada")
+            return
             
         item_seleccionado = seleccion[0]
         id_venta = self.tree_maestro_v.item(item_seleccionado, "values")[0]
+        
+        self.frm_detalle_v.config(text=f"Detalle de la Venta Seleccionada [ID: {id_venta}]")
         
         try:
             detalles = self.backend.obtener_venta_detalle(int(id_venta))
@@ -267,14 +277,14 @@ class Historiales:
         
         self.tree_maestro_c.bind("<<TreeviewSelect>>", self.mostrar_detalle_compra)
 
-        frm_detalle = tk.LabelFrame(self.tab_compras, text="Detalle de la Compra Seleccionada", bg="#f4f4f8", padx=10, pady=10)
-        frm_detalle.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        self.frm_detalle_c = tk.LabelFrame(self.tab_compras, text="Detalle de la Compra Seleccionada", bg="#f4f4f8", padx=10, pady=10)
+        self.frm_detalle_c.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
         cols_d = ("ID Prod", "Producto", "Código Barras", "Cant", "Costo Unit", "Subtotal")
-        self.tree_detalle_c = ttk.Treeview(frm_detalle, columns=cols_d, show="headings", height=8)
+        self.tree_detalle_c = ttk.Treeview(self.frm_detalle_c, columns=cols_d, show="headings", height=8)
         self.tree_detalle_c.pack(side="left", fill="both", expand=True)
 
-        ys_d = ttk.Scrollbar(frm_detalle, orient="vertical", command=self.tree_detalle_c.yview)
+        ys_d = ttk.Scrollbar(self.frm_detalle_c, orient="vertical", command=self.tree_detalle_c.yview)
         ys_d.pack(side="right", fill="y")
         self.tree_detalle_c.configure(yscrollcommand=ys_d.set)
 
@@ -304,6 +314,7 @@ class Historiales:
     def buscar_compras(self):
         for i in self.tree_maestro_c.get_children(): self.tree_maestro_c.delete(i)
         for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
+        self.frm_detalle_c.config(text="Detalle de la Compra Seleccionada") 
             
         try:
             desde_sql = _formatear_fecha_para_sql(self.ent_desde_c.get().strip())
@@ -337,10 +348,14 @@ class Historiales:
     def mostrar_detalle_compra(self, event=None):
         for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
         seleccion = self.tree_maestro_c.selection()
-        if not seleccion: return
+        if not seleccion: 
+            self.frm_detalle_c.config(text="Detalle de la Compra Seleccionada")
+            return
             
         item_seleccionado = seleccion[0]
         id_compra = self.tree_maestro_c.item(item_seleccionado, "values")[0]
+        
+        self.frm_detalle_c.config(text=f"Detalle de la Compra Seleccionada [ID: {id_compra}]")
         
         try:
             detalles = self.backend.obtener_compra_detalle(int(id_compra))
@@ -357,20 +372,24 @@ class Historiales:
             logger.exception("Error mostrando detalle de compra")
 
     # ===================================================================
-    # FUNCIÓN DE EXPORTACIÓN (¡CORREGIDA CON PUNTO Y COMA!)
+    # FUNCIÓN DE EXPORTACIÓN (¡MODIFICADA!)
     # ===================================================================
     def exportar_a_csv(self):
         try:
             tab_id = self.notebook.index(self.notebook.select())
             
+            # --- ¡MODIFICACIÓN! Formato de fecha DD-MM-AAAA ---
+            hoy = datetime.now().strftime("%d-%m-%Y")
+            
             if tab_id == 0: 
                 tree_maestro = self.tree_maestro_v
                 tree_detalle = self.tree_detalle_v
-                default_filename = "historial_ventas.csv"
+                default_filename = f"historial_ventas_{hoy}.csv"
             else: 
                 tree_maestro = self.tree_maestro_c
                 tree_detalle = self.tree_detalle_c
-                default_filename = "historial_compras.csv"
+                default_filename = f"historial_compras_{hoy}.csv"
+            # --- FIN MODIFICACIÓN ---
 
             if not tree_maestro.get_children():
                 messagebox.showinfo("Nada que exportar", "La tabla de historial está vacía.", parent=self.win)
@@ -379,16 +398,14 @@ class Historiales:
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".csv",
                 filetypes=[("Archivo CSV (delimitado por punto y coma)", "*.csv"), ("Todos los archivos", "*.*")],
-                initialfile=default_filename,
+                initialfile=default_filename, 
                 title="Guardar como CSV"
             )
             
             if not filepath:
                 return 
 
-            # --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
-            # Usamos 'delimiter=';' para que Excel (en español) lo abra bien.
-            with open(filepath, 'w', newline='', encoding='utf-8-sig') as f: # 'utf-8-sig' ayuda a Excel con acentos
+            with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f, delimiter=';') 
                 
                 columnas_maestro = tree_maestro['columns']
@@ -421,5 +438,5 @@ class Historiales:
 
 
 # Wrapper para ser llamado desde el menú principal
-def ui_historiales(parent: tk.Misc, backend, usuario: dict):
-    Historiales(parent, backend, usuario)
+def ui_historiales(parent: tk.Misc, backend, usuario: dict, filtro_fecha: str | None = None):
+    Historiales(parent, backend, usuario, filtro_fecha=filtro_fecha)

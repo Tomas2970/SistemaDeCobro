@@ -1,13 +1,24 @@
 # app/main.py
 import tkinter as tk
 from tkinter import messagebox
+import logging # Mantenemos el import de logging
+
+# --- ¡NUEVO! ---
+# Importamos el configurador de logging
+from app.tools.logger_config import setup_logging
+# Lo ejecutamos UNA SOLA VEZ al inicio de todo
+setup_logging()
+# --- FIN NUEVO ---
+
 from app.frontend.interfaz_iniciosesion import ui_login
 from app.frontend.interfaz_menu_principal import ui_menu_principal
 from app.database.backend_adapter import BackendAdapter
-import logging
 
-# Configuración básica de logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# --- ¡CAMBIO! ---
+# Ya no necesitamos esta línea, porque setup_logging() la reemplaza
+# logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# --- FIN CAMBIO ---
 
 def main() -> None:
     backend = BackendAdapter()

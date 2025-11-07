@@ -1,30 +1,17 @@
 """
 Módulo de Impresión de Tickets
 Sistema de Cobro - Supermercado Don Atilio
-
-IMPORTANTE: 
-- Las impresoras térmicas funcionan como impresoras normales de Windows
-- NO requieren librerías especiales en la mayoría de casos
-- Se imprimen como documentos de texto
 """
 
 import os
 import win32print
 import win32api
 from datetime import datetime
-# (Asegúrate de que la importación de DB sea correcta para tu estructura)
-# from app.database.DB import obtener_detalle_venta 
 
 # =====================================
 # Configuración
 # =====================================
-# --- ¡CORREGIDO! ---
-# Nombre de la impresora térmica en Windows
-# Para ver el nombre exacto: Panel de Control → Impresoras
 NOMBRE_IMPRESORA = "sam4s giant 100s"
-# Ejemplos comunes: "POS-80", "TM-T20", "Ticket Printer", etc.
-
-# Ancho del ticket (caracteres)
 ANCHO_TICKET = 42
 
 # =====================================
@@ -41,7 +28,10 @@ def linea_separadora(caracter='-', ancho=ANCHO_TICKET):
 
 def formato_precio(precio):
     """Formatea un precio con 2 decimales"""
-    return f"${precio:,.2f}"
+    try:
+        return f"${float(precio):,.2f}"
+    except Exception:
+        return "$ 0.00"
 
 def justificar_texto(izquierda, derecha, ancho=ANCHO_TICKET):
     """Justifica texto a izquierda y derecha"""
@@ -57,7 +47,7 @@ def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor
     
     Args:
         id_venta: ID de la venta a imprimir
-        items_de_la_venta: Una LISTA de los productos vendidos
+        items_de_la_venta: Una LISTA de tuplas (id_prod, nombre, cant, precio, cod)
         nombre_vendedor: Nombre del vendedor (opcional)
     
     Returns:
@@ -112,45 +102,57 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append(linea_separadora())
     
     # ========================================
-    # PRODUCTOS (¡SECCIÓN MODIFICADA!)
+    # PRODUCTOS (Formato 4 Columnas)
     # ========================================
     
-    # --- ¡INICIO DE LA MODIFICACIÓN (Formato 4 Columnas)! ---
-    # Definir encabezados de 4 columnas
-    # Anchos: 17 (Prod) + 1 (sp) + 4 (Cant) + 1 (sp) + 9 (P.Unit) + 1 (sp) + 9 (Subt) = 42
-    head_prod = "PRODUCTO".ljust(17)
-    head_cant = "CANT".rjust(4)
-    head_punit = "P.UNIT".rjust(9)
-    head_subt = "SUBTOTAL".rjust(9)
+    # --- ¡MODIFICACIÓN DE ANCHO! ---
+    # Anchos: 15 (Prod) + 6 (Cant) + 8 (P.Unit) + 10 (Subt) + 3 espacios = 42
+    
+    head_prod = "PRODUCTO".ljust(15)  # (15)
+    head_cant = "CANT".rjust(6)       # (6)
+    head_punit = "P.UNIT".rjust(8)    # (8)
+    head_subt = "SUBTOTAL".rjust(10)  # (10)
+    # --- FIN MODIFICACIÓN ---
     
     ticket.append(f"{head_prod} {head_cant} {head_punit} {head_subt}")
     ticket.append(linea_separadora())
     
     total = 0
-    # items: (id_producto | None, nombre, cant, precio_unit, codigo_barras | "")
-    # El 4to item se llama 'precio' en la tupla (lo usamos como precio_unitario)
+    # items es: (id_prod, nombre, cantidad, precio, cod)
     for (id_prod, nombre, cantidad, precio, cod) in items:
         
-        subtotal = cantidad * precio
+        # Aseguramos que cantidad sea float para la multiplicación
+        try:
+            cantidad_float = float(cantidad)
+        except ValueError:
+            cantidad_float = 0.0
+            
+        subtotal = cantidad_float * float(precio)
         total += subtotal
         
         # Formatear datos para las columnas
-        nombre_col = nombre[:17].ljust(17) # Truncar nombre a 17
-        cantidad_col = str(cantidad).rjust(4)
-        p_unit_col = formato_precio(precio).rjust(9)
-        subtotal_col = formato_precio(subtotal).rjust(9)
+        nombre_col = nombre[:15].ljust(15) # Truncar a 15
+        
+        # --- ¡MODIFICACIÓN! Formato de cantidad (pesable/entero) ---
+        if cantidad_float == int(cantidad_float):
+            cant_str = str(int(cantidad_float)) # Muestra "5"
+        else:
+            cant_str = f"{cantidad_float:.3f}" # Muestra "5.250"
+        
+        cantidad_col = cant_str.rjust(6) # Alinea en 6 chars
+        # --- FIN MODIFICACIÓN ---
+        
+        p_unit_col = formato_precio(precio).rjust(8)
+        subtotal_col = formato_precio(subtotal).rjust(10)
         
         # Unir en una sola línea
         linea = f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}"
         ticket.append(linea)
 
-        # Si el nombre es más largo que 17, imprimir el resto abajo
-        if len(nombre) > 17:
-            resto_nombre = "  " + nombre[17:] # Indentado
-            # Truncar el resto al ancho del ticket
-            ticket.append(resto_nombre[:ANCHO_TICKET]) 
-    
-    # --- ¡FIN DE LA MODIFICACIÓN! ---
+        # Si el nombre es más largo que 15, imprimir el resto abajo
+        if len(nombre) > 15:
+            resto_nombre = "  " + nombre[15:]
+            ticket.append(resto_nombre[:ANCHO_TICKET])
     
     ticket.append(linea_separadora())
     ticket.append("\n")
@@ -158,7 +160,6 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     # ========================================
     # TOTAL
     # ========================================
-    # Esta función alinea el total a la derecha, lo cual está perfecto.
     ticket.append(justificar_texto("TOTAL:", formato_precio(total)))
     ticket.append(linea_separadora('='))
     ticket.append("\n")
@@ -171,66 +172,51 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append("\n")
     ticket.append(centrar_texto("Este ticket no es valido"))
     ticket.append(centrar_texto("como factura fiscal"))
-    ticket.append("\n\n\n")  # Espacio para cortar el ticket
+    ticket.append("\n\n\n")
     
     # Unir todas las líneas
     return '\n'.join(ticket)
 
+
 # =====================================
-# Funciones de Impresión
+# Funciones de Impresión (TU MEJORA)
 # =====================================
 def enviar_a_impresora(contenido):
     """
-    Envía el contenido a la impresora térmica
-    
-    Args:
-        contenido: String con el contenido a imprimir
+    Envía el contenido a la impresora térmica con manejo robusto de codificación.
     """
     try:
-        # Obtener impresora por defecto o la configurada
         impresora = obtener_impresora()
         
         if not impresora:
             print(f"⚠️  No se encontró impresora '{NOMBRE_IMPRESORA}' ni una por defecto.")
-            # Guardar en archivo como alternativa
             guardar_ticket_txt(contenido)
             return
         
-        # Método 1: Usando win32print (Recomendado para Windows)
         imprimir_con_win32(contenido, impresora)
         
     except Exception as e:
         print(f"❌ Error al enviar a impresora: {e}")
-        # Alternativa: guardar en archivo
         guardar_ticket_txt(contenido)
 
 def imprimir_con_win32(contenido, impresora):
     """
-    Imprime usando la API de Windows (win32print)
-    
-    Requiere: pip install pywin32
+    Imprime usando la API de Windows (win32print) con manejo robusto de codificación.
     """
     try:
-        # Abrir impresora
         hPrinter = win32print.OpenPrinter(impresora)
-        
         try:
-            # Iniciar documento
             hJob = win32print.StartDocPrinter(hPrinter, 1, ("Ticket", None, "RAW"))
-            
             try:
                 win32print.StartPagePrinter(hPrinter)
                 
-                # Enviar contenido
-                # Usar 'cp850' es común para tickets para caracteres latinos como 'ñ'
-                contenido_bytes = contenido.encode('cp850', errors='replace')
+                # ¡TU MEJORA!
+                contenido_bytes = codificar_para_impresora(contenido)
                 win32print.WritePrinter(hPrinter, contenido_bytes)
                 
                 win32print.EndPagePrinter(hPrinter)
-                
             finally:
                 win32print.EndDocPrinter(hPrinter)
-                
         finally:
             win32print.ClosePrinter(hPrinter)
         
@@ -240,13 +226,40 @@ def imprimir_con_win32(contenido, impresora):
         print(f"❌ Error en win32print: {e}")
         raise
 
+
+def codificar_para_impresora(contenido: str) -> bytes:
+    """
+    Codifica el contenido del ticket con el mejor encoding disponible.
+    (Esta es tu excelente función)
+    """
+    encodings = [
+        ('cp850', 'strict'),   # Mejor para español (tiene ñ, á, é, etc.)
+        ('cp437', 'replace'),  # Común en impresoras térmicas
+        ('latin-1', 'replace'),# ISO-8859-1
+        ('utf-8', 'replace')   # Último recurso
+    ]
+    
+    for encoding, error_mode in encodings:
+        try:
+            contenido_bytes = contenido.encode(encoding, errors=error_mode)
+            print(f"✅ Codificación exitosa: {encoding}")
+            return contenido_bytes
+        except UnicodeEncodeError:
+            print(f"⚠️  Encoding {encoding} falló, probando siguiente...")
+            continue
+    
+    print("⚠️  Usando codificación de emergencia: cp850 con reemplazo de caracteres")
+    return contenido.encode('cp850', errors='replace')
+
+
+# =====================================
+# Funciones de Soporte
+# =====================================
 def guardar_ticket_txt(contenido):
     """
     Guarda el ticket en un archivo .txt como alternativa
-    Útil para pruebas o cuando no hay impresora
     """
     try:
-        # Crear carpeta si no existe
         if not os.path.exists('tickets'):
             os.makedirs('tickets')
         
@@ -265,26 +278,17 @@ def guardar_ticket_txt(contenido):
         print(f"❌ Error al guardar ticket: {e}")
         return None
 
-# =====================================
-# Funciones de Configuración
-# =====================================
 def obtener_impresora():
     """
     Obtiene el nombre de la impresora a usar
-    
-    Returns:
-        Nombre de la impresora o None si no se encuentra
     """
     try:
-        # Intentar usar la impresora configurada
-        impresoras = win32print.EnumPrinters(2) # Nivel 2 da detalles
+        impresoras = win32print.EnumPrinters(2) 
         nombres_impresoras = [imp[2] for imp in impresoras]
         
-        # Buscar la impresora configurada
         if NOMBRE_IMPRESORA in nombres_impresoras:
             return NOMBRE_IMPRESORA
         
-        # Si no existe, usar la impresora por defecto
         print(f"⚠️  Advertencia: No se encontró la impresora '{NOMBRE_IMPRESORA}'.")
         impresora_default = win32print.GetDefaultPrinter()
         print(f"    Usando la impresora por defecto: {impresora_default}")
@@ -297,7 +301,6 @@ def obtener_impresora():
 def listar_impresoras():
     """
     Lista todas las impresoras disponibles en Windows
-    Útil para saber el nombre exacto de tu impresora
     """
     try:
         impresoras = win32print.EnumPrinters(2)
@@ -330,31 +333,29 @@ def imprimir_ticket_prueba():
     ticket.append(centrar_texto("SUPERMERCADO DON ATILIO"))
     ticket.append(linea_separadora())
     ticket.append("\n")
-    ticket.append("Si puedes leer esto,")
-    ticket.append("la impresora funciona correctamente!")
+    ticket.append("Si puedes leer esto, ¡funciona!")
+    ticket.append("Prueba de caracteres: ñ Ñ á é í ó ú $")
     ticket.append("\n")
-    ticket.append(centrar_texto("Con el formato de 4 columnas:"))
     
     # --- Prueba del nuevo formato ---
-    head_prod = "PRODUCTO".ljust(17)
-    head_cant = "CANT".rjust(4)
-    head_punit = "P.UNIT".rjust(9)
-    head_subt = "SUBTOTAL".rjust(9)
+    head_prod = "PRODUCTO".ljust(15)
+    head_cant = "CANT".rjust(6)
+    head_punit = "P.UNIT".rjust(8)
+    head_subt = "SUBTOTAL".rjust(10)
     ticket.append(f"\n{head_prod} {head_cant} {head_punit} {head_subt}")
     ticket.append(linea_separadora('.'))
-    # Item 1
-    nombre_col = "Producto A".ljust(17)
-    cantidad_col = "1".rjust(4)
-    p_unit_col = "$100.00".rjust(9)
-    subtotal_col = "$100.00".rjust(9)
+    # Item 1 (Entero)
+    nombre_col = "Producto A".ljust(15)
+    cantidad_col = "2".rjust(6)
+    p_unit_col = "$100.00".rjust(8)
+    subtotal_col = "$200.00".rjust(10)
     ticket.append(f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}")
-    # Item 2 (nombre largo)
-    nombre_col = "Producto B Nombre".ljust(17)
-    cantidad_col = "10".rjust(4)
-    p_unit_col = "$25.00".rjust(9)
-    subtotal_col = "$250.00".rjust(9)
+    # Item 2 (Pesable)
+    nombre_col = "Producto Pesable".ljust(15)
+    cantidad_col = "1.250".rjust(6)
+    p_unit_col = "$100.00".rjust(8)
+    subtotal_col = "$125.00".rjust(10)
     ticket.append(f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}")
-    ticket.append("  Largo que continua") # Prueba de nombre largo
     ticket.append(linea_separadora('.'))
     # --- Fin Prueba ---
     
@@ -370,4 +371,3 @@ def imprimir_ticket_prueba():
         print("✅ Ticket de prueba enviado")
     except Exception as e:
         print(f"❌ Error: {e}")
-

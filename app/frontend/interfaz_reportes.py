@@ -3,14 +3,19 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Any, Optional
-from datetime import date, datetime, timedelta # Importar datetime y timedelta
+from datetime import date, datetime, timedelta 
 import logging
+
+try:
+    from app.frontend.interfaz_historiales import ui_historiales
+except ImportError:
+    ui_historiales = None
+    print("Advertencia: No se pudo importar 'ui_historiales' para el drill-down.")
 
 logger = logging.getLogger(__name__)
 
 # --- Helper de formato de fecha ---
 def _formatear_fecha_para_sql(fecha_str: str) -> str | None:
-    """Convierte DD/MM/YYYY a YYYY-MM-DD. Devuelve None si es inválida."""
     if not fecha_str:
         return None
     try:
@@ -19,28 +24,27 @@ def _formatear_fecha_para_sql(fecha_str: str) -> str | None:
     except ValueError:
         return None 
 
-# --- ¡NUEVO! Helper para mostrar fecha en la tabla ---
 def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
-    """Convierte AAAA-MM-DD HH:MM:SS a DD/MM/AAAA HH:MM"""
     if not fecha_sql:
         return ""
     try:
-        # (Convertimos a string primero por si viene como obj datetime)
         fecha_obj = datetime.fromisoformat(str(fecha_sql)) 
         return fecha_obj.strftime("%d/%m/%Y %H:%M")
     except Exception:
-        return str(fecha_sql) # Fallback
+        return str(fecha_sql)
 
-def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usuario'
+def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
     win = tk.Toplevel(parent)
-    win.title("🧾 Reportes - Supermercado Don Atilio")
+    # --- ¡MODIFICACIÓN! Título cambiado ---
+    win.title("🧾 Generador de Totales")
     win.geometry("980x620")
     win.configure(bg="#f4f4f8")
     win.resizable(True, True)
 
     header = tk.Frame(win, bg="#2e9e44", height=60)
     header.pack(fill=tk.X)
-    tk.Label(header, text="Generador de Reportes", bg="#2e9e44", fg="white",
+    # --- ¡MODIFICACIÓN! Texto del cabezal cambiado ---
+    tk.Label(header, text="Generador de Totales", bg="#2e9e44", fg="white",
              font=("Helvetica", 16, "bold")).pack(pady=12)
 
     body = tk.Frame(win, bg="#f4f4f8")
@@ -56,12 +60,11 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
     cb_tipo.grid(row=0, column=1, columnspan=2, sticky="w")
     cb_tipo.current(0)
 
-    # --- ¡NUEVO! Desplegable de Períodos ---
     tk.Label(frm, text="Período:", bg="#f4f4f8").grid(row=1, column=0, sticky="e", padx=6, pady=4)
     periodos = ["Personalizado", "Hoy", "Ayer", "Esta semana", "Este mes", "Mes pasado"]
     cb_periodo = ttk.Combobox(frm, state="readonly", width=20, values=periodos)
     cb_periodo.grid(row=1, column=1, sticky="w")
-    cb_periodo.current(0) # Default "Personalizado"
+    cb_periodo.current(0) 
 
     tk.Label(frm, text="Desde (DD/MM/YYYY):", bg="#f4f4f8").grid(row=2, column=0, sticky="e", padx=6, pady=4)
     ent_desde = tk.Entry(frm, width=14); ent_desde.grid(row=2, column=1, sticky="w")
@@ -91,12 +94,9 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
 
     ttk.Button(frm, text="↻", width=3, command=load_vendedores).grid(row=0, column=4, padx=4)
     
-    # --- ¡NUEVO! Función para actualizar fechas ---
     def on_periodo_seleccionado(event=None):
         periodo = cb_periodo.get()
-        hoy = date.today()
         
-        # Habilitar/Deshabilitar entradas
         if periodo == "Personalizado":
             ent_desde.config(state="normal")
             ent_hasta.config(state="normal")
@@ -105,7 +105,8 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
             ent_desde.config(state="normal")
             ent_hasta.config(state="normal")
             
-        desde, hasta = hoy, hoy # Default
+        hoy = date.today()
+        desde, hasta = hoy, hoy 
 
         if periodo == "Hoy":
             desde, hasta = hoy, hoy
@@ -113,13 +114,11 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
             ayer = hoy - timedelta(days=1)
             desde, hasta = ayer, ayer
         elif periodo == "Esta semana":
-            # Lunes es weekday() 0, Domingo es 6
             inicio_semana = hoy - timedelta(days=hoy.weekday())
             fin_semana = inicio_semana + timedelta(days=6)
             desde, hasta = inicio_semana, fin_semana
         elif periodo == "Este mes":
             inicio_mes = hoy.replace(day=1)
-            # Ir al primer día del siguiente mes y restar 1 día
             siguiente_mes = (inicio_mes + timedelta(days=32)).replace(day=1)
             fin_mes = siguiente_mes - timedelta(days=1)
             desde, hasta = inicio_mes, fin_mes
@@ -128,21 +127,20 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
             inicio_mes_pasado = fin_mes_pasado.replace(day=1)
             desde, hasta = inicio_mes_pasado, fin_mes_pasado
         
-        # Actualizar campos
         ent_desde.delete(0, tk.END); ent_desde.insert(0, desde.strftime("%d/%m/%Y"))
         ent_hasta.delete(0, tk.END); ent_hasta.insert(0, hasta.strftime("%d/%m/%Y"))
         
-        # Deshabilitar para que no se editen
         ent_desde.config(state="readonly")
         ent_hasta.config(state="readonly")
 
     cb_periodo.bind("<<ComboboxSelected>>", on_periodo_seleccionado)
 
-
     # -------- Tabla
     table_frame = tk.Frame(body, bg="#f4f4f8")
     table_frame.pack(fill=tk.BOTH, expand=True, pady=10)
     tree: ttk.Treeview
+
+    default_cols = [("Vendedor", 200), ("Cant. Ventas", 110), ("Monto Total", 120)]
 
     def setup_tree(cols: list[tuple[str, int]]):
         nonlocal tree
@@ -162,7 +160,7 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
             tree.heading(name, text=name)
             tree.column(name, width=width, anchor="w")
 
-    setup_tree([("Fecha", 140), ("ID Venta", 90), ("Vendedor", 180), ("Total", 120)])
+    setup_tree(default_cols) 
 
     # -------- Acciones
     btns = tk.Frame(body, bg="#f4f4f8"); btns.pack(fill=tk.X)
@@ -193,6 +191,34 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
         except Exception:
             return str(x)
 
+    def on_doble_clic_reporte(event=None):
+        if cb_tipo.get() != "Ventas diarias":
+            return 
+        
+        seleccion = tree.selection()
+        if not seleccion:
+            return
+            
+        item = tree.item(seleccion[0], "values")
+        fecha_seleccionada = item[0] 
+        
+        if not fecha_seleccionada or fecha_seleccionada == "Sin datos":
+            return
+            
+        if not callable(ui_historiales):
+            messagebox.showerror("Error", "No se pudo abrir 'Historiales' (archivo no encontrado).", parent=win)
+            return
+        
+        try:
+            ui_historiales(
+                parent=win, 
+                backend=backend, 
+                usuario=usuario, 
+                filtro_fecha=fecha_seleccionada
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el historial:\n{e}", parent=win)
+
     def generar():
         try:
             rango = _validar_fechas_sql()
@@ -201,34 +227,45 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
             
             tipo = cb_tipo.get()
             
+            tree.unbind("<Double-1>") 
+            
             if tipo == "Ventas por vendedor":
-                setup_tree([("Fecha", 140), ("ID Venta", 90), ("Vendedor", 180), ("Total", 120)])
+                cols = [("Vendedor", 200), ("Cant. Ventas", 110), ("Monto Total", 120)]
+                setup_tree(cols)
+                
                 vid = _vendedor_id_sel()
                 datos = backend.reporte_ventas_por_vendedor(desde_sql, hasta_sql, vid)
+                
                 tree.delete(*tree.get_children())
                 if not datos:
-                    tree.insert("", "end", values=("Sin datos", "", "", "")); return
+                    tree.insert("", "end", values=("Sin datos", "", "")); return
+                
                 for r in datos:
                     tree.insert("", "end", values=(
-                        _formatear_fecha_para_ui(r.get("fecha")), # <-- ¡CORREGIDO!
-                        r.get("id_venta") or "",
-                        r.get("vendedor") or "",
-                        _fmt_mon(r.get("total") or 0),
+                        r.get("vendedor") or "N/A",
+                        r.get("total_ventas") or 0,
+                        _fmt_mon(r.get("monto_total") or 0),
                     ))
+            
             else: # Ventas diarias
-                setup_tree([("Fecha (Día)", 140), ("Cant. Ventas", 110), ("Monto Total", 120)])
+                cols = [("Fecha (Día)", 140), ("Cant. Ventas", 110), ("Monto Total", 120)]
+                setup_tree(cols)
+                
                 datos = backend.obtener_ventas_diarias(desde_sql, hasta_sql)
                 tree.delete(*tree.get_children())
                 if not datos:
                     tree.insert("", "end", values=("Sin datos", "", "")); return
+                
                 for r in datos:
-                    # Formatear solo la fecha, ya que viene como 'DATE'
                     fecha_dia = datetime.strptime(str(r.get("fecha")), "%Y-%m-%d").strftime("%d/%m/%Y")
                     tree.insert("", "end", values=(
-                        fecha_dia, # <-- ¡CORREGIDO!
+                        fecha_dia,
                         r.get("total_ventas") or r.get("Cant. Ventas") or 0,
                         _fmt_mon(r.get("monto_total") or 0),
                     ))
+                
+                tree.bind("<Double-1>", on_doble_clic_reporte)
+            
         except Exception as e:
             logger.exception("generar()")
             messagebox.showerror("Error", f"No se pudo generar el reporte:\n{e}")
@@ -238,14 +275,21 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None: #Añadido 'usu
     def on_tipo_changed(_evt=None):
         is_vend = cb_tipo.get() == "Ventas por vendedor"
         cb_vendedor.configure(state=("readonly" if is_vend else "disabled"))
+        
+        tree.delete(*tree.get_children()) 
+        
+        if is_vend:
+            setup_tree([("Vendedor", 200), ("Cant. Ventas", 110), ("Monto Total", 120)])
+        else:
+            setup_tree([("Fecha (Día)", 140), ("Cant. Ventas", 110), ("Monto Total", 120)])
 
     cb_tipo.bind("<<ComboboxSelected>>", on_tipo_changed)
 
     # Init
     load_vendedores()
     on_tipo_changed()
-    on_periodo_seleccionado() # Para setear el default "Hoy"
-    cb_periodo.current(0) # Lo volvemos a "Personalizado"
-    on_periodo_seleccionado() # Para que active los campos
+    on_periodo_seleccionado() 
+    cb_periodo.current(0) 
+    on_periodo_seleccionado() 
     
     win.grab_set()

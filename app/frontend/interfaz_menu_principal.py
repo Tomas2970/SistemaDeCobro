@@ -8,10 +8,8 @@ logger = logging.getLogger(__name__)
 
 # --- ¡Importa la lógica de permisos! ---
 try:
-    # (Buscamos el archivo en app/permisos.py)
     from app.database.permisos import tiene_permiso 
 except ImportError:
-    # (Si falla, probamos en app/database/permisos.py)
     try:
         from app.database.permisos import tiene_permiso
     except ImportError:
@@ -104,12 +102,15 @@ def _configurar_estilos(root: tk.Tk):
     style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"),
                     padding=(10, 6), foreground="white", background=danger)
     style.map("Danger.TButton", background=[("active", "#dc2626")])
+    
+    style.configure("StockAlert.TLabel", font=("Segoe UI", 9, "bold"), 
+                    foreground="#d97706", background="#f4f4f8")
 
 
 def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     
     try:
-        root.state('zoomed') # Inicia maximizado
+        root.state('zoomed') 
     except tk.TclError:
         root.geometry("1024x768") 
             
@@ -150,8 +151,9 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
          "Menu.TButton", 
          'registrar_compras'),
          
-        ("🧾 Reportes", 
-         lambda: _abrir_seguro(root, backend, usuario, ui_reportes, "Reportes"), 
+        # --- ¡MODIFICACIÓN! Texto del botón cambiado ---
+        ("📊 Generador de Totales", 
+         lambda: _abrir_seguro(root, backend, usuario, ui_reportes, "Generador de Totales"), 
          "Menu.TButton", 
          'ver_reportes'),
          
@@ -176,17 +178,38 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
          'ver_usuarios'),
     ]
 
-    for i, (text, cmd, sty, permiso) in enumerate(botones_config):
-        r, c = divmod(i, 2)
+    fila_actual = 0
+    col_actual = 0
+    max_cols = 2 
+    
+    for (text, cmd, sty, permiso) in botones_config:
         
-        estado_btn = "normal" if tiene_permiso(usuario, permiso) else "disabled"
+        if not tiene_permiso(usuario, permiso):
+            continue 
+            
+        btn = ttk.Button(cont, text=text, style=sty, command=cmd, width=28)
+        btn.grid(row=fila_actual, column=col_actual, padx=20, pady=15)
         
-        btn = ttk.Button(cont, text=text, style=sty, command=cmd, width=28, state=estado_btn)
-        btn.grid(row=r, column=c, padx=20, pady=15)
+        col_actual += 1
+        if col_actual >= max_cols:
+            col_actual = 0
+            fila_actual += 1
 
-    # Cerrar sesión (Vuelve al login)
-    ttk.Button(root, text="⛔ Cerrar sesión", style="Danger.TButton",
-               command=root.destroy).pack(pady=20)
+    # Footer para alertas y cerrar sesión
+    footer = tk.Frame(root, bg="#f4f4f8")
+    footer.pack(fill=tk.X, side=tk.BOTTOM, pady=10)
+
+    try:
+        if hasattr(backend, "obtener_stock_bajo"):
+            stock_bajo = backend.obtener_stock_bajo()
+            if stock_bajo and len(stock_bajo) > 0:
+                ttk.Label(footer, text=f"⚠️ ¡Atención! {len(stock_bajo)} producto(s) se encuentran por debajo del stock mínimo.", 
+                          style="StockAlert.TLabel").pack(pady=4)
+    except Exception as e:
+        logger.warning(f"No se pudo verificar el stock bajo al iniciar: {e}")
+
+    ttk.Button(footer, text="⛔ Cerrar sesión", style="Danger.TButton",
+               command=root.destroy).pack(pady=10)
 
 
 # Alias compat para mains antiguos

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-import logging
+import logging # ¡CAMBIO! Mantenemos el import
 from typing import Any, Optional
 
 import bcrypt
@@ -10,6 +10,8 @@ import mysql.connector
 from mysql.connector.connection import MySQLConnection
 from dotenv import load_dotenv
 
+# (Configuración y Conexión sin cambios)
+# ...
 # ------------------------------------------------------
 # Configuración y logger
 # ------------------------------------------------------
@@ -21,14 +23,19 @@ DB_USER = os.getenv("DB_USER", "root")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "tomas")
 DB_NAME = os.getenv("DB_NAME", "supermercado_don_atilio")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+# --- ¡CAMBIO! ---
+# logging.basicConfig(...) # Se elimina esta línea
+logger = logging.getLogger(__name__) # Obtenemos el logger configurado en main.py
+# --- FIN CAMBIO ---
 
 
 # ------------------------------------------------------
 # Conexión
 # ------------------------------------------------------
 def conectar() -> MySQLConnection:
+    # --- ¡CAMBIO! Añadimos charset y collation ---
+    # Esto asegura que la conexión respete el 'utf8mb4_unicode_ci' 
+    # de tu base de datos, lo cual maneja acentos y mayúsculas.
     return mysql.connector.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -36,8 +43,10 @@ def conectar() -> MySQLConnection:
         password=DB_PASSWORD,
         database=DB_NAME,
         autocommit=False,
+        charset="utf8mb4",
+        collation="utf8mb4_unicode_ci"
     )
-
+    # --- FIN CAMBIO ---
 
 # ======================================================
 # AUTENTICACIÓN
@@ -67,19 +76,16 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
             if conn: conn.close()
         except Exception:
             pass
-
-
 # ======================================================
 # CLIENTES
 # ======================================================
-def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: str = "", email: str = "") -> Optional[int]:
+def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: str = "", email: str = "", limite_credito: float = 50000.00) -> Optional[int]:
     if not nombre.strip():
         raise ValueError("El nombre del cliente es obligatorio.")
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor()
-        # Convierte strings vacíos "" a None (NULL) para la BD (Arregla chk_1)
         cur.execute(
             "INSERT INTO Cliente (nombre, dni, direccion, telefono, email) VALUES (%s,%s,%s,%s,%s)",
             (
@@ -93,10 +99,16 @@ def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: 
         
         nuevo_id_cliente = cur.lastrowid
         
-        # ✅ NUEVO: Crear cuenta corriente automáticamente para el cliente
+        try:
+            limite_valido = float(limite_credito)
+            if limite_valido < 0:
+                limite_valido = 50000.00
+        except (ValueError, TypeError):
+            limite_valido = 50000.00
+            
         cur.execute(
-            "INSERT IGNORE INTO CuentaCorriente (id_cliente, saldo, limite_credito) VALUES (%s, 0.00, 50000.00)",
-            (nuevo_id_cliente,)
+            "INSERT IGNORE INTO CuentaCorriente (id_cliente, saldo, limite_credito) VALUES (%s, 0.00, %s)",
+            (nuevo_id_cliente, limite_valido)
         )
         
         conn.commit()
@@ -105,7 +117,7 @@ def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: 
     except mysql.connector.IntegrityError as e:
         logger.warning(f"insertar_cliente (IntegrityError): {e}")
         if conn: conn.rollback()
-        return None # Devuelve None si el DNI o email ya existe
+        return None
     except Exception as e:
         if conn:
             try: conn.rollback()
@@ -119,6 +131,61 @@ def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: 
         except Exception:
             pass
 
+def actualizar_cliente_completo(id_cliente: int, nombre: str, dni: str, direccion: str, telefono: str, email: str, limite_credito: float) -> bool:
+    if not nombre.strip():
+        raise ValueError("El nombre del cliente es obligatorio.")
+    
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        
+        conn.start_transaction()
+        
+        cur.execute(
+            """
+            UPDATE Cliente 
+            SET nombre=%s, dni=%s, direccion=%s, telefono=%s, email=%s
+            WHERE id_cliente=%s
+            """,
+            (
+                nombre.strip(),
+                dni.strip() or None,
+                direccion.strip() or None,
+                telefono.strip() or None,
+                email.strip() or None,
+                id_cliente
+            )
+        )
+        
+        cur.execute(
+            """
+            UPDATE CuentaCorriente
+            SET limite_credito=%s
+            WHERE id_cliente=%s
+            """,
+            (float(limite_credito), id_cliente)
+        )
+        
+        conn.commit()
+        return True
+        
+    except mysql.connector.IntegrityError as e:
+        logger.warning(f"actualizar_cliente_completo (IntegrityError): {e}")
+        if conn: conn.rollback()
+        return False
+    except Exception as e:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error(f"actualizar_cliente_completo: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
 
 def obtener_clientes(incluir_inactivos: bool = False) -> list[dict]:
     conn = cur = None
@@ -141,17 +208,77 @@ def obtener_clientes(incluir_inactivos: bool = False) -> list[dict]:
         except Exception:
             pass
 
+def obtener_clientes_con_saldos(incluir_inactivos: bool = False) -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        sql = """
+            SELECT 
+                c.id_cliente, c.nombre, c.dni, c.direccion, c.telefono, c.email, c.activo,
+                cc.saldo, 
+                cc.limite_credito
+            FROM Cliente c
+            LEFT JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
+        """
+        if not incluir_inactivos:
+            sql += " WHERE c.activo=1"
+        sql += " ORDER BY c.nombre"
+        cur.execute(sql)
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_clientes_con_saldos: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def obtener_cliente_completo(id_cliente: int) -> Optional[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT 
+                c.id_cliente, c.nombre, c.dni, c.direccion, c.telefono, c.email,
+                cc.limite_credito
+            FROM Cliente c
+            LEFT JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
+            WHERE c.id_cliente = %s
+            """,
+            (id_cliente,)
+        )
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"obtener_cliente_completo: {e}")
+        return None
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
 
 def buscar_cliente_por_nombre(patron: str) -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
+        
+        # --- ¡CAMBIO! Usamos LOWER() en ambos lados ---
+        # La 'collation' de la conexión ya maneja acentos.
         like = f"%{patron}%"
         cur.execute(
-            "SELECT id_cliente, nombre, dni, direccion, telefono, email FROM Cliente WHERE nombre LIKE %s AND activo=1 ORDER BY nombre",
+            "SELECT id_cliente, nombre, dni, direccion, telefono, email FROM Cliente WHERE LOWER(nombre) LIKE LOWER(%s) AND activo=1 ORDER BY nombre",
             (like,),
         )
+        # --- FIN CAMBIO ---
+        
         return list(cur.fetchall() or [])
     except Exception as e:
         logger.error(f"buscar_cliente_por_nombre: {e}")
@@ -184,7 +311,6 @@ def buscar_cliente_por_dni(dni: str) -> Optional[dict]:
             pass
 
 def eliminar_cliente_logico(id_cliente: int) -> bool:
-    """Desactiva un cliente (baja lógica)."""
     conn = cur = None
     try:
         conn = conectar()
@@ -230,8 +356,7 @@ def obtener_categorias() -> list[dict]:
 # ======================================================
 # PRODUCTOS / INVENTARIO
 # ======================================================
-def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int]) -> Optional[int]:
-    """Crea producto + Inventario(0, stock_minimo=5)."""
+def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int], es_pesable: bool = False) -> Optional[int]:
     if not nombre.strip():
         raise ValueError("El nombre del producto es obligatorio.")
     conn = cur = None
@@ -239,11 +364,11 @@ def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int]) -
         conn = conectar()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO Producto (nombre, precio, id_categoria) VALUES (%s,%s,%s)",
-            (nombre.strip(), float(precio), id_categoria),
+            "INSERT INTO Producto (nombre, precio, id_categoria, es_pesable) VALUES (%s, %s, %s, %s)",
+            (nombre.strip(), float(precio), id_categoria, bool(es_pesable)),
         )
         pid = cur.lastrowid
-        cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s,%s,%s)", (pid, 0, 5))
+        cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s, %s, %s)", (pid, 0.000, 5))
         conn.commit()
         return pid
     except Exception as e:
@@ -261,10 +386,9 @@ def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int]) -
 
 
 def crear_producto_completo(
-    nombre: str, precio: float, id_categoria: Optional[int], stock_inicial: int, stock_minimo: int
+    nombre: str, precio: float, id_categoria: Optional[int], stock_inicial: float, stock_minimo: int, es_pesable: bool = False
 ) -> Optional[int]:
-    """Alta + inventario inicial + stock_minimo."""
-    pid = insertar_producto(nombre, precio, id_categoria)
+    pid = insertar_producto(nombre, precio, id_categoria, es_pesable)
     if not pid:
         return None
     conn = cur = None
@@ -273,7 +397,7 @@ def crear_producto_completo(
         cur = conn.cursor()
         cur.execute("UPDATE Inventario SET stock_minimo=%s WHERE id_producto=%s", (int(stock_minimo), pid))
         if stock_inicial:
-            cur.execute("UPDATE Inventario SET cantidad=cantidad+%s WHERE id_producto=%s", (int(stock_inicial), pid))
+            cur.execute("UPDATE Inventario SET cantidad=cantidad+%s WHERE id_producto=%s", (float(stock_inicial), pid))
         conn.commit()
     except Exception as e:
         if conn:
@@ -289,32 +413,40 @@ def crear_producto_completo(
     return pid
 
 
-def _select_producto_join() -> str:
-    # --- FILTRA POR p.activo = 1 ---
+def _select_producto_campos() -> str:
     return """
         SELECT
-            p.id_producto, p.nombre, p.precio, p.codigo_barras, p.id_categoria,
+            p.id_producto, p.nombre, p.precio, p.es_pesable, 
+            p.codigo_barras, p.id_categoria,
             c.nombre AS nombre_categoria,
-            COALESCE(i.cantidad, 0) AS stock,
+            COALESCE(i.cantidad, 0.000) AS stock,
             COALESCE(i.stock_minimo, 0) AS stock_minimo
+    """
+
+def _select_producto_joins() -> str:
+    return """
         FROM Producto p
         LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
         LEFT JOIN Inventario i ON p.id_producto = i.id_producto
-        WHERE p.activo = 1
     """
-
 
 def buscar_producto_por_nombre(patron: str) -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        base_sql = _select_producto_join()
+        
+        base_sql = _select_producto_campos() + _select_producto_joins() + " WHERE p.activo = 1"
+        
         if not patron:
             cur.execute(base_sql + " ORDER BY p.id_producto")
             return list(cur.fetchall() or [])
+            
+        # --- ¡CAMBIO! Usamos LOWER() en ambos lados ---
         like = f"%{patron}%"
-        cur.execute(base_sql + " AND p.nombre LIKE %s ORDER BY p.nombre", (like,))
+        cur.execute(base_sql + " AND LOWER(p.nombre) LIKE LOWER(%s) ORDER BY p.nombre", (like,))
+        # --- FIN CAMBIO ---
+        
         return list(cur.fetchall() or [])
     except Exception as e:
         logger.error(f"buscar_producto_por_nombre: {e}")
@@ -332,10 +464,29 @@ def buscar_producto_por_codigo_barras(codigo: str) -> Optional[dict]:
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute(_select_producto_join() + " AND p.codigo_barras = %s", (codigo,))
+        sql = _select_producto_campos() + _select_producto_joins() + " WHERE p.activo = 1 AND p.codigo_barras = %s"
+        cur.execute(sql, (codigo,))
         return cur.fetchone()
     except Exception as e:
         logger.error(f"buscar_producto_por_codigo_barras: {e}")
+        return None
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def buscar_producto_por_id(id_producto: int) -> Optional[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        sql = _select_producto_campos() + _select_producto_joins() + " WHERE p.activo = 1 AND p.id_producto = %s"
+        cur.execute(sql, (id_producto,))
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"buscar_producto_por_id: {e}")
         return None
     finally:
         try:
@@ -353,17 +504,17 @@ def obtener_inventario() -> list[dict]:
     return buscar_producto_por_nombre("")
 
 
-def obtener_stock_por_producto(id_producto: int) -> int:
+def obtener_stock_por_producto(id_producto: int) -> float:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor()
         cur.execute("SELECT cantidad FROM Inventario WHERE id_producto = %s", (id_producto,))
         row = cur.fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
+        return float(row[0]) if row and row[0] is not None else 0.0
     except Exception as e:
         logger.error(f"obtener_stock_por_producto: {e}")
-        return 0
+        return 0.0
     finally:
         try:
             if cur: cur.close()
@@ -413,8 +564,7 @@ def actualizar_stock_minimo(id_producto: int, stock_minimo: int) -> bool:
             pass
 
 
-def actualizar_inventario_absoluto(id_producto: int, cantidad_abs: int, stock_minimo: Optional[int] = None) -> bool:
-    """Setea cantidad absoluta y, opcionalmente, stock_minimo en una sola transacción."""
+def actualizar_inventario_absoluto(id_producto: int, cantidad_abs: float, stock_minimo: Optional[int] = None) -> bool:
     conn = cur = None
     try:
         conn = conectar()
@@ -422,14 +572,14 @@ def actualizar_inventario_absoluto(id_producto: int, cantidad_abs: int, stock_mi
         cur.execute("SELECT 1 FROM Inventario WHERE id_producto=%s", (id_producto,))
         if not cur.fetchone():
             cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s,%s,%s)",
-                        (id_producto, 0, int(stock_minimo) if stock_minimo is not None else 5))
+                        (id_producto, 0.000, int(stock_minimo) if stock_minimo is not None else 5))
         if stock_minimo is not None:
             cur.execute(
                 "UPDATE Inventario SET cantidad=%s, stock_minimo=%s WHERE id_producto=%s",
-                (int(cantidad_abs), int(stock_minimo), id_producto),
+                (float(cantidad_abs), int(stock_minimo), id_producto),
             )
         else:
-            cur.execute("UPDATE Inventario SET cantidad=%s WHERE id_producto=%s", (int(cantidad_abs), id_producto))
+            cur.execute("UPDATE Inventario SET cantidad=%s WHERE id_producto=%s", (float(cantidad_abs), id_producto))
         conn.commit()
         return True
     except Exception as e:
@@ -452,6 +602,7 @@ def actualizar_producto(
     precio: Optional[float] = None,
     id_categoria: Optional[int] = None,
     codigo_barras: Optional[str] = None,
+    es_pesable: Optional[bool] = None 
 ) -> bool:
     campos: list[str] = []
     params: list[Any] = []
@@ -464,6 +615,8 @@ def actualizar_producto(
         campos.append("id_categoria=%s"); params.append(id_categoria)
     if codigo_barras is not None:
         campos.append("codigo_barras=%s"); params.append(codigo_barras or None)
+    if es_pesable is not None:
+        campos.append("es_pesable=%s"); params.append(bool(es_pesable))
 
     if not campos:
         return True
@@ -498,16 +651,16 @@ def actualizar_producto(
             pass
 
 
-def actualizar_stock(id_producto: int, delta: int, *_compat) -> bool:
-    if not isinstance(delta, int):
-        raise ValueError("delta debe ser int")
+def actualizar_stock(id_producto: int, delta: float, *_compat) -> bool:
+    if not isinstance(delta, (int, float)):
+        raise ValueError("delta debe ser int o float")
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor()
         cur.execute("SELECT 1 FROM Inventario WHERE id_producto=%s", (id_producto,))
         if not cur.fetchone():
-            cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s,%s,%s)", (id_producto, 0, 5))
+            cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s,%s,%s)", (id_producto, 0.000, 5))
         cur.execute("UPDATE Inventario SET cantidad = GREATEST(cantidad + %s, 0) WHERE id_producto=%s", (delta, id_producto))
         conn.commit()
         return cur.rowcount > 0
@@ -526,7 +679,6 @@ def actualizar_stock(id_producto: int, delta: int, *_compat) -> bool:
 
 
 def eliminar_producto(id_producto: int) -> bool:
-    """Baja lógica: setea activo=FALSE en Producto."""
     conn = cur = None
     try:
         conn = conectar()
@@ -550,37 +702,33 @@ def eliminar_producto(id_producto: int) -> bool:
 
 
 def obtener_stock_bajo() -> list[dict]:
-    """
-    Productos con cantidad <= stock_minimo.
-    Usa vista 'vista_stock_bajo' si existe; de lo contrario, hace la consulta equivalente.
-    """
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        # intentar vista
-        try:
-            cur.execute("SELECT * FROM vista_stock_bajo ORDER BY cantidad ASC")
-            rows = cur.fetchall()
-            if rows is not None:
-                return list(rows)
-        except Exception:
-            pass
-        # fallback
-        cur.execute(
-            """
-            SELECT
-              p.id_producto, p.nombre, p.precio,
-              c.nombre AS categoria,
-              i.cantidad, i.stock_minimo, (i.stock_minimo - i.cantidad) AS unidades_faltantes
-            FROM Producto p
-            JOIN Inventario i ON p.id_producto = i.id_producto
-            LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
-            WHERE i.cantidad <= i.stock_minimo AND p.activo = 1
-            ORDER BY i.cantidad ASC
-            """
-        )
-        return list(cur.fetchall() or [])
+        cur.execute("SELECT *, (stock_minimo - cantidad) AS unidades_faltantes FROM vista_stock_bajo ORDER BY unidades_faltantes DESC")
+        rows = cur.fetchall()
+        return list(rows or [])
+    except mysql.connector.Error as e:
+        if e.errno == 1146:
+            logger.warning("La vista 'vista_stock_bajo' no existe. Ejecutando consulta de fallback.")
+            cur.execute(
+                """
+                SELECT
+                  p.id_producto, p.nombre, p.precio, p.es_pesable,
+                  c.nombre AS categoria,
+                  i.cantidad, i.stock_minimo, (i.stock_minimo - i.cantidad) AS unidades_faltantes
+                FROM Producto p
+                JOIN Inventario i ON p.id_producto = i.id_producto
+                LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
+                WHERE i.cantidad <= i.stock_minimo AND p.activo = 1
+                ORDER BY i.cantidad ASC
+                """
+            )
+            return list(cur.fetchall() or [])
+        else:
+            logger.error(f"obtener_stock_bajo (vista): {e}")
+            return []
     except Exception as e:
         logger.error(f"obtener_stock_bajo: {e}")
         return []
@@ -596,6 +744,8 @@ def obtener_stock_bajo() -> list[dict]:
 # VENTAS (con snapshot en detalle)
 # ======================================================
 def insertar_venta(id_usuario: int, id_cliente: Optional[int]) -> Optional[int]:
+    # ¡Esta función está OBSOLETA! Se reemplaza por 'registrar_venta_completa'
+    logger.warning("Llamada a función obsoleta: insertar_venta")
     conn = cur = None
     try:
         conn = conectar()
@@ -620,24 +770,29 @@ def insertar_venta(id_usuario: int, id_cliente: Optional[int]) -> Optional[int]:
             pass
 
 
-def insertar_detalle_venta(id_venta: int, id_producto: int, cantidad: int, precio_unitario: float) -> bool:
+def insertar_detalle_venta(id_venta: int, id_producto: int, cantidad: float, precio_unitario: float) -> bool:
+    # ¡Esta función está OBSOLETA! Se reemplaza por 'registrar_venta_completa'
+    logger.warning("Llamada a función obsoleta: insertar_detalle_venta")
     if cantidad <= 0 or precio_unitario <= 0:
         raise ValueError("Cantidad y precio_unitario deben ser > 0")
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        # stock
-        cur.execute("SELECT cantidad FROM Inventario WHERE id_producto=%s", (id_producto,))
+        
+        # --- ¡CORRECCIÓN! Agregamos FOR UPDATE para bloquear ---
+        cur.execute("SELECT cantidad FROM Inventario WHERE id_producto=%s FOR UPDATE", (id_producto,))
         inv = cur.fetchone()
-        if not inv or int(inv["cantidad"]) < cantidad:
-            raise ValueError(f"Stock insuficiente (disp: {inv['cantidad'] if inv else 0}, req: {cantidad})")
-        # snapshot
+        stock_actual = float(inv["cantidad"]) if inv else 0.0
+        
+        if stock_actual < cantidad:
+            conn.rollback() # Liberar bloqueo
+            raise ValueError(f"Stock insuficiente (disp: {stock_actual:.3f}, req: {cantidad:.3f})")
+        
         cur.execute("SELECT nombre, codigo_barras FROM Producto WHERE id_producto=%s", (id_producto,))
         prod = cur.fetchone()
         if not prod:
             raise ValueError(f"Producto {id_producto} inexistente")
-        # insertar
         cur.execute(
             """
             INSERT INTO DetalleVenta (id_venta, id_producto, nombre_producto, codigo_barras, cantidad, precio_unitario)
@@ -645,7 +800,6 @@ def insertar_detalle_venta(id_venta: int, id_producto: int, cantidad: int, preci
             """,
             (id_venta, id_producto, prod["nombre"], prod["codigo_barras"], cantidad, precio_unitario),
         )
-        # descuenta
         cur.execute("UPDATE Inventario SET cantidad = cantidad - %s WHERE id_producto=%s", (cantidad, id_producto))
         conn.commit()
         return True
@@ -662,8 +816,9 @@ def insertar_detalle_venta(id_venta: int, id_producto: int, cantidad: int, preci
         except Exception:
             pass
 
-def insertar_detalle_venta_libre(id_venta: int, nombre_producto: str, cantidad: int, precio_unitario: float) -> bool:
-    """Inserta un item manual (sin ID) en DetalleVenta. NO toca stock."""
+def insertar_detalle_venta_libre(id_venta: int, nombre_producto: str, cantidad: float, precio_unitario: float) -> bool:
+    # ¡Esta función está OBSOLETA! Se reemplaza por 'registrar_venta_completa'
+    logger.warning("Llamada a función obsoleta: insertar_detalle_venta_libre")
     if cantidad <= 0 or precio_unitario <= 0:
         raise ValueError("Cantidad y precio_unitario deben ser > 0")
     conn = cur = None
@@ -694,10 +849,8 @@ def insertar_detalle_venta_libre(id_venta: int, nombre_producto: str, cantidad: 
 
 
 def actualizar_pago_y_estado_venta(id_venta: int, tipo_pago: str, estado: str = "completada") -> bool:
-    """
-    Actualiza el tipo de pago y el estado de una venta.
-    ¡Esto dispara el trigger 'trg_venta_au_cuentacorriente' si el tipo_pago es 'cuenta_corriente'!
-    """
+    # ¡Esta función está OBSOLETA! Se reemplaza por 'registrar_venta_completa'
+    logger.warning("Llamada a función obsoleta: actualizar_pago_y_estado_venta")
     conn = cur = None
     try:
         conn = conectar()
@@ -720,6 +873,110 @@ def actualizar_pago_y_estado_venta(id_venta: int, tipo_pago: str, estado: str = 
             if conn: conn.close()
         except Exception:
             pass
+
+# --- ¡NUEVA FUNCIÓN ATÓMICA! ---
+def registrar_venta_completa(id_usuario: int, id_cliente: int | None, items: list, tipo_pago: str) -> int | None:
+    """
+    Registra una venta completa (Maestro, Detalles, Stock, C/C) en una sola transacción.
+    Si algo falla, revierte todo.
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        
+        # 1. Iniciar transacción
+        conn.start_transaction()
+        
+        # 2. Insertar la venta (con total 0 temporal) y obtener el ID
+        cur.execute(
+            "INSERT INTO Venta (id_usuario, id_cliente, estado, tipo_pago, total) VALUES (%s, %s, 'completada', %s, 0)", 
+            (id_usuario, id_cliente, tipo_pago)
+        )
+        id_venta = cur.lastrowid
+        
+        if not id_venta:
+            raise RuntimeError("No se pudo crear el registro de Venta.")
+            
+        total_real = 0.0
+        
+        # 3. Recorrer items, validar stock e insertar detalles
+        for (id_producto, nombre, cant, precio, _) in items:
+            
+            # Si el item no tiene ID (venta libre), solo lo insertamos
+            if id_producto is None:
+                cur.execute(
+                    """
+                    INSERT INTO DetalleVenta (id_venta, id_producto, nombre_producto, codigo_barras, cantidad, precio_unitario)
+                    VALUES (%s, NULL, %s, NULL, %s, %s)
+                    """,
+                    (id_venta, nombre, cant, precio),
+                )
+            else:
+                # --- ¡CORRECCIÓN DE CONCURRENCIA! ---
+                # 1. Bloquear la fila de inventario
+                cur.execute("SELECT cantidad FROM Inventario WHERE id_producto=%s FOR UPDATE", (id_producto,))
+                # --- FIN CORRECCIÓN ---
+                
+                inv = cur.fetchone()
+                stock_actual = float(inv["cantidad"]) if inv else 0.0
+                
+                if stock_actual < cant:
+                    # (El rollback automático liberará el bloqueo)
+                    raise ValueError(f"Stock insuficiente para '{nombre}' (disp: {stock_actual:.3f}, req: {cant:.3f})")
+                
+                # 2. Insertar detalle
+                cur.execute(
+                    """
+                    INSERT INTO DetalleVenta (id_venta, id_producto, nombre_producto, cantidad, precio_unitario)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (id_venta, id_producto, nombre, cant, precio),
+                )
+                
+                # 3. Descontar stock (la fila ya está bloqueada)
+                cur.execute("UPDATE Inventario SET cantidad = cantidad - %s WHERE id_producto=%s", (cant, id_producto))
+            
+            total_real += (cant * precio)
+
+        # 4. Actualizar el total real en la Venta
+        cur.execute("UPDATE Venta SET total = %s WHERE id_venta = %s", (total_real, id_venta))
+        
+        # 5. Si es Cuenta Corriente, actualizar el saldo
+        if tipo_pago == "cuenta_corriente" and id_cliente is not None:
+            # --- ¡CORRECCIÓN DE CONCURRENCIA! ---
+            cur.execute("SELECT saldo, limite_credito FROM CuentaCorriente WHERE id_cliente = %s FOR UPDATE", (id_cliente,))
+            # --- FIN CORRECCIÓN ---
+            
+            cuenta = cur.fetchone()
+            
+            if not cuenta:
+                raise RuntimeError(f"El cliente {id_cliente} no tiene cuenta corriente.")
+            
+            saldo_proyectado = float(cuenta['saldo']) - total_real
+            
+            if saldo_proyectado < -float(cuenta['limite_credito']):
+                raise ValueError(f"Límite de crédito excedido. (Disponible: {float(cuenta['limite_credito']) + float(cuenta['saldo']):.2f})")
+            
+            cur.execute("UPDATE CuentaCorriente SET saldo = %s WHERE id_cliente = %s", (saldo_proyectado, id_cliente))
+
+        # 6. Si todo salió bien, confirmar (esto libera todos los bloqueos 'FOR UPDATE')
+        conn.commit()
+        return id_venta
+        
+    except Exception as e:
+        if conn:
+            try: conn.rollback() # Liberar bloqueos en caso de error
+            except Exception: pass
+        logger.error(f"Error en registrar_venta_completa (TRANSACCIÓN REVERTIDA): {e}")
+        raise # Re-lanzamos el error para que el adapter lo capture
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+# --- FIN NUEVA FUNCIÓN ---
 
 
 # ======================================================
@@ -750,26 +1007,33 @@ def obtener_vendedores() -> list[dict]:
         except Exception:
             pass
 
-
 def reporte_ventas_por_vendedor(desde: str, hasta: str, id_vendedor: Optional[int] = None) -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
+        
         sql = """
-            SELECT v.id_venta, v.fecha, u.id_usuario AS id_vendedor, u.nombre AS vendedor, v.total
+            SELECT 
+                u.nombre AS vendedor,
+                COUNT(v.id_venta) AS total_ventas,
+                SUM(v.total) AS monto_total
             FROM Venta v
-            LEFT JOIN Usuario u ON u.id_usuario = v.id_usuario
+            JOIN Usuario u ON u.id_usuario = v.id_usuario
             WHERE v.fecha BETWEEN %s AND %s AND v.estado = 'completada'
         """
         params: list[Any] = [f"{desde} 00:00:00", f"{hasta} 23:59:59"]
+        
         if id_vendedor:
-            sql += " AND v.id_usuario = %s"; params.append(id_vendedor)
-        sql += " ORDER BY v.fecha DESC, v.id_venta DESC"
+            sql += " AND v.id_usuario = %s"
+            params.append(id_vendedor)
+            
+        sql += " GROUP BY u.id_usuario, u.nombre ORDER BY monto_total DESC"
+        
         cur.execute(sql, tuple(params))
         return list(cur.fetchall() or [])
     except Exception as e:
-        logger.error(f"reporte_ventas_por_vendedor: {e}")
+        logger.error(f"reporte_ventas_por_vendedor (agrupado): {e}")
         return []
     finally:
         try:
@@ -833,8 +1097,7 @@ def obtener_proveedores(incluir_inactivos: bool = False) -> list[dict]:
         except Exception:
             pass
 
-def insertar_proveedor(nombre: str, empresa: str = "", telefono: str = "", email: str = "", contacto: str = "") -> Optional[int]:
-    """Crea un nuevo proveedor y devuelve su ID."""
+def insertar_proveedor(nombre: str, empresa: str = "", telefono: str = "", email: str = "") -> Optional[int]:
     if not nombre.strip():
         raise ValueError("El nombre del proveedor es obligatorio.")
     conn = cur = None
@@ -842,13 +1105,12 @@ def insertar_proveedor(nombre: str, empresa: str = "", telefono: str = "", email
         conn = conectar()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO Proveedor (nombre, empresa, telefono, email, contacto, activo) VALUES (%s, %s, %s, %s, %s, TRUE)",
+            "INSERT INTO Proveedor (nombre, empresa, telefono, email, activo) VALUES (%s, %s, %s, %s, TRUE)",
             (
                 nombre.strip(), 
                 empresa.strip() or None,
                 telefono.strip() or None, 
-                email.strip() or None, 
-                contacto.strip() or None
+                email.strip() or None
             ),
         )
         conn.commit()
@@ -866,8 +1128,65 @@ def insertar_proveedor(nombre: str, empresa: str = "", telefono: str = "", email
         except Exception:
             pass
 
+def actualizar_proveedor(id_proveedor: int, nombre: str, empresa: str, telefono: str, email: str) -> bool:
+    if not nombre.strip():
+        raise ValueError("El nombre del proveedor es obligatorio.")
+    
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE Proveedor
+            SET nombre=%s, empresa=%s, telefono=%s, email=%s
+            WHERE id_proveedor=%s
+            """,
+            (
+                nombre.strip(),
+                empresa.strip() or None,
+                telefono.strip() or None,
+                email.strip() or None,
+                id_proveedor
+            )
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error(f"actualizar_proveedor: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def obtener_proveedor_completo(id_proveedor: int) -> Optional[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT id_proveedor, nombre, empresa, telefono, email FROM Proveedor WHERE id_proveedor = %s",
+            (id_proveedor,)
+        )
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"obtener_proveedor_completo: {e}")
+        return None
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+
 def eliminar_proveedor_logico(id_proveedor: int) -> bool:
-    """Desactiva un proveedor (baja lógica)."""
     conn = cur = None
     try:
         conn = conectar()
@@ -888,11 +1207,104 @@ def eliminar_proveedor_logico(id_proveedor: int) -> bool:
         except Exception:
             pass
 
+def obtener_productos_por_proveedor(id_proveedor: int) -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        
+        sql = (
+            _select_producto_campos() + 
+            _select_producto_joins() +
+            " JOIN Proveedor_Producto pp ON p.id_producto = pp.id_producto "
+            " WHERE pp.id_proveedor = %s AND p.activo = 1 ORDER BY p.nombre"
+        )
+        
+        cur.execute(sql, (id_proveedor,))
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_productos_por_proveedor: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def obtener_productos_sin_asignar(id_proveedor: int) -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        
+        sql = (
+            _select_producto_campos() +
+            _select_producto_joins() +
+            " WHERE p.activo = 1 AND p.id_producto NOT IN ( "
+            "   SELECT id_producto FROM Proveedor_Producto WHERE id_proveedor = %s "
+            " ) ORDER BY p.nombre"
+        )
+        
+        cur.execute(sql, (id_proveedor,))
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_productos_sin_asignar: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def asignar_producto_a_proveedor(id_proveedor: int, id_producto: int) -> bool:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT IGNORE INTO Proveedor_Producto (id_proveedor, id_producto) VALUES (%s, %s)",
+            (id_proveedor, id_producto)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        if conn: conn.rollback()
+        logger.error(f"asignar_producto_a_proveedor: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
+
+def quitar_producto_a_proveedor(id_proveedor: int, id_producto: int) -> bool:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM Proveedor_Producto WHERE id_proveedor = %s AND id_producto = %s",
+            (id_proveedor, id_producto)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        if conn: conn.rollback()
+        logger.error(f"quitar_producto_a_proveedor: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
+
+
 # ======================================================
 # COMPRAS (Ingreso de mercadería)
 # ======================================================
 def insertar_compra(id_usuario: int, id_proveedor: int) -> Optional[int]:
-    """Crea el registro maestro 'Compra' y devuelve el ID."""
     conn = cur = None
     try:
         conn = conectar()
@@ -916,8 +1328,7 @@ def insertar_compra(id_usuario: int, id_proveedor: int) -> Optional[int]:
         except Exception:
             pass
 
-def insertar_detalle_compra(id_compra: int, id_producto: int, cantidad: int, precio_costo: float) -> bool:
-    """Inserta un item en DetalleCompra Y SUMA EL STOCK en Inventario."""
+def insertar_detalle_compra(id_compra: int, id_producto: int, cantidad: float, precio_costo: float) -> bool:
     if cantidad <= 0 or precio_costo < 0:
         raise ValueError("Cantidad debe ser > 0 y precio_costo >= 0")
     
@@ -939,7 +1350,8 @@ def insertar_detalle_compra(id_compra: int, id_producto: int, cantidad: int, pre
             (id_compra, id_producto, prod["nombre"], prod["codigo_barras"], cantidad, precio_costo),
         )
         
-        cur.execute("UPDATE Inventario SET cantidad = cantidad + %s WHERE id_producto=%s", (cantidad, id_producto))
+        # --- ¡CORRECCIÓN! Suma de stock en compra (float) ---
+        cur.execute("UPDATE Inventario SET cantidad = cantidad + %s WHERE id_producto=%s", (float(cantidad), id_producto))
         
         conn.commit()
         return True
@@ -966,15 +1378,10 @@ def obtener_ventas_maestro(
     id_cliente: Optional[int], 
     id_vendedor: Optional[int]
 ) -> list[dict]:
-    """
-    Busca ventas (maestro) con filtros dinámicos.
-    id_cliente = 0 busca Consumidor Final (NULL).
-    """
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        
         sql = """
             SELECT
                 v.id_venta, v.fecha, v.total, v.estado, v.tipo_pago,
@@ -984,10 +1391,8 @@ def obtener_ventas_maestro(
             LEFT JOIN Usuario u ON v.id_usuario = u.id_usuario
             LEFT JOIN Cliente c ON v.id_cliente = c.id_cliente
         """
-        
         where_clauses = []
         params = []
-        
         if fecha_desde:
             where_clauses.append("DATE(v.fecha) >= %s")
             params.append(fecha_desde)
@@ -997,22 +1402,17 @@ def obtener_ventas_maestro(
         if id_vendedor is not None:
             where_clauses.append("v.id_usuario = %s")
             params.append(id_vendedor)
-        
         if id_cliente is not None:
-            if id_cliente == 0: # Caso especial para Consumidor Final
+            if id_cliente == 0: 
                 where_clauses.append("v.id_cliente IS NULL")
             else:
                 where_clauses.append("v.id_cliente = %s")
                 params.append(id_cliente)
-                
         if where_clauses:
             sql += " WHERE " + " AND ".join(where_clauses)
-            
         sql += " ORDER BY v.fecha DESC, v.id_venta DESC"
-        
         cur.execute(sql, tuple(params))
         return list(cur.fetchall() or [])
-        
     except Exception as e:
         logger.error(f"obtener_ventas_maestro: {e}")
         return []
@@ -1024,7 +1424,6 @@ def obtener_ventas_maestro(
             pass
 
 def obtener_venta_detalle(id_venta: int) -> list[dict]:
-    """Obtiene los productos (detalle) de una venta específica."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1063,12 +1462,10 @@ def obtener_compras_maestro(
     fecha_hasta: Optional[str], 
     id_proveedor: Optional[int]
 ) -> list[dict]:
-    """Busca compras (maestro) con filtros dinámicos."""
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        
         sql = """
             SELECT
                 c.id_compra, c.fecha, c.total, c.estado,
@@ -1078,10 +1475,8 @@ def obtener_compras_maestro(
             LEFT JOIN Proveedor p ON c.id_proveedor = p.id_proveedor
             LEFT JOIN Usuario u ON c.id_usuario = u.id_usuario
         """
-        
         where_clauses = []
         params = []
-        
         if fecha_desde:
             where_clauses.append("DATE(c.fecha) >= %s")
             params.append(fecha_desde)
@@ -1091,15 +1486,11 @@ def obtener_compras_maestro(
         if id_proveedor is not None:
             where_clauses.append("c.id_proveedor = %s")
             params.append(id_proveedor)
-                
         if where_clauses:
             sql += " WHERE " + " AND ".join(where_clauses)
-            
         sql += " ORDER BY c.fecha DESC, c.id_compra DESC"
-        
         cur.execute(sql, tuple(params))
         return list(cur.fetchall() or [])
-        
     except Exception as e:
         logger.error(f"obtener_compras_maestro: {e}")
         return []
@@ -1111,7 +1502,6 @@ def obtener_compras_maestro(
             pass
 
 def obtener_compra_detalle(id_compra: int) -> list[dict]:
-    """Obtiene los productos (detalle) de una compra específica."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1146,7 +1536,6 @@ def obtener_compra_detalle(id_compra: int) -> list[dict]:
 # CUENTA CORRIENTE
 # ======================================================
 def obtener_clientes_con_deuda() -> list[dict]:
-    """Obtiene clientes y su saldo de la vista vista_clientes_deuda."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1164,7 +1553,6 @@ def obtener_clientes_con_deuda() -> list[dict]:
             pass
 
 def crear_cuenta_corriente_si_no_existe(id_cliente: int) -> bool:
-    """Crea una CC para un cliente si no la tiene. Usa INSERT IGNORE."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1189,7 +1577,6 @@ def crear_cuenta_corriente_si_no_existe(id_cliente: int) -> bool:
             pass
 
 def obtener_cuenta_por_cliente(id_cliente: int) -> Optional[dict]:
-    """Obtiene los datos de la CC de un cliente."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1207,7 +1594,6 @@ def obtener_cuenta_por_cliente(id_cliente: int) -> Optional[dict]:
             pass
 
 def registrar_pago_cuenta_corriente(id_cuenta: int, monto: float, metodo: str, id_usuario: int) -> bool:
-    """Registra un pago y actualiza el saldo en una transacción."""
     if monto <= 0:
         raise ValueError("El monto del pago debe ser positivo.")
     
@@ -1249,7 +1635,6 @@ def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 def obtener_usuarios_con_rol() -> list[dict]:
-    """Obtiene todos los usuarios (incluyendo inactivos) con el nombre de su rol."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1274,7 +1659,6 @@ def obtener_usuarios_con_rol() -> list[dict]:
             pass
 
 def obtener_roles() -> list[dict]:
-    """Obtiene la lista de todos los roles (ID y Nombre)."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1292,7 +1676,6 @@ def obtener_roles() -> list[dict]:
             pass
 
 def crear_usuario(nombre: str, password_plana: str, id_rol: int) -> Optional[int]:
-    """Crea un nuevo usuario con contraseña hasheada."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1309,7 +1692,7 @@ def crear_usuario(nombre: str, password_plana: str, id_rol: int) -> Optional[int
     except mysql.connector.IntegrityError as e:
         logger.warning(f"crear_usuario (IntegrityError): {e}")
         if conn: conn.rollback()
-        return None # Nombre de usuario ya existe
+        return None 
     except Exception as e:
         if conn:
             try: conn.rollback()
@@ -1324,7 +1707,6 @@ def crear_usuario(nombre: str, password_plana: str, id_rol: int) -> Optional[int
             pass
 
 def actualizar_rol_usuario(id_usuario: int, id_rol_nuevo: int) -> bool:
-    """Actualiza el rol de un usuario existente."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1346,7 +1728,6 @@ def actualizar_rol_usuario(id_usuario: int, id_rol_nuevo: int) -> bool:
             pass
 
 def resetear_password_usuario(id_usuario: int, password_plana_nueva: str) -> bool:
-    """Actualiza la contraseña de un usuario."""
     conn = cur = None
     try:
         conn = conectar()
@@ -1371,7 +1752,6 @@ def resetear_password_usuario(id_usuario: int, password_plana_nueva: str) -> boo
             pass
 
 def desactivar_usuario(id_usuario: int) -> bool:
-    """Desactiva un usuario (baja lógica)."""
     conn = cur = None
     try:
         conn = conectar()

@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS Producto (
   nombre VARCHAR(120) NOT NULL,
   descripcion TEXT,
   precio DECIMAL(10,2) NOT NULL,
+  es_pesable BOOLEAN NOT NULL DEFAULT FALSE, 
   codigo_barras VARCHAR(32) NULL,
   id_categoria INT NULL,
   activo BOOLEAN DEFAULT TRUE,
@@ -122,7 +123,7 @@ CREATE TABLE IF NOT EXISTS Producto (
 
 CREATE TABLE IF NOT EXISTS Inventario (
   id_inventario INT AUTO_INCREMENT PRIMARY KEY,
-  cantidad INT NOT NULL DEFAULT 0,
+  cantidad DECIMAL(10, 3) NOT NULL DEFAULT 0.000, 
   stock_minimo INT NOT NULL DEFAULT 5,
   stock_maximo INT DEFAULT 100,
   id_producto INT NOT NULL UNIQUE,
@@ -138,7 +139,7 @@ CREATE TABLE IF NOT EXISTS Inventario (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 4) Proveedores / Compras
+-- 4) Proveedores / Compras / Mapeo
 -- =========================================================
 CREATE TABLE IF NOT EXISTS Proveedor (
   id_proveedor INT AUTO_INCREMENT PRIMARY KEY,
@@ -146,7 +147,6 @@ CREATE TABLE IF NOT EXISTS Proveedor (
   empresa VARCHAR(200),
   telefono VARCHAR(20),
   email VARCHAR(255) UNIQUE,
-  contacto VARCHAR(100),
   activo BOOLEAN DEFAULT TRUE,
   fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CHECK (email IS NULL OR email LIKE '%@%.%'),
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS DetalleCompra (
   id_producto INT NULL,
   nombre_producto VARCHAR(120) NULL,
   codigo_barras   VARCHAR(32)  NULL,
-  cantidad INT NOT NULL,
+  cantidad DECIMAL(10, 3) NOT NULL, 
   precio_unitario DECIMAL(10,2) NOT NULL,
   subtotal DECIMAL(10,2) GENERATED ALWAYS AS (cantidad * precio_unitario) STORED,
   CHECK (cantidad > 0),
@@ -194,6 +194,23 @@ CREATE TABLE IF NOT EXISTS DetalleCompra (
     ON DELETE SET NULL ON UPDATE CASCADE,
   INDEX idx_detalle_compra_compra (id_compra),
   INDEX idx_detalle_compra_producto (id_producto)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS Proveedor_Producto (
+    id_proveedor INT NOT NULL,
+    id_producto INT NOT NULL,
+
+    PRIMARY KEY (id_proveedor, id_producto),
+    
+    CONSTRAINT fk_pp_proveedor
+        FOREIGN KEY (id_proveedor) 
+        REFERENCES Proveedor(id_proveedor)
+        ON DELETE CASCADE,
+    
+    CONSTRAINT fk_pp_producto
+        FOREIGN KEY (id_producto) 
+        REFERENCES Producto(id_producto)
+        ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- =========================================================
@@ -225,10 +242,10 @@ CREATE TABLE IF NOT EXISTS Venta (
 CREATE TABLE IF NOT EXISTS DetalleVenta (
   id_detalle_venta INT AUTO_INCREMENT PRIMARY KEY,
   id_venta INT NOT NULL,
-  id_producto INT NULL, -- ¡ARREGLADO! AHORA PERMITE NULL
+  id_producto INT NULL, 
   nombre_producto VARCHAR(120) NULL,
   codigo_barras   VARCHAR(32)  NULL,
-  cantidad INT NOT NULL,
+  cantidad DECIMAL(10, 3) NOT NULL, 
   precio_unitario DECIMAL(10,2) NOT NULL,
   subtotal DECIMAL(10,2) GENERATED ALWAYS AS (cantidad * precio_unitario) STORED,
   CHECK (cantidad > 0),
@@ -244,33 +261,53 @@ CREATE TABLE IF NOT EXISTS DetalleVenta (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 6) Auditoría de Inventario
+-- 6) Auditoría
 -- =========================================================
 CREATE TABLE IF NOT EXISTS AuditoriaInventario (
   id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
   id_producto INT NOT NULL,
-  cantidad_anterior INT NOT NULL,
-  cantidad_nueva INT NOT NULL,
+  cantidad_anterior DECIMAL(10, 3) NOT NULL, 
+  cantidad_nueva DECIMAL(10, 3) NOT NULL, 
   tipo_movimiento VARCHAR(50) NOT NULL,
   id_referencia INT,
   id_usuario INT,
   fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   observaciones TEXT,
-  CONSTRAINT fk_auditoria_producto
+  CONSTRAINT fk_auditoria_inv_producto
     FOREIGN KEY (id_producto) REFERENCES Producto(id_producto)
     ON DELETE CASCADE,
-  CONSTRAINT fk_auditoria_usuario
+  CONSTRAINT fk_auditoria_inv_usuario
     FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
     ON DELETE SET NULL,
-  INDEX idx_auditoria_producto (id_producto),
-  INDEX idx_auditoria_fecha (fecha),
-  INDEX idx_auditoria_tipo (tipo_movimiento)
+  INDEX idx_auditoria_inv_producto (id_producto),
+  INDEX idx_auditoria_inv_fecha (fecha),
+  INDEX idx_auditoria_inv_tipo (tipo_movimiento)
 ) ENGINE=InnoDB;
 
+-- --- ¡NUEVA TABLA DE AUDITORÍA DE ACCIONES! ---
+CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
+  id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
+  id_usuario INT,
+  accion VARCHAR(100) NOT NULL,
+  tabla_afectada VARCHAR(50),
+  id_registro INT,
+  datos_anteriores JSON,
+  datos_nuevos JSON,
+  fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  CONSTRAINT fk_auditoria_acc_usuario
+    FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
+    ON DELETE SET NULL,
+    
+  INDEX idx_auditoria_acc_fecha (fecha),
+  INDEX idx_auditoria_acc_usuario (id_usuario),
+  INDEX idx_auditoria_acc_accion (accion)
+) ENGINE=InnoDB;
+-- --- FIN NUEVA TABLA ---
+
 -- =========================================================
--- 7) Triggers (totales / auditoría / cuenta corriente)
+-- 7) Triggers
 -- =========================================================
--- Triggers (Sección 7) — ejecutar este bloque SOLO
 DELIMITER $$
 
 DROP TRIGGER IF EXISTS trg_detalle_venta_ai_total $$
@@ -306,7 +343,7 @@ CREATE TRIGGER trg_auditoria_venta_inventario
 AFTER INSERT ON DetalleVenta
 FOR EACH ROW
 BEGIN
-  DECLARE v_cant_anterior INT DEFAULT 0;
+  DECLARE v_cant_anterior DECIMAL(10, 3) DEFAULT 0.000; 
   IF NEW.id_producto IS NOT NULL THEN
     SELECT cantidad INTO v_cant_anterior
     FROM Inventario WHERE id_producto = NEW.id_producto;
@@ -317,70 +354,44 @@ BEGIN
   END IF;
 END $$
 
--- ============================================
--- === TRIGGER CORREGIDO (INICIO) ===
--- ============================================
 DROP TRIGGER IF EXISTS trg_venta_au_cuentacorriente $$
 CREATE TRIGGER trg_venta_au_cuentacorriente
 AFTER UPDATE ON Venta
 FOR EACH ROW
 BEGIN
-  -- Solo actuar si el cliente existe
   IF NEW.id_cliente IS NOT NULL THEN
-
-    -- CASO 1: La venta se acaba de marcar como 'cuenta_corriente' (venía de otro estado)
     IF NEW.tipo_pago = 'cuenta_corriente' AND OLD.tipo_pago <> 'cuenta_corriente' THEN
       UPDATE CuentaCorriente
-      SET saldo = saldo - NEW.total -- Aplicar el total COMPLETO
+      SET saldo = saldo - NEW.total 
       WHERE id_cliente = NEW.id_cliente;
-
-    -- CASO 2: La venta YA ERA 'cuenta_corriente' y su total cambió (ej. edición/anulación)
     ELSIF NEW.tipo_pago = 'cuenta_corriente' AND NEW.total <> OLD.total THEN
       UPDATE CuentaCorriente
-      SET saldo = saldo - (NEW.total - OLD.total) -- Aplicar solo la DIFERENCIA
+      SET saldo = saldo - (NEW.total - OLD.total) 
       WHERE id_cliente = NEW.id_cliente;
-    
-    -- CASO 3 (Opcional pero recomendado): La venta DEJÓ de ser 'cuenta_corriente'
     ELSIF OLD.tipo_pago = 'cuenta_corriente' AND NEW.tipo_pago <> 'cuenta_corriente' THEN
       UPDATE CuentaCorriente
-      SET saldo = saldo + OLD.total -- Revertir (sumar) el total ANTERIOR
+      SET saldo = saldo + OLD.total 
       WHERE id_cliente = NEW.id_cliente;
-    
     END IF;
-  
   END IF;
 END $$
--- ============================================
--- === TRIGGER CORREGIDO (FIN) ===
--- ============================================
 
 DELIMITER ;
-
 
 -- =========================================================
 -- 8) Datos iniciales (roles, categorías)
 -- =========================================================
-INSERT IGNORE INTO Rol (id_rol, nombre, descripcion) VALUES
-  (1, 'admin', 'Administrador del sistema con todos los permisos'),
-  (2, 'vendedor', 'Usuario que puede realizar ventas'),
-  (3, 'supervisor', 'Usuario que puede gestionar inventario y ver reportes');
-
-INSERT IGNORE INTO Categoria (id_categoria, nombre, descripcion) VALUES
-  (1, 'Bebidas', 'Bebidas alcohólicas y no alcohólicas'),
-  (2, 'Almacén', 'Productos de almacén y despensa'),
-  (3, 'Lácteos', 'Productos lácteos y derivados'),
-  (4, 'Carnes', 'Carnes y embutidos'),
-  (5, 'Limpieza', 'Productos de limpieza e higiene'),
-  (6, 'Panadería', 'Productos de panadería y pastelería');
+-- (Se movieron a 'app/tools/seed_initial_data.py')
 
 -- =========================================================
--- 9) Vistas útiles (¡ACTUALIZADAS!)
+-- 9) Vistas útiles
 -- =========================================================
 CREATE OR REPLACE VIEW vista_stock_bajo AS
 SELECT
   p.id_producto,
   p.nombre,
   p.precio,
+  p.es_pesable,
   c.nombre AS categoria,
   i.cantidad,
   i.stock_minimo,
@@ -435,7 +446,6 @@ ORDER BY cc.saldo ASC;
 -- =========================================================
 -- 10) Índices compuestos adicionales
 -- =========================================================
--- Índices idempotentes en MySQL
 DELIMITER $$
 
 DROP PROCEDURE IF EXISTS ensure_index $$
