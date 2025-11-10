@@ -18,9 +18,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", "3307"))
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
 DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "tomas")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "supermercado_don_atilio")
 
 # --- ¡CAMBIO! ---
@@ -1764,6 +1764,66 @@ def desactivar_usuario(id_usuario: int) -> bool:
             try: conn.rollback()
             except Exception: pass
         logger.error(f"desactivar_usuario: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+    # ======================================================
+# AUDITORÍA DE ACCIONES (agregar al final de DB.py)
+# ======================================================
+def registrar_auditoria(
+    id_usuario: Optional[int],
+    accion: str,
+    tabla_afectada: Optional[str] = None,
+    id_registro: Optional[int] = None,
+    datos_anteriores: Optional[dict] = None,
+    datos_nuevos: Optional[dict] = None
+) -> bool:
+    """
+    Registra una acción en la tabla AuditoriaAcciones
+    
+    Args:
+        id_usuario: ID del usuario que realizó la acción
+        accion: Descripción de la acción (ej: 'CREAR_PRODUCTO')
+        tabla_afectada: Tabla afectada (ej: 'Producto')
+        id_registro: ID del registro afectado
+        datos_anteriores: Dict con datos antes del cambio
+        datos_nuevos: Dict con datos después del cambio
+    
+    Returns:
+        True si se registró correctamente, False si falló
+    """
+    import json
+    
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        
+        # Convertir dicts a JSON
+        datos_ant_json = json.dumps(datos_anteriores, ensure_ascii=False) if datos_anteriores else None
+        datos_new_json = json.dumps(datos_nuevos, ensure_ascii=False) if datos_nuevos else None
+        
+        cur.execute(
+            """
+            INSERT INTO AuditoriaAcciones 
+            (id_usuario, accion, tabla_afectada, id_registro, datos_anteriores, datos_nuevos)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (id_usuario, accion, tabla_afectada, id_registro, datos_ant_json, datos_new_json)
+        )
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error(f"registrar_auditoria: {e}")
         return False
     finally:
         try:

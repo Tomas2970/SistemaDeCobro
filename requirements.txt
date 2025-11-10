@@ -5,41 +5,38 @@
 
 # Base de datos
 mysql-connector-python==8.2.0
-pymysql==1.1.0
 
-# Framework web (si usas Flask)
-Flask==3.0.0
-Flask-CORS==4.0.0
-
-# Seguridad
+# Seguridad y Configuración
 bcrypt==4.1.2
 python-dotenv==1.0.0
 
 # Utilidades
 python-dateutil==2.8.2
 
-# Impresión de tickets (Windows)
-pywin32==306
+# Interfaz gráfica (Tkinter viene con Python, pero por si acaso)
+tkinter - incluido en Python estándar
+
+# Impresora térmica (OPCIONAL - solo si tienes impresora física)
+# Descomenta la siguiente línea si vas a usar impresora:
+python-escpos>=3.0.0
+
+# Imágenes (para cargar el logo)
+Pillow>=10.4.0
+
+pywin32
+# Interfaz gráfica (Tkinter viene con Python, pero por si acaso)
+# tkinter - incluido en Python estándar
 
 # =====================================
 # INSTALACIÓN
 # =====================================
 # pip install -r requirements.txt
 #
-# Para actualizar todas las dependencias:
-# pip install --upgrade -r requirements.txt
+# Para compilar el ejecutable:
+# pyinstaller build_spec.py
 #
 # =====================================
-# ENTORNO VIRTUAL (RECOMENDADO)
+# NOTAS IMPORTANTES
 # =====================================
-# Crear entorno virtual:
-# python -m venv venv
-#
-# Activar (Windows):
-# venv\Scripts\activate
-#
-# Activar (Linux/Mac):
-# source venv/bin/activate
-#
-# Instalar dependencias:
-# pip install -r requirements.txt
+# - Flask y Flask-CORS removidos (no son necesarios para app de escritorio)
+# - pymysql removido (usamos mysql-connector-python)

@@ -1,6 +1,7 @@
 -- =========================================================
 -- Supermercado Don Atilio - Esquema completo
 -- Compatible MySQL 8.x / MariaDB 10.4+
+-- VERSIÓN CORREGIDA - Compatible con MariaDB
 -- =========================================================
 
 -- 0) Base de datos
@@ -284,7 +285,6 @@ CREATE TABLE IF NOT EXISTS AuditoriaInventario (
   INDEX idx_auditoria_inv_tipo (tipo_movimiento)
 ) ENGINE=InnoDB;
 
--- --- ¡NUEVA TABLA DE AUDITORÍA DE ACCIONES! ---
 CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
   id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
   id_usuario INT,
@@ -303,7 +303,6 @@ CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
   INDEX idx_auditoria_acc_usuario (id_usuario),
   INDEX idx_auditoria_acc_accion (accion)
 ) ENGINE=InnoDB;
--- --- FIN NUEVA TABLA ---
 
 -- =========================================================
 -- 7) Triggers
@@ -364,11 +363,11 @@ BEGIN
       UPDATE CuentaCorriente
       SET saldo = saldo - NEW.total 
       WHERE id_cliente = NEW.id_cliente;
-    ELSIF NEW.tipo_pago = 'cuenta_corriente' AND NEW.total <> OLD.total THEN
+    ELSEIF NEW.tipo_pago = 'cuenta_corriente' AND NEW.total <> OLD.total THEN
       UPDATE CuentaCorriente
       SET saldo = saldo - (NEW.total - OLD.total) 
       WHERE id_cliente = NEW.id_cliente;
-    ELSIF OLD.tipo_pago = 'cuenta_corriente' AND NEW.tipo_pago <> 'cuenta_corriente' THEN
+    ELSEIF OLD.tipo_pago = 'cuenta_corriente' AND NEW.tipo_pago <> 'cuenta_corriente' THEN
       UPDATE CuentaCorriente
       SET saldo = saldo + OLD.total 
       WHERE id_cliente = NEW.id_cliente;

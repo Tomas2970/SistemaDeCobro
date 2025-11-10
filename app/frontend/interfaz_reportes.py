@@ -6,11 +6,12 @@ from typing import Any, Optional
 from datetime import date, datetime, timedelta 
 import logging
 
+# --- ¡CORRECCIÓN! Importa la CLASE Historiales, no ui_historiales ---
 try:
-    from app.frontend.interfaz_historiales import ui_historiales
+    from app.frontend.interfaz_historiales import Historiales
 except ImportError:
-    ui_historiales = None
-    print("Advertencia: No se pudo importar 'ui_historiales' para el drill-down.")
+    Historiales = None
+    print("Advertencia: No se pudo importar 'Historiales' para el drill-down.")
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +36,13 @@ def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
 
 def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
     win = tk.Toplevel(parent)
-    # --- ¡MODIFICACIÓN! Título cambiado ---
-    win.title("🧾 Generador de Totales")
+    win.title("📊 Generador de Totales")
     win.geometry("980x620")
     win.configure(bg="#f4f4f8")
     win.resizable(True, True)
 
     header = tk.Frame(win, bg="#2e9e44", height=60)
     header.pack(fill=tk.X)
-    # --- ¡MODIFICACIÓN! Texto del cabezal cambiado ---
     tk.Label(header, text="Generador de Totales", bg="#2e9e44", fg="white",
              font=("Helvetica", 16, "bold")).pack(pady=12)
 
@@ -191,6 +190,7 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
         except Exception:
             return str(x)
 
+    # --- ¡CORRECCIÓN! Función de doble clic arreglada ---
     def on_doble_clic_reporte(event=None):
         if cb_tipo.get() != "Ventas diarias":
             return 
@@ -204,20 +204,24 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
         
         if not fecha_seleccionada or fecha_seleccionada == "Sin datos":
             return
-            
-        if not callable(ui_historiales):
-            messagebox.showerror("Error", "No se pudo abrir 'Historiales' (archivo no encontrado).", parent=win)
+        
+        # Verificar que la clase Historiales esté disponible
+        if Historiales is None:
+            messagebox.showerror("Error", "No se pudo cargar el módulo 'Historiales'.", parent=win)
             return
         
         try:
-            ui_historiales(
+            # Instanciar la clase Historiales pasando el filtro de fecha
+            Historiales(
                 parent=win, 
                 backend=backend, 
                 usuario=usuario, 
                 filtro_fecha=fecha_seleccionada
             )
         except Exception as e:
+            logger.exception("Error abriendo Historiales")
             messagebox.showerror("Error", f"No se pudo abrir el historial:\n{e}", parent=win)
+    # --- FIN CORRECCIÓN ---
 
     def generar():
         try:
@@ -264,6 +268,7 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
                         _fmt_mon(r.get("monto_total") or 0),
                     ))
                 
+                # ¡Importante! Vincular el evento de doble clic solo para ventas diarias
                 tree.bind("<Double-1>", on_doble_clic_reporte)
             
         except Exception as e:

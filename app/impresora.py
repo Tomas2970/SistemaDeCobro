@@ -11,7 +11,7 @@ from datetime import datetime
 # =====================================
 # Configuración
 # =====================================
-NOMBRE_IMPRESORA = "sam4s giant 100s"
+NOMBRE_IMPRESORA = "SAM4S GIANT-100"
 ANCHO_TICKET = 42
 
 # =====================================
@@ -41,7 +41,8 @@ def justificar_texto(izquierda, derecha, ancho=ANCHO_TICKET):
 # =====================================
 # Función Principal de Impresión
 # =====================================
-def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor"):
+def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor", 
+                   metodo_pago="efectivo", monto_entregado=0, vuelto=0, cliente="Consumidor Final"):
     """
     Imprime un ticket de venta
     
@@ -49,6 +50,10 @@ def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor
         id_venta: ID de la venta a imprimir
         items_de_la_venta: Una LISTA de tuplas (id_prod, nombre, cant, precio, cod)
         nombre_vendedor: Nombre del vendedor (opcional)
+        metodo_pago: Método de pago (efectivo, tarjeta, transferencia, cuenta_corriente)
+        monto_entregado: Monto que entregó el cliente
+        vuelto: Vuelto a entregar
+        cliente: Nombre del cliente
     
     Returns:
         True si se imprimió correctamente, False si hubo error
@@ -59,7 +64,8 @@ def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor
             return False
         
         # Generar contenido del ticket
-        ticket = generar_contenido_ticket(id_venta, items_de_la_venta, nombre_vendedor)
+        ticket = generar_contenido_ticket(id_venta, items_de_la_venta, nombre_vendedor, 
+                                        metodo_pago, monto_entregado, vuelto, cliente)
         
         # Imprimir
         enviar_a_impresora(ticket)
@@ -71,7 +77,8 @@ def imprimir_ticket(id_venta, items_de_la_venta: list, nombre_vendedor="Vendedor
         print(f"❌ Error al imprimir ticket: {e}")
         return False
 
-def generar_contenido_ticket(id_venta, items, nombre_vendedor):
+def generar_contenido_ticket(id_venta, items, nombre_vendedor, metodo_pago, 
+                           monto_entregado, vuelto, cliente):
     """
     Genera el contenido formateado del ticket
     
@@ -90,7 +97,7 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append(centrar_texto("Tel: (381) 123-4567"))
     ticket.append(centrar_texto("CUIT: 20-12345678-9"))
     ticket.append(linea_separadora())
-    ticket.append("\n")
+    
     
     # ========================================
     # INFORMACIÓN DE LA VENTA
@@ -99,6 +106,7 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
     ticket.append(f"Fecha: {fecha_hora}")
     ticket.append(f"Ticket N°: {id_venta:06d}")
     ticket.append(f"Vendedor: {nombre_vendedor}")
+    ticket.append(f"Cliente : {cliente}")
     ticket.append(linea_separadora())
     
     # ========================================
@@ -155,12 +163,44 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor):
             ticket.append(resto_nombre[:ANCHO_TICKET])
     
     ticket.append(linea_separadora())
-    ticket.append("\n")
+    
     
     # ========================================
-    # TOTAL
+    # TOTALES
     # ========================================
+    ticket.append(justificar_texto("SUBTOTAL:", formato_precio(total)))
+    
+    # Si hay descuento (puedes agregarlo después)
+    # ticket.append(justificar_texto("DESCUENTO:", "-$50.00"))
+    
     ticket.append(justificar_texto("TOTAL:", formato_precio(total)))
+    ticket.append(linea_separadora('='))
+    
+    # ========================================
+    # INFORMACIÓN DE PAGO (NUEVA SECCIÓN)
+    # ========================================
+    ticket.append("INFORMACION DE PAGO:")
+    ticket.append(linea_separadora('.'))
+    
+    # Método de pago
+    metodo_str = metodo_pago.upper()
+    if metodo_pago == "efectivo":
+        metodo_str = "EFECTIVO"
+    elif metodo_pago == "tarjeta":
+        metodo_str = "TARJETA"
+    elif metodo_pago == "transferencia":
+        metodo_str = "TRANSFERENCIA"
+    elif metodo_pago == "cuenta_corriente":
+        metodo_str = "CTA. CORRIENTE"
+    
+    ticket.append(f"Metodo: {metodo_str}")
+    
+    # Solo mostrar monto entregado y vuelto para efectivo
+    if metodo_pago == "efectivo" and monto_entregado > 0:
+        ticket.append(justificar_texto("Entrego:", formato_precio(monto_entregado)))
+        if vuelto > 0:
+            ticket.append(justificar_texto("Vuelto :", formato_precio(vuelto)))
+    
     ticket.append(linea_separadora('='))
     ticket.append("\n")
     
@@ -326,6 +366,29 @@ def imprimir_ticket_prueba():
     """
     Imprime un ticket de prueba para verificar la impresora
     """
+    # Datos de prueba
+    items_prueba = [
+        (1, "Coca-Cola 1.5L", 1, 1200.0, "779089500000"),
+        (2, "Arroz Gallo 1Kg", 2, 750.0, "779123456789"),
+        (3, "Pan Lactal Bimbo", 1, 850.5, "779987654321"),
+        (4, "Tomate Perita Kg", 1.250, 450.0, "779555555555")
+    ]
+    
+    # Usar la función principal con datos de prueba
+    return imprimir_ticket(
+        id_venta=999999,
+        items_de_la_venta=items_prueba,
+        nombre_vendedor="SISTEMA",
+        metodo_pago="efectivo",
+        monto_entregado=5000.0,
+        vuelto=500.0,
+        cliente="Cliente de Prueba"
+    )
+
+def probar_impresion_rapida():
+    """
+    Prueba rápida sin items complejos
+    """
     ticket = []
     ticket.append("\n")
     ticket.append(centrar_texto("=== TICKET DE PRUEBA ==="))
@@ -357,7 +420,15 @@ def imprimir_ticket_prueba():
     subtotal_col = "$125.00".rjust(10)
     ticket.append(f"{nombre_col} {cantidad_col} {p_unit_col} {subtotal_col}")
     ticket.append(linea_separadora('.'))
-    # --- Fin Prueba ---
+    
+    # --- NUEVA SECCIÓN DE PAGO ---
+    ticket.append("INFORMACIÓN DE PAGO:")
+    ticket.append(linea_separadora('.'))
+    ticket.append("Método: EFECTIVO")
+    ticket.append(justificar_texto("Entregó:", "$500.00"))
+    ticket.append(justificar_texto("Vuelto ::", "$175.00"))
+    ticket.append(linea_separadora('='))
+    # --- FIN NUEVA SECCIÓN ---
     
     ticket.append("\n")
     ticket.append(centrar_texto(f"Modelo: {NOMBRE_IMPRESORA}"))
@@ -369,5 +440,28 @@ def imprimir_ticket_prueba():
     try:
         enviar_a_impresora(contenido)
         print("✅ Ticket de prueba enviado")
+        return True
     except Exception as e:
         print(f"❌ Error: {e}")
+        return False
+
+# =====================================
+# Ejecución directa para pruebas
+# =====================================
+if __name__ == "__main__":
+    print("🧪 Módulo de Impresión - Don Atilio")
+    print("1. Listar impresoras")
+    print("2. Probar impresión rápida")
+    print("3. Probar ticket completo")
+    
+    opcion = input("Selecciona opción (1-3): ").strip()
+    
+    if opcion == "1":
+        listar_impresoras()
+    elif opcion == "2":
+        probar_impresion_rapida()
+    elif opcion == "3":
+        imprimir_ticket_prueba()
+    else:
+        print("Ejecutando prueba rápida...")
+        probar_impresion_rapida()

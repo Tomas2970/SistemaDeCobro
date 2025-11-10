@@ -1,32 +1,48 @@
 # ============================================
 # app/frontend/interfaz_venta.py
-# (¡MODIFICADO! Usa la nueva venta atómica)
+# (¡MODIFICADO! Para ser compatible con tu impresora.py de win32print)
 # ============================================
 from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, Toplevel, Listbox, Scrollbar, SINGLE, EXTENDED
 from tkinter import ttk
 from typing import Any
+
 try:
     from app.frontend.stock_alerts import check_low_stock_after_sale 
 except ImportError:
     def check_low_stock_after_sale(*args, **kwargs):
         print("Advertencia: Módulo 'stock_alerts' no encontrado.")
 
+# --- ¡CORRECCIÓN 1! ---
+# Importamos 'impresora' y la función 'imprimir_ticket'
 try:
-    from app.impresora import imprimir_ticket
-except ImportError:
-    print("ADVERTENCIA: app/impresora.py no encontrado. La función de imprimir no estará disponible.")
+    import sys
+    import os
+    # Agregar la carpeta app/ al path si no está
+    app_dir = os.path.join(os.path.dirname(__file__), '..')
+    if app_dir not in sys.path:
+        sys.path.insert(0, app_dir)
+    
+    import impresora
+    # El nombre de la función en tu impresora.py es 'imprimir_ticket'
+    imprimir_ticket = impresora.imprimir_ticket
+except ImportError as e:
+    print(f"ADVERTENCIA: impresora.py no encontrado. La función de imprimir no estará disponible. Error: {e}")
     def imprimir_ticket(*args, **kwargs):
-        messagebox.showerror("Error de Impresora", "No se encontró el archivo 'app/impresora.py'.")
+        messagebox.showerror("Error de Impresora", "No se encontró el archivo 'impresora.py'.")
         return False
+# --- FIN CORRECCIÓN 1 ---
 
+# --- Import de la ventana de pago ---
 try:
-    from app.frontend.interfaz_forma_pago import pedir_forma_pago
-except ImportError:
-    def pedir_forma_pago(*args, **kwargs):
+    from app.frontend.interfaz_forma_pago import mostrar_ventana_pago
+except ImportError as e:
+    print(f"ADVERTENCIA: No se pudo importar interfaz_forma_pago: {e}")
+    def mostrar_ventana_pago(parent, total_venta, cliente_seleccionado):
         messagebox.showerror("Error Crítico", "No se encontró 'interfaz_forma_pago.py'.")
-        return None
+        # Devolvemos un dict de 'efectivo' de emergencia para evitar un crash
+        return {'tipo_pago': 'efectivo', 'monto_pagado': total_venta, 'vuelto': 0}
 
 
 def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
@@ -253,27 +269,30 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     btn_agregar.config(command=agregar_producto)
     entry_producto.bind("<Return>", lambda e: agregar_producto())
     
-    # ---------------- Confirmar venta ----------------
-    # --- ¡FUNCIÓN COMPLETAMENTE REESCRITA! ---
+    
+    # --- ¡FUNCIÓN CONFIRMAR_VENTA ACTUALIZADA! ---
     def confirmar_venta():
         if not items:
             messagebox.showwarning("Atención", "Agregue al menos un producto."); return
         
-        # 1. Pedir forma de pago
-        tipo_pago = pedir_forma_pago(
+        # 1. Pedir forma de pago (AHORA RETORNA UN DICT)
+        info_pago = mostrar_ventana_pago(
             parent=win,
-            total=total_venta,
+            total_venta=total_venta,
             cliente_seleccionado=(cliente_sel is not None)
         )
         
-        if tipo_pago is None:
+        if info_pago is None:
             return # Usuario canceló
+
+        # Extraer el tipo de pago del dict
+        tipo_pago = info_pago['tipo_pago']
 
         if tipo_pago == "cuenta_corriente" and cliente_sel is None:
             messagebox.showerror("Error", "No se puede usar Cuenta Corriente sin un cliente seleccionado.")
             return
 
-        # 2. (Opcional) Validación preventiva de límite de crédito (mejora la UI)
+        # 2. (Opcional) Validación preventiva de límite de crédito
         if tipo_pago == "cuenta_corriente":
             try:
                 id_cli = cliente_sel.get("id_cliente")
@@ -299,7 +318,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         id_usuario = usuario.get("id_usuario") or usuario.get("id", 0)
         id_cliente = cliente_sel.get("id_cliente") if cliente_sel else None
 
-        # 4. ¡Llamada única y atómica al backend!
+        # 4. Llamada única y atómica al backend
         try:
             id_venta = backend.registrar_venta_completa(
                 id_usuario=id_usuario,
@@ -309,30 +328,58 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             )
             
             if not id_venta:
-                # Esto no debería pasar si la transacción lanza un error
                 messagebox.showerror("Error", "La venta no pudo ser registrada (ID nulo).")
                 return
 
         except Exception as e:
-            # Si el backend (DB.py) lanza un error (Stock, Límite, etc.), lo atrapamos aquí
             messagebox.showerror("Error al Guardar Venta", f"La venta fue revertida.\n\nMotivo: {e}", parent=win)
-            return # La venta no se guardó, no se reinicia el formulario
+            return
 
-        # 5. Imprimir ticket (si todo salió bien)
+        # --- ¡CORRECCIÓN 2! ---
+        # 5. Imprimir ticket (Adaptado a tu impresora.py de win32print)
         try:
             msg_pregunta = f"Venta #{id_venta} registrada.\n¿Desea imprimir el ticket?"
             if messagebox.askyesno("Venta Registrada", msg_pregunta, parent=win):
-                imprimir_ticket(
-                    id_venta=id_venta,
-                    items_de_la_venta=items, 
-                    nombre_vendedor=usuario.get("nombre", "Vendedor")
-                )
+                
+                # Preparar los argumentos que tu impresora.py espera
+                args_impresora = {
+                    "id_venta": id_venta,
+                    "items_de_la_venta": items,
+                    "nombre_vendedor": usuario.get("nombre", "Vendedor"),
+                    "metodo_pago": info_pago['tipo_pago'],
+                    "monto_entregado": info_pago.get('monto_pagado', 0.0),
+                    "vuelto": info_pago.get('vuelto', 0.0),
+                    "cliente": cliente_sel.get('nombre', 'Consumidor Final') if cliente_sel else 'Consumidor Final'
+                }
+                
+                # Llamar a la función 'imprimir_ticket' con argumentos separados
+                imprimir_ticket(**args_impresora)
+                
         except Exception as e:
             messagebox.showerror("Error de Impresión", f"La venta se guardó, pero no se pudo imprimir el ticket.\n\nError: {e}", parent=win)
+        # --- FIN CORRECCIÓN 2 ---
 
-        # 6. Reiniciar la venta para la próxima
+        # 6. Mostrar mensaje de éxito con vuelto
+        mensaje = f"✓ Venta #{id_venta} registrada exitosamente\n\n"
+        mensaje += f"Total: ${total_venta:,.2f}\n"
+        
+        tipos_texto = {
+            'efectivo': 'Efectivo',
+            'tarjeta': 'Tarjeta Déb/Créd',
+            'transferencia': 'Transferencia',
+            'cuenta_corriente': 'Cuenta Corriente'
+        }
+        mensaje += f"Método: {tipos_texto.get(tipo_pago, tipo_pago)}\n"
+        
+        if tipo_pago == 'efectivo':
+            mensaje += f"Paga con: ${info_pago['monto_pagado']:,.2f}\n"
+            if info_pago['vuelto'] > 0:
+                mensaje += f"\n💵 VUELTO: ${info_pago['vuelto']:,.2f}"
+        
+        messagebox.showinfo("Venta Exitosa", mensaje, parent=win)
+
+        # 7. Reiniciar la venta para la próxima
         _reiniciar_venta_completa()
-    # --- FIN FUNCIÓN REESCRITA ---
 
     tk.Button(win, text="Confirmar Venta", bg="#4CAF50", fg="white", command=confirmar_venta).place(x=640, y=16)
     tk.Button(win, text="Cancelar", bg="#f44336", fg="white", command=win.destroy).place(x=755, y=16)

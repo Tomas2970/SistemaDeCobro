@@ -38,7 +38,7 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     frame_izq.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     frame_centro = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
-    frame_centro.pack(side=tk.LEFT, fill=tk.Y, pady=100) # Centra los botones verticalmente
+    frame_centro.pack(side=tk.LEFT, fill=tk.Y, pady=100)
 
     frame_der = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
     frame_der.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -46,11 +46,16 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     # --- Panel Izquierdo (Asignados) ---
     tk.Label(frame_izq, text="Productos ASIGNADOS a este proveedor", bg="#f4f4f8", font=("Helvetica", 10, "bold")).pack(pady=5)
     
+    # Búsqueda para asignados
+    var_filtro_asignados = tk.StringVar()
+    ent_filtro_asignados = tk.Entry(frame_izq, textvariable=var_filtro_asignados, width=40)
+    ent_filtro_asignados.pack(fill=tk.X, pady=(0, 5))
+    
     frame_lista_izq = tk.Frame(frame_izq)
     frame_lista_izq.pack(fill=tk.BOTH, expand=True)
     
     sc_izq = Scrollbar(frame_lista_izq, orient=tk.VERTICAL)
-    lista_asignados = Listbox(frame_lista_izq, selectmode=EXTENDED, yscrollcommand=sc_izq.set, height=20)
+    lista_asignados = Listbox(frame_lista_izq, selectmode=EXTENDED, yscrollcommand=sc_izq.set, height=18)
     sc_izq.config(command=lista_asignados.yview)
     sc_izq.pack(side=tk.RIGHT, fill=tk.Y)
     lista_asignados.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -74,6 +79,7 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
 
     # --- Lógica de Carga de Datos ---
     def cargar_listas():
+        """Carga todas las listas desde la base de datos"""
         nonlocal productos_asignados, productos_disponibles
         try:
             productos_asignados = backend.obtener_productos_por_proveedor(id_proveedor)
@@ -85,38 +91,94 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
             messagebox.showerror("Error", f"No se pudieron cargar las listas de productos:\n{e}", parent=win)
 
     def _filtrar_listas(event=None):
+        """Filtra y muestra las listas según los criterios de búsqueda"""
         lista_asignados.delete(0, END)
         lista_disponibles.delete(0, END)
         
-        filtro = var_filtro.get().strip().lower()
+        # Filtros independientes para cada lista
+        filtro_asig = var_filtro_asignados.get().strip().lower()
+        filtro_disp = var_filtro.get().strip().lower()
         
+        # Filtrar lista de ASIGNADOS
         for p in productos_asignados:
-            lista_asignados.insert(END, _fmt(p))
+            nombre = (p.get('nombre') or '').lower()
+            id_str = str(p.get('id_producto'))
+            codigo = (p.get('codigo_barras') or '').lower()
             
+            if (not filtro_asig or 
+                filtro_asig in nombre or 
+                filtro_asig == id_str or 
+                filtro_asig in codigo):
+                lista_asignados.insert(END, _fmt(p))
+            
+        # Filtrar lista de DISPONIBLES
         for p in productos_disponibles:
-            if filtro in (p.get('nombre') or '').lower() or filtro == str(p.get('id_producto')):
+            nombre = (p.get('nombre') or '').lower()
+            id_str = str(p.get('id_producto'))
+            codigo = (p.get('codigo_barras') or '').lower()
+            
+            if (not filtro_disp or 
+                filtro_disp in nombre or 
+                filtro_disp == id_str or 
+                filtro_disp in codigo):
                 lista_disponibles.insert(END, _fmt(p))
-
-    var_filtro.trace_add("write", _filtrar_listas)
 
     # --- Lógica de Botones de Mapeo ---
     def asignar():
+        """Asigna productos seleccionados de disponibles a asignados"""
         ids = _get_id_from_selection(lista_disponibles)
-        if not ids: return
+        if not ids: 
+            messagebox.showwarning("Atención", "Seleccione al menos un producto de la lista de disponibles.", parent=win)
+            return
         
-        for id_prod in ids:
-            backend.asignar_producto_a_proveedor(id_proveedor, id_prod)
+        # Guardar filtros actuales ANTES de modificar las listas
+        filtro_disp_actual = var_filtro.get()
+        filtro_asig_actual = var_filtro_asignados.get()
         
-        cargar_listas() # Recarga todo
+        try:
+            for id_prod in ids:
+                backend.asignar_producto_a_proveedor(id_proveedor, id_prod)
+            
+            # Recargar datos desde la base de datos
+            cargar_listas()
+            
+            # Restaurar filtros DESPUÉS de recargar
+            var_filtro.set(filtro_disp_actual)
+            var_filtro_asignados.set(filtro_asig_actual)
+            
+            # Aplicar filtros con los valores restaurados
+            _filtrar_listas()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudieron asignar los productos:\n{e}", parent=win)
 
     def quitar():
+        """Quita productos seleccionados de asignados a disponibles"""
         ids = _get_id_from_selection(lista_asignados)
-        if not ids: return
+        if not ids: 
+            messagebox.showwarning("Atención", "Seleccione al menos un producto de la lista de asignados.", parent=win)
+            return
         
-        for id_prod in ids:
-            backend.quitar_producto_a_proveedor(id_proveedor, id_prod)
+        # Guardar filtros actuales ANTES de modificar las listas
+        filtro_disp_actual = var_filtro.get()
+        filtro_asig_actual = var_filtro_asignados.get()
+        
+        try:
+            for id_prod in ids:
+                backend.quitar_producto_a_proveedor(id_proveedor, id_prod)
             
-        cargar_listas() # Recarga todo
+            # Recargar datos desde la base de datos
+            cargar_listas()
+            
+            # Restaurar filtros DESPUÉS de recargar
+            var_filtro.set(filtro_disp_actual)
+            var_filtro_asignados.set(filtro_asig_actual)
+            
+            # Aplicar filtros con los valores restaurados
+            _filtrar_listas()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudieron quitar los productos:\n{e}", parent=win)
 
     # --- Botones del Centro ---
     btn_asignar = tk.Button(frame_centro, text="< Asignar", command=asignar, bg="#4CAF50", fg="white", width=10)
@@ -125,7 +187,41 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     btn_quitar = tk.Button(frame_centro, text="Quitar >", command=quitar, bg="#f44336", fg="white", width=10)
     btn_quitar.pack(pady=10)
 
+    # --- Botón para limpiar filtros ---
+    def limpiar_filtros():
+        var_filtro.set("")
+        var_filtro_asignados.set("")
+        _filtrar_listas()
+
+    btn_limpiar = tk.Button(frame_centro, text="Limpiar Filtros", command=limpiar_filtros, bg="#607D8B", fg="white", width=12)
+    btn_limpiar.pack(pady=10)
+
+    # --- Vincular eventos de filtrado ---
+    def on_filtro_change(*args):
+        _filtrar_listas()
+    
+    var_filtro.trace_add("write", on_filtro_change)
+    var_filtro_asignados.trace_add("write", on_filtro_change)
+
     # --- Carga Inicial ---
     cargar_listas()
+    
+    # --- Atajos de teclado ---
+    def on_key_press(event):
+        if event.keysym == 'Escape':
+            limpiar_filtros()
+        elif event.state & 0x4 and event.keysym == 'a':  # Ctrl+A
+            if event.widget == lista_disponibles:
+                lista_disponibles.selection_set(0, END)
+            elif event.widget == lista_asignados:
+                lista_asignados.selection_set(0, END)
+
+    win.bind('<KeyPress>', on_key_press)
+    lista_disponibles.bind('<KeyPress>', on_key_press)
+    lista_asignados.bind('<KeyPress>', on_key_press)
+    
+    # Focus en la búsqueda de disponibles por defecto
+    ent_filtro.focus_set()
+
     win.grab_set()
     win.transient(parent)
