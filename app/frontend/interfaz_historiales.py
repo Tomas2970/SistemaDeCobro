@@ -7,6 +7,14 @@ from datetime import date, datetime, timedelta
 import logging
 import csv 
 
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False):
+        pass
+
 logger = logging.getLogger(__name__)
 
 # --- Helpers de formato de fecha ---
@@ -121,6 +129,12 @@ class Historiales:
         
         if self.filtro_fecha_default:
             self.notebook.select(self.tab_ventas)
+        
+        # ¡NUEVO! Aplicar navegación por teclado
+        configurar_navegacion_ventana(self.win)
+        
+        # ¡NUEVO! Foco inicial en el campo "Desde" de ventas
+        self.win.after(50, lambda: self.ent_desde_v.focus_set())
         
         self.win.grab_set()
 
@@ -323,7 +337,7 @@ class Historiales:
         # --- Fila 2 ---
         tk.Label(frm_filtros, text="Proveedor:", bg="#f4f4f8", font=("Segoe UI", 9)).grid(row=1, column=0, padx=(5,2), pady=(5,0))
         self.cb_proveedor_c = ttk.Combobox(frm_filtros, state="readonly", width=28, font=("Segoe UI", 9))
-        self.cb_proveedor_c.grid(row=1, column=1, padx=2, columnspan=2, pady=(5,0)) # columnspan para alinear
+        self.cb_proveedor_c.grid(row=1, column=1, padx=2, columnspan=2, pady=(5,0))
 
         btn_buscar = tk.Button(frm_filtros, text="🔎 Buscar", command=self.buscar_compras, 
                              bg="#03A9F4", fg="white", width=10, font=("Segoe UI", 9, "bold"))

@@ -3,7 +3,15 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 from app.frontend.interfaz_crear_proveedor import ui_crear_proveedor
-# --- ¡NUEVO! Importamos la nueva pantalla ---
+
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False):
+        pass
+
 try:
     from app.frontend.interfaz_asignar_productos import ui_asignar_productos
 except ImportError:
@@ -72,10 +80,8 @@ def ui_gestion_proveedores(parent: tk.Misc, backend):
         id_prov = item[0]
         
         ui_crear_proveedor(win, backend, id_proveedor_a_editar=int(id_prov))
-        
         cargar_datos()
     
-    # --- ¡NUEVA FUNCIÓN! ---
     def abrir_asignar_productos():
         seleccion = tree.selection()
         if not seleccion:
@@ -90,9 +96,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend):
         id_prov = int(item[0])
         nombre_prov = str(item[1])
         
-        # Llama a la nueva pantalla
         ui_asignar_productos(win, backend, id_prov, nombre_prov)
-    # --- FIN NUEVA FUNCIÓN ---
 
     def desactivar_proveedor():
         seleccion = tree.selection()
@@ -116,15 +120,17 @@ def ui_gestion_proveedores(parent: tk.Misc, backend):
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error:\n{e}", parent=win)
 
-    tk.Button(frame_botones, text="↻ Recargar Lista", command=cargar_datos, bg="#03A9F4", fg="white", width=15).pack(side=tk.LEFT, padx=(20, 10))
+    btn_recargar = tk.Button(frame_botones, text="↻ Recargar Lista", command=cargar_datos, bg="#03A9F4", fg="white", width=15)
+    btn_recargar.pack(side=tk.LEFT, padx=(20, 10))
     
-    tk.Button(frame_botones, text="✎ Editar Seleccionado", command=abrir_editar_proveedor, bg="#FFC107", fg="black", width=18).pack(side=tk.LEFT, padx=10)
+    btn_editar = tk.Button(frame_botones, text="✎ Editar Seleccionado", command=abrir_editar_proveedor, bg="#FFC107", fg="black", width=18)
+    btn_editar.pack(side=tk.LEFT, padx=10)
     
-    # --- ¡NUEVO BOTÓN! ---
-    tk.Button(frame_botones, text="Asignar Productos", command=abrir_asignar_productos, bg="#7c3aed", fg="white", width=18).pack(side=tk.LEFT, padx=10)
-    # --- FIN NUEVO BOTÓN ---
+    btn_asignar = tk.Button(frame_botones, text="Asignar Productos", command=abrir_asignar_productos, bg="#7c3aed", fg="white", width=18)
+    btn_asignar.pack(side=tk.LEFT, padx=10)
     
-    tk.Button(frame_botones, text="Desactivar Seleccionado", command=desactivar_proveedor, bg="#f44336", fg="white", width=20).pack(side=tk.LEFT, padx=10)
+    btn_desactivar = tk.Button(frame_botones, text="Desactivar Seleccionado", command=desactivar_proveedor, bg="#f44336", fg="white", width=20)
+    btn_desactivar.pack(side=tk.LEFT, padx=10)
     
     chk_inactivos = tk.Checkbutton(
         frame_botones, 
@@ -137,8 +143,16 @@ def ui_gestion_proveedores(parent: tk.Misc, backend):
     )
     chk_inactivos.pack(side=tk.LEFT, padx=20)
     
-    tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#607D8B", fg="white", width=15).pack(side=tk.RIGHT, padx=20)
+    btn_cerrar = tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#607D8B", fg="white", width=15)
+    btn_cerrar.pack(side=tk.RIGHT, padx=20)
 
     cargar_datos()
+    
+    # ¡NUEVO! Aplicar navegación por teclado
+    configurar_navegacion_ventana(win)
+    
+    # ¡NUEVO! Foco inicial en botón recargar
+    win.after(50, lambda: btn_recargar.focus_set())
+    
     win.grab_set()
     win.transient(parent)

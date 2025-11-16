@@ -10,6 +10,32 @@ import os
 import tkinter as tk
 import logging
 
+# =========================================================
+# --- BLOQUE DE "ENGANCHE" PARA PYINSTALLER ---
+# Este bloque no hace nada funcional en el código, 
+# pero le "dice" a PyInstaller que debe incluir estos 
+# archivos sí o sí en el .exe final.
+# =http,
+# =========================================================
+try:
+    from app.frontend import interfaz_inventario
+    from app.frontend import interfaz_productos
+    from app.frontend import interfaz_venta
+    from app.frontend import interfaz_reportes
+    from app.frontend import interfaz_gestion_clientes
+    from app.frontend import interfaz_cuenta_corriente
+    from app.frontend import interfaz_compra
+    from app.frontend import interfaz_historiales
+    from app.frontend import interfaz_gestion_usuarios
+    
+    # También incluimos los que son importados por otras interfaces
+    from app.frontend import interfaz_forma_pago
+    from app.frontend import stock_alerts 
+except ImportError:
+    # No importa si falla, es solo para el análisis estático
+    pass 
+# =========================================================
+
 # --- Configuración de Paths ---
 # (Esto es crucial para que PyInstaller encuentre los archivos)
 if getattr(sys, 'frozen', False):

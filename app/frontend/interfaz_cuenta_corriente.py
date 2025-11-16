@@ -5,12 +5,20 @@ from tkinter import ttk, messagebox, simpledialog, Toplevel
 from typing import Optional, Any
 import logging
 
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False):
+        pass
+
 logger = logging.getLogger(__name__)
 
 class CuentaCorriente:
     def __init__(self, parent: tk.Misc, backend, usuario: dict):
         self.backend = backend
-        self.usuario = usuario # Guardamos el usuario para registrar quién cobra
+        self.usuario = usuario
         self.win = tk.Toplevel(parent)
         self.win.title("🏦 Gestión de Cuentas Corrientes")
         self.win.geometry("900x600")
@@ -19,6 +27,12 @@ class CuentaCorriente:
 
         self.crear_widgets()
         self.cargar_deudores()
+        
+        # ¡NUEVO! Aplicar navegación por teclado
+        configurar_navegacion_ventana(self.win)
+        
+        # ¡NUEVO! Foco inicial en botón registrar pago
+        self.win.after(50, lambda: self.btn_pago.focus_set())
         
         self.win.grab_set()
 
@@ -31,13 +45,15 @@ class CuentaCorriente:
         frm_acciones = tk.Frame(self.win, bg="#f4f4f8", pady=15)
         frm_acciones.pack(fill=tk.X)
 
-        tk.Button(frm_acciones, text="Registrar un Pago", 
+        self.btn_pago = tk.Button(frm_acciones, text="Registrar un Pago", 
                   command=self.abrir_ventana_pago, 
-                  bg="#4CAF50", fg="white", font=("Segoe UI", 10, "bold"), width=20, height=2).pack(side=tk.LEFT, padx=20)
+                  bg="#4CAF50", fg="white", font=("Segoe UI", 10, "bold"), width=20, height=2)
+        self.btn_pago.pack(side=tk.LEFT, padx=20)
         
-        tk.Button(frm_acciones, text="↻ Recargar Lista de Deudores", 
+        btn_recargar = tk.Button(frm_acciones, text="↻ Recargar Lista de Deudores", 
                   command=self.cargar_deudores, 
-                  bg="#03A9F4", fg="white", font=("Segoe UI", 10, "bold"), width=25, height=2).pack(side=tk.LEFT, padx=10)
+                  bg="#03A9F4", fg="white", font=("Segoe UI", 10, "bold"), width=25, height=2)
+        btn_recargar.pack(side=tk.LEFT, padx=10)
 
         # --- Frame Maestro (Lista de Deudores) ---
         frm_lista = tk.LabelFrame(self.win, text="Clientes con Deuda (Saldo Negativo)", bg="#f4f4f8", padx=10, pady=10)
@@ -89,6 +105,9 @@ class CuentaCorriente:
         self.win_pago.geometry("500x400")
         self.win_pago.config(bg="#f4f4f8")
         self.win_pago.resizable(False, False)
+        
+        # ¡NUEVO! Aplicar navegación al popup
+        configurar_navegacion_ventana(self.win_pago)
         
         self.win_pago.grab_set()
         self.win_pago.transient(self.win)
@@ -148,8 +167,14 @@ class CuentaCorriente:
         btn_frame = tk.Frame(frame, bg="#f4f4f8")
         btn_frame.grid(row=9, column=0, columnspan=2, pady=20)
         
-        tk.Button(btn_frame, text="Confirmar Pago", command=self.confirmar_pago, bg="#4CAF50", fg="white", width=20).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="Cancelar", command=self.win_pago.destroy, bg="#f44336", fg="white", width=15).pack(side=tk.LEFT, padx=10)
+        btn_confirmar = tk.Button(btn_frame, text="Confirmar Pago", command=self.confirmar_pago, bg="#4CAF50", fg="white", width=20)
+        btn_confirmar.pack(side=tk.LEFT, padx=10)
+        
+        btn_cancelar = tk.Button(btn_frame, text="Cancelar", command=self.win_pago.destroy, bg="#f44336", fg="white", width=15)
+        btn_cancelar.pack(side=tk.LEFT, padx=10)
+        
+        # ¡NUEVO! Foco inicial en el combo de clientes
+        self.win_pago.after(50, lambda: self.cb_clientes_pago.focus_set())
 
     def cargar_info_cuenta(self, event=None):
         # Resetea los labels
@@ -170,17 +195,14 @@ class CuentaCorriente:
         id_cliente = self.cliente_seleccionado.get('id_cliente')
         
         try:
-            # --- Lógica Clave: Asegura que la CC exista ---
             self.backend.crear_cuenta_corriente_si_no_existe(id_cliente)
-            
-            # Ahora sí, obtiene la info de la cuenta
             cuenta = self.backend.obtener_cuenta_por_cliente(id_cliente)
             self.cuenta_seleccionada = cuenta
             
             if cuenta:
                 saldo = cuenta.get('saldo', 0.0)
                 limite = cuenta.get('limite_credito', 0.0)
-                disponible = saldo + limite # Si saldo es -1000 y limite 5000, disponible es 4000
+                disponible = saldo + limite
                 
                 self.lbl_saldo.config(text=self._fmt_mon(saldo), fg=("#ef4444" if saldo < 0 else "blue"))
                 self.lbl_limite.config(text=self._fmt_mon(limite))
@@ -193,7 +215,6 @@ class CuentaCorriente:
             messagebox.showerror("Error", f"No se pudo cargar la info de la cuenta:\n{e}", parent=self.win_pago)
 
     def confirmar_pago(self):
-        # 1. Validar Cliente y Cuenta
         if not self.cliente_seleccionado or not self.cuenta_seleccionada:
             messagebox.showwarning("Faltan datos", "Debe seleccionar un cliente válido.", parent=self.win_pago)
             return
@@ -201,7 +222,6 @@ class CuentaCorriente:
         id_cuenta = self.cuenta_seleccionada.get('id_cuenta')
         id_usuario = self.usuario.get('id_usuario')
 
-        # 2. Validar Monto
         try:
             monto = float(self.entry_monto.get().strip())
             if monto <= 0:
@@ -210,10 +230,8 @@ class CuentaCorriente:
             messagebox.showwarning("Monto Inválido", "Ingrese un monto numérico positivo (ej: 1500.50).", parent=self.win_pago)
             return
             
-        # 3. Validar Método
         metodo = self.cb_metodo.get()
         
-        # 4. Enviar al Backend
         try:
             ok = self.backend.registrar_pago_cuenta_corriente(
                 id_cuenta=id_cuenta,
@@ -224,8 +242,8 @@ class CuentaCorriente:
             
             if ok:
                 messagebox.showinfo("Éxito", "Pago registrado correctamente.", parent=self.win_pago)
-                self.win_pago.destroy() # Cierra la ventana de pago
-                self.cargar_deudores() # Recarga la lista de deudores en la ventana principal
+                self.win_pago.destroy()
+                self.cargar_deudores()
             else:
                 messagebox.showerror("Error", "No se pudo registrar el pago.", parent=self.win_pago)
                 
@@ -234,6 +252,5 @@ class CuentaCorriente:
             messagebox.showerror("Error", f"Ocurrió un error al guardar:\n{e}", parent=self.win_pago)
 
 
-# Wrapper para ser llamado desde el menú principal
 def ui_cuenta_corriente(parent: tk.Misc, backend, usuario: dict):
     CuentaCorriente(parent, backend, usuario)

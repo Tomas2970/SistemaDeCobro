@@ -6,6 +6,14 @@ from typing import Any, Optional
 from datetime import date, datetime, timedelta 
 import logging
 
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win):
+        pass
+
 # --- ¡CORRECCIÓN! Importa la CLASE Historiales, no ui_historiales ---
 try:
     from app.frontend.interfaz_historiales import Historiales
@@ -66,11 +74,13 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
     cb_periodo.current(0) 
 
     tk.Label(frm, text="Desde (DD/MM/YYYY):", bg="#f4f4f8").grid(row=2, column=0, sticky="e", padx=6, pady=4)
-    ent_desde = tk.Entry(frm, width=14); ent_desde.grid(row=2, column=1, sticky="w")
+    ent_desde = tk.Entry(frm, width=14)
+    ent_desde.grid(row=2, column=1, sticky="w")
     ent_desde.insert(0, f"01/01/{date.today().year}")
 
     tk.Label(frm, text="Hasta (DD/MM/YYYY):", bg="#f4f4f8").grid(row=3, column=0, sticky="e", padx=6, pady=4)
-    ent_hasta = tk.Entry(frm, width=14); ent_hasta.grid(row=3, column=1, sticky="w")
+    ent_hasta = tk.Entry(frm, width=14)
+    ent_hasta.grid(row=3, column=1, sticky="w")
     ent_hasta.insert(0, date.today().strftime("%d/%m/%Y"))
 
     tk.Label(frm, text="Vendedor:", bg="#f4f4f8").grid(row=0, column=2, sticky="e", padx=(24,6))
@@ -83,7 +93,8 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
         except Exception as e:
             logger.exception("obtener_vendedores()")
             vendedores = []
-        nombres = ["(Todos)"]; ids = [None]
+        nombres = ["(Todos)"]
+        ids = [None]
         for v in vendedores:
             nombres.append(str(v.get("nombre") or ""))
             ids.append(int(v.get("id_usuario") or v.get("id") or 0) or None)
@@ -91,7 +102,8 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
         cb_vendedor.ids = ids  # type: ignore
         cb_vendedor.current(0)
 
-    ttk.Button(frm, text="↻", width=3, command=load_vendedores).grid(row=0, column=4, padx=4)
+    btn_reload_vendedores = ttk.Button(frm, text="↻", width=3, command=load_vendedores)
+    btn_reload_vendedores.grid(row=0, column=4, padx=4)
     
     def on_periodo_seleccionado(event=None):
         periodo = cb_periodo.get()
@@ -126,8 +138,10 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
             inicio_mes_pasado = fin_mes_pasado.replace(day=1)
             desde, hasta = inicio_mes_pasado, fin_mes_pasado
         
-        ent_desde.delete(0, tk.END); ent_desde.insert(0, desde.strftime("%d/%m/%Y"))
-        ent_hasta.delete(0, tk.END); ent_hasta.insert(0, hasta.strftime("%d/%m/%Y"))
+        ent_desde.delete(0, tk.END)
+        ent_desde.insert(0, desde.strftime("%d/%m/%Y"))
+        ent_hasta.delete(0, tk.END)
+        ent_hasta.insert(0, hasta.strftime("%d/%m/%Y"))
         
         ent_desde.config(state="readonly")
         ent_hasta.config(state="readonly")
@@ -162,7 +176,8 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
     setup_tree(default_cols) 
 
     # -------- Acciones
-    btns = tk.Frame(body, bg="#f4f4f8"); btns.pack(fill=tk.X)
+    btns = tk.Frame(body, bg="#f4f4f8")
+    btns.pack(fill=tk.X)
 
     def _vendedor_id_sel() -> Optional[int]:
         try:
@@ -190,7 +205,7 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
         except Exception:
             return str(x)
 
-    # --- ¡CORRECCIÓN! Función de doble clic arreglada ---
+    # --- Función de doble clic arreglada ---
     def on_doble_clic_reporte(event=None):
         if cb_tipo.get() != "Ventas diarias":
             return 
@@ -221,12 +236,12 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
         except Exception as e:
             logger.exception("Error abriendo Historiales")
             messagebox.showerror("Error", f"No se pudo abrir el historial:\n{e}", parent=win)
-    # --- FIN CORRECCIÓN ---
 
     def generar():
         try:
             rango = _validar_fechas_sql()
-            if not rango: return
+            if not rango:
+                return
             desde_sql, hasta_sql = rango
             
             tipo = cb_tipo.get()
@@ -242,7 +257,8 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
                 
                 tree.delete(*tree.get_children())
                 if not datos:
-                    tree.insert("", "end", values=("Sin datos", "", "")); return
+                    tree.insert("", "end", values=("Sin datos", "", ""))
+                    return
                 
                 for r in datos:
                     tree.insert("", "end", values=(
@@ -251,14 +267,15 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
                         _fmt_mon(r.get("monto_total") or 0),
                     ))
             
-            else: # Ventas diarias
+            else:  # Ventas diarias
                 cols = [("Fecha (Día)", 140), ("Cant. Ventas", 110), ("Monto Total", 120)]
                 setup_tree(cols)
                 
                 datos = backend.obtener_ventas_diarias(desde_sql, hasta_sql)
                 tree.delete(*tree.get_children())
                 if not datos:
-                    tree.insert("", "end", values=("Sin datos", "", "")); return
+                    tree.insert("", "end", values=("Sin datos", "", ""))
+                    return
                 
                 for r in datos:
                     fecha_dia = datetime.strptime(str(r.get("fecha")), "%Y-%m-%d").strftime("%d/%m/%Y")
@@ -273,9 +290,10 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
             
         except Exception as e:
             logger.exception("generar()")
-            messagebox.showerror("Error", f"No se pudo generar el reporte:\n{e}")
+            messagebox.showerror("Error", f"No se pudo generar el reporte:\n{e}", parent=win)
 
-    ttk.Button(btns, text="Generar", width=14, command=generar).pack(side=tk.LEFT, padx=4, pady=6)
+    btn_generar = ttk.Button(btns, text="Generar", width=14, command=generar)
+    btn_generar.pack(side=tk.LEFT, padx=4, pady=6)
 
     def on_tipo_changed(_evt=None):
         is_vend = cb_tipo.get() == "Ventas por vendedor"
@@ -295,6 +313,19 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict) -> None:
     on_tipo_changed()
     on_periodo_seleccionado() 
     cb_periodo.current(0) 
-    on_periodo_seleccionado() 
+    on_periodo_seleccionado()
+    
+    # ¡NUEVO! Aplicar navegación por teclado
+    configurar_navegacion_ventana(win)
+    
+    # ¡NUEVO! Foco inicial en el combo de tipo de reporte
+    def _enfocar_inicial():
+        try:
+            win.focus_force()
+            cb_tipo.focus_set()
+        except Exception:
+            pass
+    
+    win.after(50, _enfocar_inicial)
     
     win.grab_set()

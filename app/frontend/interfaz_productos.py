@@ -3,21 +3,38 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Any, Dict
+
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False):
+        pass
+
 try:
     from app.frontend.stock_alerts import show_low_stock_alert
 except ImportError:
     def show_low_stock_alert(*args, **kwargs):
         print("Advertencia: Módulo 'stock_alerts' no encontrado.")
 
+try:
+    from app.frontend.stock_event_manager import stock_events
+except ImportError:
+    print("ADVERTENCIA: No se pudo importar stock_event_manager")
+    class DummyStockEvents:
+        def notificar_cambio_stock(self): pass
+    stock_events = DummyStockEvents()
+
 def ui_productos(
     parent: tk.Misc, 
     backend, 
-    usuario: dict, # <-- ¡Ya recibimos el 'usuario' aquí!
+    usuario: dict,
     id_producto_a_cargar: int | None = None
 ) -> None:
     
     win = tk.Toplevel(parent)
-    win.title("🧰 Productos (Alta / Edición / Stock)")
+    win.title("🧰 Productos (Alta / Baja / Modificacion)")
     win.geometry("520x480")
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
@@ -31,16 +48,21 @@ def ui_productos(
     
     tk.Label(frm_busqueda, text="ID / Código / Nombre:", bg="#f4f4f8").pack(side=tk.LEFT, padx=(0, 6))
     var_token = tk.StringVar()
-    tk.Entry(frm_busqueda, textvariable=var_token, width=24).pack(side=tk.LEFT)
-    tk.Button(frm_busqueda, text="🔎 Buscar", width=8, command=lambda: cargar_por_token()).pack(side=tk.LEFT, padx=(6,2))
-    tk.Button(frm_busqueda, text="Nuevo", width=7, command=lambda: limpiar_form()).pack(side=tk.LEFT, padx=2)
+    ent_busqueda = tk.Entry(frm_busqueda, textvariable=var_token, width=24)
+    ent_busqueda.pack(side=tk.LEFT)
+    
+    btn_buscar = tk.Button(frm_busqueda, text="🔎 Buscar", width=8, command=lambda: cargar_por_token())
+    btn_buscar.pack(side=tk.LEFT, padx=(6,2))
+    
+    btn_nuevo = tk.Button(frm_busqueda, text="Nuevo", width=7, command=lambda: limpiar_form())
+    btn_nuevo.pack(side=tk.LEFT, padx=2)
 
-    # --- Frame para el formulario, centrado ---
+    # --- Frame para el formulario ---
     body = tk.Frame(main_frame, bg="#f4f4f8")
     body.pack(fill=tk.X, pady=8) 
     
-    body.columnconfigure(0, weight=1, uniform='lbl') # Etiqueta
-    body.columnconfigure(1, weight=3, uniform='ent') # Entrada
+    body.columnconfigure(0, weight=1, uniform='lbl')
+    body.columnconfigure(1, weight=3, uniform='ent')
 
     row = 0
     def add_row(lbl: str, widget):
@@ -49,20 +71,32 @@ def ui_productos(
         widget.grid(row=row, column=1, sticky="w", padx=8, pady=6)
         row += 1
 
-    var_id = tk.StringVar(); add_row("ID (solo lectura):", tk.Entry(body, textvariable=var_id, width=12, state="readonly"))
-    var_nombre = tk.StringVar(); add_row("Nombre:", tk.Entry(body, textvariable=var_nombre, width=40))
-    combo_cat = ttk.Combobox(body, state="readonly", width=38); add_row("Categoría:", combo_cat)
-    var_precio = tk.StringVar(value="0.00"); add_row("Precio:", tk.Entry(body, textvariable=var_precio, width=14))
+    var_id = tk.StringVar()
+    add_row("ID (solo lectura):", tk.Entry(body, textvariable=var_id, width=12, state="readonly"))
+    
+    var_nombre = tk.StringVar()
+    add_row("Nombre:", tk.Entry(body, textvariable=var_nombre, width=40))
+    
+    combo_cat = ttk.Combobox(body, state="readonly", width=38)
+    add_row("Categoría:", combo_cat)
+    
+    var_precio = tk.StringVar(value="0.00")
+    add_row("Precio:", tk.Entry(body, textvariable=var_precio, width=14))
     
     var_es_pesable = tk.BooleanVar(value=False)
     chk_pesable = tk.Checkbutton(body, text="Es pesable (se vende por Kg/Lt)", variable=var_es_pesable, bg="#f4f4f8")
     add_row("Tipo de Venta:", chk_pesable)
     
-    var_cod = tk.StringVar(); add_row("Código de barras:", tk.Entry(body, textvariable=var_cod, width=40))
-    var_stock = tk.StringVar(value="0"); add_row("Stock (Kg / Unid):", tk.Entry(body, textvariable=var_stock, width=10))
-    var_stock_min = tk.StringVar(value="10"); add_row("Stock mínimo:", tk.Entry(body, textvariable=var_stock_min, width=10))
+    var_cod = tk.StringVar()
+    add_row("Código de barras:", tk.Entry(body, textvariable=var_cod, width=40))
+    
+    var_stock = tk.StringVar(value="0")
+    add_row("Stock (Kg / Unid):", tk.Entry(body, textvariable=var_stock, width=10))
+    
+    var_stock_min = tk.StringVar(value="10")
+    add_row("Stock mínimo:", tk.Entry(body, textvariable=var_stock_min, width=10))
 
-    # --- Frame de acciones centrado ---
+    # --- Frame de acciones ---
     actions = tk.Frame(main_frame, bg="#f4f4f8")
     actions.pack(pady=10, fill=tk.X, expand=True) 
     
@@ -117,8 +151,12 @@ def ui_productos(
         return res[0] if res else None
 
     def limpiar_form():
-        var_id.set(""); var_nombre.set(""); var_precio.set("0.00"); var_cod.set("")
-        var_stock.set("0"); var_stock_min.set("10")
+        var_id.set("")
+        var_nombre.set("")
+        var_precio.set("0.00")
+        var_cod.set("")
+        var_stock.set("0")
+        var_stock_min.set("10")
         var_es_pesable.set(False) 
         if combo_cat["values"]: combo_cat.current(0)
         var_token.set("")
@@ -131,11 +169,13 @@ def ui_productos(
             
         prod = _resolver_producto(token)
         if not prod:
-            messagebox.showinfo("Sin resultados", "No se encontró el producto.", parent=win); return
+            messagebox.showinfo("Sin resultados", "No se encontró el producto.", parent=win)
+            return
         
         n = _norm(prod)
         var_id.set("" if n["id"] in (None, "", "None") else str(n["id"]))
-        var_nombre.set(n["nombre"]); var_precio.set(f"{n['precio']:.2f}")
+        var_nombre.set(n["nombre"])
+        var_precio.set(f"{n['precio']:.2f}")
         var_cod.set(n["codigo"])
         var_es_pesable.set(n["es_pesable"]) 
         
@@ -168,13 +208,13 @@ def ui_productos(
         return except_id is not None and pid == except_id
 
     def guardar():
-        # --- ¡MODIFICACIÓN! Obtener id_usuario para auditoría ---
         id_user = usuario.get("id_usuario")
         
         try:
             nombre = var_nombre.get().strip()
             if not nombre:
-                messagebox.showwarning("Validación", "El nombre es obligatorio.", parent=win); return
+                messagebox.showwarning("Validación", "El nombre es obligatorio.", parent=win)
+                return
             
             ids_meta = getattr(combo_cat, "ids", [None])  # type: ignore
             id_cat = ids_meta[combo_cat.current()] if ids_meta and combo_cat.current() >= 0 else None
@@ -188,12 +228,14 @@ def ui_productos(
             es_pesable = var_es_pesable.get() 
 
         except Exception as e:
-            messagebox.showwarning("Validación", f"Verifique los datos (precio/stock). Error: {e}", parent=win); return
+            messagebox.showwarning("Validación", f"Verifique los datos (precio/stock). Error: {e}", parent=win)
+            return
 
         pid = int(var_id.get()) if var_id.get().isdigit() else None
         
         if not _validar_dup_codigo(codigo, pid):
-            messagebox.showwarning("Código", "El código de barras ya existe en otro producto.", parent=win); return
+            messagebox.showwarning("Código", "El código de barras ya existe en otro producto.", parent=win)
+            return
 
         if pid is None:
             try:
@@ -205,11 +247,12 @@ def ui_productos(
                     stock_inicial=stock_abs,
                     stock_minimo=stock_min,
                     es_pesable=es_pesable,
-                    id_usuario=id_user # <-- Pasa el usuario
+                    id_usuario=id_user
                 )
                 if nuevo_id:
                     var_id.set(str(nuevo_id))
                     messagebox.showinfo("OK", f"Producto creado (ID {nuevo_id}).", parent=win)
+                    stock_events.notificar_cambio_stock()
                 else:
                     messagebox.showerror("Error", "No se pudo crear el producto.", parent=win)
             except Exception as e:
@@ -224,39 +267,40 @@ def ui_productos(
                     precio=precio,
                     codigo_barras=codigo,
                     es_pesable=es_pesable,
-                    id_usuario=id_user # <-- Pasa el usuario
+                    id_usuario=id_user
                 )
                 
                 ok_inv = backend.actualizar_inventario_absoluto(
                     id_producto=pid,
                     stock_abs=stock_abs,
                     stock_minimo=stock_min,
-                    id_usuario=id_user # <-- Pasa el usuario
+                    id_usuario=id_user
                 )
                 
                 if ok_prod and ok_inv:
                     messagebox.showinfo("OK", "Producto actualizado correctamente.", parent=win)
+                    stock_events.notificar_cambio_stock()
                 elif not ok_prod:
                      messagebox.showerror("Error", "No se pudieron guardar los cambios del producto.", parent=win)
                 else:
                     messagebox.showwarning("Atención", "Se guardaron los datos del producto, pero falló la actualización del stock.", parent=win)
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo actualizar:\s{e}", parent=win)
+                messagebox.showerror("Error", f"No se pudo actualizar:\n{e}", parent=win)
 
     def desactivar():
         pid_txt = var_id.get().strip()
         if not pid_txt.isdigit():
-            messagebox.showwarning("Desactivar", "No hay un producto cargado.", parent=win); return
+            messagebox.showwarning("Desactivar", "No hay un producto cargado.", parent=win)
+            return
         
         pid = int(pid_txt)
         if not messagebox.askyesno("Confirmar", f"¿Desactivar el producto ID {pid}?\nEl producto ya no aparecerá en ventas o inventario.", parent=win):
             return
         try:
-            # --- ¡MODIFICACIÓN! Pasa el id_usuario ---
             id_user = usuario.get("id_usuario")
             if backend.eliminar_producto(pid, id_usuario=id_user):
-            # --- FIN MODIFICACIÓN ---
                 messagebox.showinfo("OK", "Producto desactivado.", parent=win)
+                stock_events.notificar_cambio_stock()
                 limpiar_form()
             else:
                  messagebox.showerror("Error", "No se pudo desactivar el producto.", parent=win)
@@ -270,5 +314,12 @@ def ui_productos(
     
     # Boot
     cargar_categorias()
-    win.after(10, cargar_producto_inicial) 
+    win.after(10, cargar_producto_inicial)
+    
+    # ¡NUEVO! Aplicar navegación por teclado con confirmación
+    configurar_navegacion_ventana(win, confirmar_cierre=True)
+    
+    # ¡NUEVO! Foco inicial en el campo de búsqueda
+    win.after(50, lambda: ent_busqueda.focus_set())
+    
     win.grab_set()

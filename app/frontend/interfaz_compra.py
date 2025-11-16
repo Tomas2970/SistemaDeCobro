@@ -7,6 +7,23 @@ import os
 from app.frontend.interfaz_crear_proveedor import ui_crear_proveedor
 from app.frontend.interfaz_gestion_proveedores import ui_gestion_proveedores
 
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False):
+        pass
+
+# Sistema de notificación de cambios de stock
+try:
+    from app.frontend.stock_event_manager import stock_events
+except ImportError:
+    print("ADVERTENCIA: No se pudo importar stock_event_manager")
+    class DummyStockEvents:
+        def notificar_cambio_stock(self): pass
+    stock_events = DummyStockEvents()
+
 def ui_compra(parent: tk.Misc, backend, usuario: dict):
     
     proveedor_seleccionado: dict | None = None
@@ -17,7 +34,6 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     win.geometry("780x600")
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
-
 
     tk.Label(win, text="Registrar Compra", bg="#f4f4f8", fg="#333",
              font=("Helvetica", 14, "bold")).place(x=20, y=20)
@@ -44,12 +60,21 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                     messagebox.showerror("Error", f"No se pudo recargar proveedores.\n{e}", parent=win)
             
             def mostrar_popup_lista(proveedores: list):
-                sel = Toplevel(win); sel.title("Seleccionar Proveedor"); sel.geometry("400x300"); sel.config(bg="#f4f4f8")
+                sel = Toplevel(win)
+                sel.title("Seleccionar Proveedor")
+                sel.geometry("400x300")
+                sel.config(bg="#f4f4f8")
                 
-                frame_lista = tk.Frame(sel); frame_lista.pack(expand=True, fill="both", padx=10, pady=10)
-                sc = Scrollbar(frame_lista); sc.pack(side="right", fill="y")
+                # ¡NUEVO! Aplicar navegación al popup
+                configurar_navegacion_ventana(sel)
+                
+                frame_lista = tk.Frame(sel)
+                frame_lista.pack(expand=True, fill="both", padx=10, pady=10)
+                sc = Scrollbar(frame_lista)
+                sc.pack(side="right", fill="y")
                 lst = Listbox(frame_lista, selectmode=SINGLE, yscrollcommand=sc.set, width=50, height=12)
-                lst.pack(side="left", fill="both", expand=True); sc.config(command=lst.yview)
+                lst.pack(side="left", fill="both", expand=True)
+                sc.config(command=lst.yview)
                 
                 for p in proveedores:
                     lst.insert(tk.END, f"{p.get('id_proveedor')} | {p.get('nombre')}")
@@ -68,9 +93,14 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                     
                 frame_boton = tk.Frame(sel, bg="#f4f4f8")
                 frame_boton.pack(fill="x", pady=8)
-                tk.Button(frame_boton, text="Seleccionar", command=tomar, bg="#4CAF50", fg="white").pack() 
+                btn_sel = tk.Button(frame_boton, text="Seleccionar", command=tomar, bg="#4CAF50", fg="white")
+                btn_sel.pack()
                 
-                sel.grab_set(); sel.transient(win)
+                # ¡NUEVO! Foco inicial en la lista
+                sel.after(50, lambda: lst.focus_set())
+                
+                sel.grab_set()
+                sel.transient(win)
             
             proveedores_actuales = backend.obtener_proveedores(incluir_inactivos=False)
             if not proveedores_actuales:
@@ -84,7 +114,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
             messagebox.showerror("Error", f"No se pudo cargar proveedores.\n{e}", parent=win)
             return
 
-    tk.Button(win, text="Elegir...", command=abrir_selector_proveedor).place(x=400, y=65)
+    btn_elegir = tk.Button(win, text="Elegir...", command=abrir_selector_proveedor)
+    btn_elegir.place(x=400, y=65)
     
     def abrir_gestion_proveedores():
         nonlocal proveedor_seleccionado
@@ -106,10 +137,12 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
 
     def abrir_crear_nuevo():
         ui_crear_proveedor(win, backend, id_proveedor_a_editar=None)
-        
-    tk.Button(win, text="+ Crear", command=abrir_crear_nuevo).place(x=470, y=65)
-    tk.Button(win, text="Gestionar Proveedores", command=abrir_gestion_proveedores).place(x=540, y=65)
-
+    
+    btn_crear = tk.Button(win, text="+ Crear", command=abrir_crear_nuevo)
+    btn_crear.place(x=470, y=65)
+    
+    btn_gestionar = tk.Button(win, text="Gestionar Proveedores", command=abrir_gestion_proveedores)
+    btn_gestionar.place(x=540, y=65)
 
     # ==========================================
     # 2. SELECCIÓN DE PRODUCTOS
@@ -130,22 +163,34 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         sel.geometry("400x350")
         sel.config(bg="#f4f4f8")
         
-        tk.Label(sel, text="Buscar producto:", bg="#f4f4f8").pack(pady=5)
-        var_pat = tk.StringVar(); ent = tk.Entry(sel, textvariable=var_pat, width=40); ent.pack(pady=4); ent.focus_set()
+        # ¡NUEVO! Aplicar navegación al popup
+        configurar_navegacion_ventana(sel)
         
-        frame_lista = tk.Frame(sel); frame_lista.pack(expand=True, fill="both", padx=10, pady=10)
-        sc = Scrollbar(frame_lista); sc.pack(side="right", fill="y")
+        tk.Label(sel, text="Buscar producto:", bg="#f4f4f8").pack(pady=5)
+        var_pat = tk.StringVar()
+        ent = tk.Entry(sel, textvariable=var_pat, width=40)
+        ent.pack(pady=4)
+        
+        frame_lista = tk.Frame(sel)
+        frame_lista.pack(expand=True, fill="both", padx=10, pady=10)
+        sc = Scrollbar(frame_lista)
+        sc.pack(side="right", fill="y")
         lst = Listbox(frame_lista, selectmode=SINGLE, yscrollcommand=sc.set, width=50, height=12)
-        lst.pack(side="left", fill="both", expand=True); sc.config(command=lst.yview)
+        lst.pack(side="left", fill="both", expand=True)
+        sc.config(command=lst.yview)
         
         data = backend.obtener_productos_por_proveedor(id_prov)
         
-        def render(filas): lst.delete(0, tk.END); [lst.insert(tk.END, f"{c.get('id_producto','')} | {c.get('nombre','')}") for c in filas]
+        def render(filas):
+            lst.delete(0, tk.END)
+            [lst.insert(tk.END, f"{c.get('id_producto','')} | {c.get('nombre','')}") for c in filas]
         render(data)
         
         def filtrar(*_):
             q = var_pat.get().strip().lower()
-            if not q: render(data); return
+            if not q:
+                render(data)
+                return
             filtrados = [p for p in data if q in str(p.get('nombre','')).lower() or q == str(p.get('id_producto'))]
             render(filtrados)
         var_pat.trace_add("write", filtrar)
@@ -163,13 +208,16 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         
         frame_boton = tk.Frame(sel, bg="#f4f4f8")
         frame_boton.pack(fill="x", pady=(0, 8))
-        tk.Button(frame_boton, text="Seleccionar", command=tomar, bg="#4CAF50", fg="white", width=15).pack() 
+        btn_sel = tk.Button(frame_boton, text="Seleccionar", command=tomar, bg="#4CAF50", fg="white", width=15)
+        btn_sel.pack()
         
-        sel.grab_set(); sel.transient(win)
+        # ¡NUEVO! Foco inicial en búsqueda
+        sel.after(50, lambda: ent.focus_set())
+        
+        sel.grab_set()
+        sel.transient(win)
 
     def agregar_al_carrito(producto: dict):
-        # --- ¡CORRECCIÓN! ---
-        # Cambiado de askinteger a askfloat para permitir decimales (Kg)
         es_pesable = producto.get('es_pesable', False)
         
         prompt_cantidad = f"¿Qué cantidad (unid/Kg) de '{producto.get('nombre')}'?"
@@ -188,7 +236,6 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                  messagebox.showwarning("Cantidad Inválida", "Este producto no es pesable. Ingrese solo unidades enteras.", parent=win)
                  return
             cantidad = int(cantidad)
-        # --- FIN CORRECCIÓN ---
 
         precio_costo = simpledialog.askfloat("Precio de Costo", f"Ingrese el PRECIO DE COSTO por unidad:",
                                              parent=win, minvalue=0.01)
@@ -203,7 +250,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         })
         refrescar_carrito()
 
-    tk.Button(win, text="+ Agregar Producto al Carrito", command=abrir_selector_producto, bg="#03A9F4", fg="white").place(x=170, y=115)
+    btn_agregar_prod = tk.Button(win, text="+ Agregar Producto al Carrito", command=abrir_selector_producto, bg="#03A9F4", fg="white")
+    btn_agregar_prod.place(x=170, y=115)
 
     # ==========================================
     # 3. CARRITO (Treeview)
@@ -219,7 +267,9 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     tree.column("Costo Unit.", width=120, anchor="e")
     tree.column("Subtotal", width=120, anchor="e")
     ys = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
-    tree.configure(yscroll=ys.set); ys.place(x=750, y=160, height=tree.cget('height')*19)
+    tree.configure(yscroll=ys.set)
+    ys.place(x=750, y=160, height=tree.cget('height')*19)
+    
     def refrescar_carrito():
         for i in tree.get_children():
             tree.delete(i)
@@ -237,7 +287,7 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
             tree.insert("", tk.END, values=[
                 item['id_producto'],
                 item['nombre'],
-                cant_str, # <-- Muestra decimal si es necesario
+                cant_str,
                 f"$ {item['precio_costo']:.2f}",
                 f"$ {subtotal:.2f}"
             ])
@@ -248,17 +298,14 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
             messagebox.showwarning("Atención", "Seleccione un producto de la lista para quitar.", parent=win)
             return
             
-        # --- ¡CORRECCIÓN! Búsqueda más robusta por ID y Cantidad ---
         item_values = tree.item(selected_item[0], "values")
         if not item_values: return 
         
         item_id = int(item_values[0])
         item_cant_str = str(item_values[2])
         
-        # Intentar encontrar el item exacto (por si el mismo ID está dos veces)
         item_a_quitar = None
         for item in carrito:
-            # Comparamos el ID y también la cantidad (convertida a string)
             cant_str = str(item['cantidad'])
             if isinstance(item['cantidad'], float) and item['cantidad'] != int(item['cantidad']):
                 cant_str = f"{item['cantidad']:.3f}"
@@ -271,9 +318,11 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
             carrito.remove(item_a_quitar)
         
         tree.delete(selected_item[0])
-        refrescar_carrito() # Refresca el total
+        refrescar_carrito()
 
-    tk.Button(win, text="Quitar Seleccionado", command=quitar_del_carrito, bg="#f44336", fg="white").place(x=30, y=440)
+    btn_quitar = tk.Button(win, text="Quitar Seleccionado", command=quitar_del_carrito, bg="#f44336", fg="white")
+    btn_quitar.place(x=30, y=440)
+    
     # ==========================================
     # 4. GUARDAR O CANCELAR
     # ==========================================
@@ -303,16 +352,27 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                 )
             
             messagebox.showinfo("Éxito", f"Compra #{id_compra} registrada correctamente.\nEl stock ha sido actualizado.", parent=win)
+            
+            # ¡NOTIFICAR CAMBIO DE STOCK!
+            stock_events.notificar_cambio_stock()
+            
             win.destroy()
 
         except Exception as e:
             messagebox.showerror("Error al Guardar", f"Ocurrió un error:\n{e}", parent=win)
 
+    btn_guardar = tk.Button(win, text="Guardar Compra", bg="#4CAF50", fg="white",
+              font=("Helvetica", 10, "bold"), width=18, command=guardar_compra)
+    btn_guardar.place(x=250, y=550)
 
-    tk.Button(win, text="Guardar Compra", bg="#4CAF50", fg="white",
-              font=("Helvetica", 10, "bold"), width=18, command=guardar_compra).place(x=250, y=550)
+    btn_cancelar = tk.Button(win, text="Cancelar", bg="#f44336", fg="white",
+              font=("Helvetica", 10, "bold"), width=15, command=win.destroy)
+    btn_cancelar.place(x=420, y=550)
 
-    tk.Button(win, text="Cancelar", bg="#f44336", fg="white",
-              font=("Helvetica", 10, "bold"), width=15, command=win.destroy).place(x=420, y=550)
-
+    # ¡NUEVO! Aplicar navegación por teclado con confirmación
+    configurar_navegacion_ventana(win, confirmar_cierre=True)
+    
+    # ¡NUEVO! Foco inicial en botón elegir proveedor
+    win.after(50, lambda: btn_elegir.focus_set())
+    
     win.grab_set()

@@ -1,6 +1,15 @@
+# app/frontend/interfaz_forma_pago.py
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog  # Importamos simpledialog
+from tkinter import ttk, messagebox, simpledialog
 from typing import Any, Optional
+
+# ¡NUEVO! Importar navegación por teclado
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False):
+        pass
 
 class VentanaPago:
     """Ventana para seleccionar forma de pago y calcular vuelto"""
@@ -21,7 +30,6 @@ class VentanaPago:
         # Crear ventana modal
         self.ventana = tk.Toplevel(parent)
         self.ventana.title("Método de Pago")
-        # NO fijamos geometry todavía; dejamos que mida primero
         self.ventana.resizable(False, False)
         self.ventana.transient(parent)
         self.ventana.grab_set()
@@ -29,19 +37,21 @@ class VentanaPago:
         self._crear_widgets()
 
         # --- TAMAÑO / CENTRADO DINÁMICO ---
-        # Medir tamaño requerido real
         self.ventana.update_idletasks()
-        req_w = max(450, self.ventana.winfo_reqwidth() + 20)   # ancho mínimo 450
-        req_h = max(460, self.ventana.winfo_reqheight() + 20)  # alto mínimo 460 (subimos un poco)
-        # Centrar
+        req_w = max(450, self.ventana.winfo_reqwidth() + 20)
+        req_h = max(460, self.ventana.winfo_reqheight() + 20)
         sw = self.ventana.winfo_screenwidth()
         sh = self.ventana.winfo_screenheight()
         x = (sw - req_w) // 2
         y = (sh - req_h) // 2
         self.ventana.geometry(f"{req_w}x{req_h}+{x}+{y}")
-        # -------------------------------
+        
+        # ¡NUEVO! Aplicar navegación por teclado
+        configurar_navegacion_ventana(self.ventana)
+        
+        # ¡NUEVO! Foco inicial en el campo de pago
+        self.ventana.after(50, lambda: self.entry_paga.focus_set())
 
-        # Esperar a que se cierre
         self.ventana.wait_window()
 
     def _crear_widgets(self):
@@ -96,7 +106,7 @@ class VentanaPago:
             rb_cc.config(state="disabled", text="Cuenta Corriente (Debe elegir un cliente)")
 
         self.frame_efectivo = ttk.LabelFrame(main_frame, text="Detalles del Pago", padding="10")
-        self.frame_efectivo.pack(fill=tk.X, pady=(0, 18))  # +3px margen extra
+        self.frame_efectivo.pack(fill=tk.X, pady=(0, 18))
 
         frame_paga = ttk.Frame(self.frame_efectivo)
         frame_paga.pack(fill=tk.X, pady=6)
@@ -114,11 +124,14 @@ class VentanaPago:
 
         frame_botones = ttk.Frame(main_frame)
         frame_botones.pack(fill=tk.X, pady=(14, 0))
-        ttk.Button(frame_botones, text="Confirmar Pago", command=self._confirmar).pack(side=tk.RIGHT, padx=6)
-        ttk.Button(frame_botones, text="Cancelar", command=self._cancelar).pack(side=tk.RIGHT)
+        
+        btn_confirmar = ttk.Button(frame_botones, text="Confirmar Pago", command=self._confirmar)
+        btn_confirmar.pack(side=tk.RIGHT, padx=6)
+        
+        btn_cancelar = ttk.Button(frame_botones, text="Cancelar", command=self._cancelar)
+        btn_cancelar.pack(side=tk.RIGHT)
 
         self._cambio_metodo()
-        self.entry_paga.focus_set()
 
     def _cambio_metodo(self):
         if self.metodo_var.get() == "efectivo":

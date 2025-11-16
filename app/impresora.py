@@ -168,7 +168,6 @@ def generar_contenido_ticket(id_venta, items, nombre_vendedor, metodo_pago,
     # ========================================
     # TOTALES
     # ========================================
-    ticket.append(justificar_texto("SUBTOTAL:", formato_precio(total)))
     
     # Si hay descuento (puedes agregarlo después)
     # ticket.append(justificar_texto("DESCUENTO:", "-$50.00"))

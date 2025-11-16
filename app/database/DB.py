@@ -89,10 +89,10 @@ def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: 
         cur.execute(
             "INSERT INTO Cliente (nombre, dni, direccion, telefono, email) VALUES (%s,%s,%s,%s,%s)",
             (
-                nombre.strip(), 
+                nombre.strip(),
                 dni.strip() or None,
-                direccion.strip() or None, 
-                telefono.strip() or None, 
+                direccion.strip() or None,
+                telefono.strip() or None,
                 email.strip() or None
             ),
         )
@@ -117,7 +117,11 @@ def insertar_cliente(nombre: str, dni: str = "", direccion: str = "", telefono: 
     except mysql.connector.IntegrityError as e:
         logger.warning(f"insertar_cliente (IntegrityError): {e}")
         if conn: conn.rollback()
+        
+        if getattr(e, "errno", None) == 1062:
+            raise ValueError("DNI_DUPLICADO") from e
         return None
+    
     except Exception as e:
         if conn:
             try: conn.rollback()

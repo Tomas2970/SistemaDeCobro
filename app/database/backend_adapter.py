@@ -75,6 +75,12 @@ class BackendAdapter:
         except (ValueError, TypeError):
             limite_valido = 50000.00
         return DB.insertar_cliente(nombre, dni, direccion, telefono, email, limite_valido)
+    
+    def crear_cliente(self, nombre: str, dni: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
+        """
+        Alias usado por la interfaz de registro de clientes.
+        """
+        return self.insertar_cliente(nombre, dni, direccion, telefono, email, limite_credito)
 
     def actualizar_cliente(self, id_cliente: int, nombre: str, dni: str, direccion: str, telefono: str, email: str, limite_credito: float) -> bool:
         try:

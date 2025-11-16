@@ -13,6 +13,17 @@ except Exception:
     messagebox.showerror("Error Crítico", "No se encontró 'permisos.py'. Los roles no funcionarán.")
     def tiene_permiso(usuario, accion): return True
 
+# --- ¡NUEVO! Sistema de eventos de stock ---
+try:
+    from app.frontend.stock_event_manager import stock_events
+except ImportError:
+    print("ADVERTENCIA: No se pudo importar stock_event_manager. Las alertas no se actualizarán automáticamente.")
+    class DummyStockEvents:
+        def suscribir(self, callback): pass
+        def desuscribir(self, callback): pass
+        def limpiar(self): pass
+    stock_events = DummyStockEvents()
+
 # ===== Imports tolerantes =====
 def _safe_import(path, name):
     try:
@@ -97,7 +108,7 @@ def _titulo_superior(root: tk.Tk):
     ttk.Label(barra, text="SUPERMERCADO DON ATILIO", style="Title.TLabel").pack(pady=14)
 
 
-# ===== Navegación con flechas (CORREGIDA) =====
+# ===== Navegación con flechas =====
 class ArrowNavigator:
     def __init__(self, root: tk.Tk, cols: int):
         self.root = root
@@ -114,24 +125,19 @@ class ArrowNavigator:
         self.buttons.append(btn)
 
     def _menu_activo(self) -> bool:
-        """Verifica si el foco está en la ventana principal (no en ventanas hijas)"""
         fg = self.root.focus_get()
         if not fg:
             return False
-        # Verificar que no haya ventanas Toplevel abiertas
         for widget in self.root.winfo_children():
             if isinstance(widget, tk.Toplevel) and widget.winfo_exists():
                 return False
-        # Solo retorna True si el widget con foco pertenece DIRECTAMENTE a root
         return fg.winfo_toplevel() is self.root and fg in self.buttons
 
     def bind_keys(self):
-        """CORREGIDO: Solo vincula las teclas si el menú está activo"""
         def safe_move(delta):
             if self._menu_activo():
                 self._move(delta)
                 return "break"
-            # Si no está activo, NO interceptar la tecla
             return None
         
         self.root.bind("<Up>",        lambda e: safe_move(-self.cols))
@@ -140,13 +146,11 @@ class ArrowNavigator:
         self.root.bind("<Right>",     lambda e: safe_move(+1))
         self.root.bind("<Return>",    self._enter)
         self.root.bind("<KP_Enter>",  self._enter)
-        # CORREGIDO: ESC solo pregunta si cerrar, no cierra directo
         self.root.bind("<Escape>",    self._on_escape)
 
     def _on_escape(self, _):
-        """Solo cierra si estamos en el menú principal y el usuario confirma"""
         if not self._menu_activo():
-            return None  # Dejar que otras ventanas manejen ESC
+            return None
         
         respuesta = messagebox.askyesno(
             "Cerrar Sesión",
@@ -158,10 +162,8 @@ class ArrowNavigator:
         return "break"
 
     def focus_index(self, idx: int):
-        """CORREGIDO: Controla límites correctamente"""
         if not self.buttons:
             return
-        # Asegurar que el índice esté dentro del rango
         self.index = max(0, min(idx, len(self.buttons) - 1))
         try:
             self.buttons[self.index].focus_set()
@@ -169,13 +171,11 @@ class ArrowNavigator:
             pass
 
     def _move(self, delta: int):
-        """CORREGIDO: Mejor control de movimiento"""
         if not self.buttons:
             return
         
         nuevo_indice = self.index + delta
         
-        # Control de límites más estricto
         if nuevo_indice < 0:
             nuevo_indice = 0
         elif nuevo_indice >= len(self.buttons):
@@ -184,7 +184,6 @@ class ArrowNavigator:
         self.focus_index(nuevo_indice)
 
     def _enter(self, _):
-        """Solo invoca si el menú está activo"""
         if not self._menu_activo():
             return None
         try:
@@ -212,7 +211,7 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
 
     nav = ArrowNavigator(root, cols=2)
 
-    # --- Botón VENTA PRIMERO (para que sea el índice 0) ---
+    # --- Botón VENTA PRIMERO ---
     hero_wrap = tk.Frame(center, bg=root["bg"])
     hero_wrap.grid(row=0, column=0, pady=6)
 
@@ -257,34 +256,68 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     btn_cli  = add_btn(gest, "👥 Clientes", ui_gestion_clientes, 'ver_clientes', 0, 2)
     btn_usr  = add_btn(gest, "⚙️ Usuarios", ui_gestion_usuarios, 'ver_usuarios', 1, 2)
 
-    # --- ANCHO FIJO PARA BOTÓN VENTA (sin cálculos dinámicos) ---
-    # Simplemente usamos el doble del ancho de los botones normales
+    # Ancho fijo para botón venta
     if btn_venta:
-        btn_venta.configure(width=50)  # Aproximadamente el doble de 24
+        btn_venta.configure(width=50)
 
-    # --- Footer ---
+    # --- Footer CON ALERTA POR EVENTOS ---
     footer = tk.Frame(root, bg=root["bg"])
     footer.pack(fill=tk.X, side=tk.BOTTOM, pady=4)
 
-    try:
-        if hasattr(backend, "obtener_stock_bajo"):
-            stock_bajo = backend.obtener_stock_bajo()
-            if stock_bajo and len(stock_bajo) > 0:
-                ttk.Label(footer,
-                          text=f"⚠️ ¡Atención! {len(stock_bajo)} producto(s) se encuentran por debajo del stock mínimo.",
-                          style="StockAlert.TLabel").pack(pady=2)
-    except Exception as e:
-        logger.warning(f"No se pudo verificar el stock bajo al iniciar: {e}")
+    # Crear el label de alerta (inicialmente vacío)
+    lbl_alerta = ttk.Label(footer, text="", style="StockAlert.TLabel")
+    lbl_alerta.pack(pady=2)
+
+    # --- ¡SISTEMA DE EVENTOS! Actualización solo cuando cambia el stock ---
+    def actualizar_alerta_stock():
+        """
+        Verifica el stock bajo y actualiza la alerta.
+        Esta función se ejecuta:
+        1. Al iniciar el menú
+        2. Cada vez que se notifica un cambio de stock (venta/compra/modificación)
+        """
+        try:
+            # Forzar actualización de la ventana
+            root.update_idletasks()
+            
+            if hasattr(backend, "obtener_stock_bajo"):
+                stock_bajo = backend.obtener_stock_bajo()
+                if stock_bajo and len(stock_bajo) > 0:
+                    texto = f"⚠️ ¡Atención! {len(stock_bajo)} producto(s) se encuentran por debajo del stock mínimo."
+                    lbl_alerta.config(text=texto)
+                    lbl_alerta.pack(pady=2)
+                else:
+                    lbl_alerta.config(text="")
+                    lbl_alerta.pack_forget()
+            
+            # Forzar re-renderizado
+            root.update()
+        except Exception as e:
+            logger.warning(f"Error verificando stock bajo: {e}")
+    
+    # Suscribirse a eventos de cambio de stock
+    stock_events.suscribir(actualizar_alerta_stock)
+    
+    # Ejecutar la primera verificación inmediatamente
+    actualizar_alerta_stock()
+    
+    # Limpiar suscripción al cerrar la ventana
+    def on_closing():
+        stock_events.desuscribir(actualizar_alerta_stock)
+        root.destroy()
+    
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    # --- FIN SISTEMA DE EVENTOS ---
 
     ttk.Button(footer, text="⛔  Cerrar Sesión", style="Danger.TButton",
-               command=root.destroy).pack(pady=2)
+               command=on_closing).pack(pady=2)
 
-    # Navegación - CORREGIDO: Inicia en el botón de VENTA (índice 0)
+    # Navegación
     nav.bind_keys()
     if btn_venta:
-        nav.focus_index(0)  # Inicia en VENTA
+        nav.focus_index(0)
     else:
-        nav.focus_index(0)  # O en el primer botón disponible
+        nav.focus_index(0)
 
 
 def ui_menu_principal(*args, **kwargs) -> None:
