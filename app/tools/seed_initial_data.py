@@ -3,7 +3,7 @@ import sys
 import bcrypt
 import mysql.connector 
 from typing import Optional
-from datetime import datetime, timedelta # <--- IMPORTANTE: Añadido
+from datetime import datetime, timedelta
 
 try:
     from app.database.DB import conectar
@@ -25,8 +25,6 @@ def get_categoria_id(cur, nombre: str) -> Optional[int]:
     row = cur.fetchone()
     return int(row[0]) if row else None
 
-# --- CORRECCIÓN ---
-# Ahora busca id, precio y nombre (para el snapshot en DetalleVenta)
 def get_producto_info(cur, nombre: str) -> Optional[tuple[int, float, str]]:
     """Busca un producto por nombre y devuelve (id, precio, nombre)"""
     cur.execute("SELECT id_producto, precio, nombre FROM Producto WHERE nombre=%s", (nombre,))
@@ -45,8 +43,15 @@ def get_user_id(cur, nombre: str) -> Optional[int]:
     row = cur.fetchone()
     return int(row[0]) if row else None
 
+# --- ¡NUEVO! ---
+def get_proveedor_id(cur, nombre: str) -> Optional[int]:
+    """Busca un proveedor por nombre y devuelve (id)"""
+    cur.execute("SELECT id_proveedor FROM Proveedor WHERE nombre=%s", (nombre,))
+    row = cur.fetchone()
+    return int(row[0]) if row else None
+
 # ==========================================
-# ROLES (Sin cambios)
+# ROLES
 # ==========================================
 def ensure_roles(cur) -> None:
     print("Asegurando roles...")
@@ -59,7 +64,7 @@ def ensure_roles(cur) -> None:
     cur.execute("ALTER TABLE Rol AUTO_INCREMENT = 10;")
 
 # ==========================================
-# USUARIOS (Sin cambios)
+# USUARIOS
 # ==========================================
 def user_exists(cur, nombre: str) -> bool:
     cur.execute("SELECT 1 FROM Usuario WHERE nombre=%s", (nombre,))
@@ -82,11 +87,10 @@ def ensure_user(cur, nombre: str, password: str, rol_nombre: str) -> None:
     )
 
 # ==========================================
-# CATEGORÍAS (¡ACTUALIZADO!)
+# CATEGORÍAS
 # ==========================================
 def ensure_categorias(cur) -> None:
     print("Asegurando categorías iniciales...")
-    # Añadido 'activa=TRUE' para ser explícito, aunque el schema.sql ya lo pone por defecto.
     cur.execute("""
         INSERT IGNORE INTO Categoria (id_categoria, nombre, descripcion, activa) VALUES
         (1, 'Bebidas', 'Bebidas alcohólicas y no alcohólicas', TRUE),
@@ -102,7 +106,7 @@ def ensure_categorias(cur) -> None:
     cur.execute("ALTER TABLE Categoria AUTO_INCREMENT = 100;")
 
 # ==========================================
-# PROVEEDORES (Más proveedores)
+# PROVEEDORES
 # ==========================================
 def ensure_proveedor(cur, nombre: str, empresa: str = "", telefono: str = "", email: str = "") -> None:
     try:
@@ -124,11 +128,10 @@ def ensure_proveedor(cur, nombre: str, empresa: str = "", telefono: str = "", em
         print(f"   ! Error al crear proveedor '{nombre}': {e}")
 
 # ==========================================
-# CLIENTES (Más clientes y deuda)
+# CLIENTES
 # ==========================================
 def ensure_cliente(cur, nombre: str, dni: str = "", limite: float = 50000.00) -> None:
     try:
-        # El schema tiene mas columnas (direccion, tel, email) pero son nullables
         cur.execute(
             "INSERT INTO Cliente (nombre, dni, activo) VALUES (%s, %s, TRUE)",
             (nombre, dni or None)
@@ -165,7 +168,7 @@ def set_cliente_deuda(cur, nombre_cliente: str, monto_deuda: float) -> None:
 
 
 # ==========================================
-# PRODUCTOS (¡MÁS PRODUCTOS!)
+# PRODUCTOS
 # ==========================================
 def ensure_producto(cur, nombre: str, precio: float, categoria: str, stock_inicial: float, stock_min: int, es_pesable: bool, codigo: str = "") -> None:
     id_cat = get_categoria_id(cur, categoria)
@@ -183,7 +186,6 @@ def ensure_producto(cur, nombre: str, precio: float, categoria: str, stock_inici
         )
         id_prod = cur.lastrowid
         cur.execute(
-            # El schema tiene stock_maximo (default 100), así que no lo especificamos
             "INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s, %s, %s)",
             (id_prod, stock_inicial, stock_min)
         )
@@ -195,11 +197,10 @@ def ensure_producto(cur, nombre: str, precio: float, categoria: str, stock_inici
             print(f"   ! Error al crear producto '{nombre}': {e}")
 
 # ==========================================
-# HISTORIAL DE VENTAS (¡CORREGIDO!)
+# HISTORIAL DE VENTAS
 # ==========================================
 def ensure_venta_historica(cur, cliente_nombre: str, vendedor_nombre: str, productos_nombres: list[tuple[str, float]], metodo_pago: str, dias_atras: int) -> None:
     
-    # 1. Obtener IDs
     id_cliente = get_cliente_id(cur, cliente_nombre)
     id_usuario = get_user_id(cur, vendedor_nombre)
     
@@ -208,38 +209,26 @@ def ensure_venta_historica(cur, cliente_nombre: str, vendedor_nombre: str, produ
         return
 
     total_venta = 0.0
-    # (id_producto, cantidad, precio_unitario, nombre_producto)
-    detalles_para_insertar = [] 
+    detalles_para_insertar = [] # (id_producto, cantidad, precio_unitario, nombre_producto)
 
-    # 2. Procesar lista de productos
     for prod_nombre_buscado, cantidad in productos_nombres:
-        # --- CORRECCIÓN ---
-        # Buscamos (id, precio, nombre) usando la nueva función
         id_producto, precio_unitario, nombre_producto = get_producto_info(cur, prod_nombre_buscado)
         
         if not id_producto:
             print(f"  ! Error Venta: Producto '{prod_nombre_buscado}' no encontrado. Venta cancelada.")
-            return # Cancelar toda la venta si un producto no existe
+            raise RuntimeError(f"Producto {prod_nombre_buscado} no encontrado para venta")
         
         subtotal = precio_unitario * cantidad
         total_venta += subtotal
-        # --- CORRECCIÓN ---
-        # Guardamos el nombre del producto para el snapshot
         detalles_para_insertar.append((id_producto, cantidad, precio_unitario, nombre_producto))
     
     if not detalles_para_insertar:
         print("  ! Error Venta: No hay productos para vender.")
         return
 
-    # 3. Calcular fecha
     fecha_venta = datetime.now() - timedelta(days=dias_atras)
 
     try:
-        # --- CORRECCIÓN ---
-        # 4. Insertar Venta principal
-        # Quitamos 'total' (se calcula por trigger)
-        # Cambiamos 'metodo_pago' por 'tipo_pago'
-        # Añadimos 'estado' para ser explícitos
         cur.execute(
             """
             INSERT INTO Venta (id_cliente, id_usuario, tipo_pago, fecha, estado)
@@ -249,24 +238,15 @@ def ensure_venta_historica(cur, cliente_nombre: str, vendedor_nombre: str, produ
         )
         id_venta = cur.lastrowid
 
-        # 5. Insertar Detalles y actualizar stock
         sql_detalles = []
-        # --- CORRECCIÓN ---
-        # Ahora el loop desempaqueta (id_prod, cant, precio, nombre_prod)
         for id_prod, cant, precio, nombre_prod in detalles_para_insertar:
-            # --- CORRECCIÓN ---
-            # El orden de 'sql_detalles' debe coincidir con el 'executemany'
             sql_detalles.append((id_venta, id_prod, nombre_prod, cant, precio))
             
-            # 6. Actualizar Inventario (descontar stock)
             cur.execute(
                 "UPDATE Inventario SET cantidad = cantidad - %s WHERE id_producto = %s",
                 (cant, id_prod)
             )
 
-        # --- CORRECCIÓN ---
-        # Quitamos 'subtotal' (generado)
-        # Añadimos 'nombre_producto' (snapshot)
         cur.executemany(
             """
             INSERT INTO DetalleVenta (id_venta, id_producto, nombre_producto, cantidad, precio_unitario)
@@ -275,10 +255,7 @@ def ensure_venta_historica(cur, cliente_nombre: str, vendedor_nombre: str, produ
             sql_detalles
         )
         
-        # 7. Actualizar Cuenta Corriente si es necesario
-        if metodo_pago == 'Cuenta Corriente': # Tu schema usa 'cuenta_corriente', asumo que esto es un valor válido
-            # --- CORRECCIÓN ---
-            # La lógica correcta es RESTAR el total al saldo (para aumentar la deuda)
+        if metodo_pago == 'cuenta_corriente':
             cur.execute(
                 "UPDATE CuentaCorriente SET saldo = saldo - %s WHERE id_cliente = %s",
                 (total_venta, id_cliente)
@@ -289,8 +266,80 @@ def ensure_venta_historica(cur, cliente_nombre: str, vendedor_nombre: str, produ
     
     except mysql.connector.Error as e:
         print(f"  ! Error al crear venta histórica: {e}")
-        # Hacemos 'raise' para que el 'main' haga rollback
         raise
+
+# ==========================================
+# HISTORIAL DE COMPRAS (¡NUEVO!)
+# ==========================================
+def ensure_compra_historica(cur, proveedor_nombre: str, usuario_nombre: str, productos_comprados: list[tuple[str, float, float]], dias_atras: int) -> None:
+    """
+    Crea una compra histórica y SUMA al inventario.
+    productos_comprados = [(nombre_producto, cantidad, precio_costo)]
+    """
+    
+    id_proveedor = get_proveedor_id(cur, proveedor_nombre)
+    id_usuario = get_user_id(cur, usuario_nombre)
+    
+    if not id_proveedor or not id_usuario:
+        print(f"  ! Error Compra: Proveedor '{proveedor_nombre}' o Usuario '{usuario_nombre}' no encontrado.")
+        return
+
+    total_compra = 0.0
+    detalles_para_insertar = [] # (id_producto, nombre_producto, cantidad, precio_costo)
+    stock_para_actualizar = [] # (cantidad_a_sumar, id_producto)
+
+    for prod_nombre_buscado, cantidad, precio_costo in productos_comprados:
+        id_producto, _, nombre_producto = get_producto_info(cur, prod_nombre_buscado)
+        
+        if not id_producto:
+            print(f"  ! Error Compra: Producto '{prod_nombre_buscado}' no encontrado. Compra cancelada.")
+            raise RuntimeError(f"Producto {prod_nombre_buscado} no encontrado para compra")
+        
+        total_compra += (cantidad * precio_costo)
+        detalles_para_insertar.append((id_producto, nombre_producto, cantidad, precio_costo))
+        stock_para_actualizar.append((cantidad, id_producto))
+    
+    if not detalles_para_insertar:
+        print("  ! Error Compra: No hay productos para comprar.")
+        return
+
+    fecha_compra = datetime.now() - timedelta(days=dias_atras)
+
+    try:
+        # 1. Insertar Compra (el 'total' se calcula por trigger)
+        cur.execute(
+            """
+            INSERT INTO Compra (id_usuario, id_proveedor, fecha, estado)
+            VALUES (%s, %s, %s, 'recibida')
+            """,
+            (id_usuario, id_proveedor, fecha_compra)
+        )
+        id_compra = cur.lastrowid
+
+        # 2. Preparar detalles
+        sql_detalles = [(id_compra, id_prod, nombre_prod, cant, precio_costo) for id_prod, nombre_prod, cant, precio_costo in detalles_para_insertar]
+        
+        # 3. Insertar Detalles
+        cur.executemany(
+            """
+            INSERT INTO DetalleCompra (id_compra, id_producto, nombre_producto, cantidad, precio_unitario)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            sql_detalles
+        )
+        
+        # 4. Actualizar Inventario (SUMAR stock)
+        cur.executemany(
+            "UPDATE Inventario SET cantidad = cantidad + %s WHERE id_producto = %s",
+            stock_para_actualizar
+        )
+        
+        print(f"   + Compra (ID: {id_compra}) a '{proveedor_nombre}' por ~${total_compra} (stock actualizado).")
+    
+    except mysql.connector.Error as e:
+        print(f"  ! Error al crear compra histórica: {e}")
+        raise
+
 
 # ==========================================
 # FUNCIÓN PRINCIPAL (¡ACTUALIZADA!)
@@ -304,11 +353,11 @@ def main() -> None:
         cur = conn.cursor()
         
         print("=" * 60)
-        print("   CARGA DE DATOS INICIALES (VERSIÓN CORREGIDA) - Don Atilio")
+        print("   CARGA DE DATOS INICIALES (VERSIÓN COMPLETA) - Don Atilio")
         print("=" * 60)
         print()
 
-        print("PASO 1/7: Asegurando Roles...")
+        print("PASO 1/8: Asegurando Roles...")
         try:
             ensure_roles(cur)
             print("✓ Roles OK")
@@ -316,7 +365,7 @@ def main() -> None:
             print(f"✗ Error en roles: {e}")
             errores += 1
 
-        print("\nPASO 2/7: Asegurando Usuarios...")
+        print("\nPASO 2/8: Asegurando Usuarios...")
         try:
             ensure_user(cur, "admin", "admin123", "admin")
             ensure_user(cur, "tomas", "tomas123", "vendedor")
@@ -327,15 +376,15 @@ def main() -> None:
             print(f"✗ Error en usuarios: {e}")
             errores += 1
 
-        print("\nPASO 3/7: Asegurando Categorías...")
+        print("\nPASO 3/8: Asegurando Categorías...")
         try:
-            ensure_categorias(cur) # <-- Función actualizada
+            ensure_categorias(cur)
             print("✓ Categorías OK")
         except Exception as e:
             print(f"✗ Error en categorías: {e}")
             errores += 1
         
-        print("\nPASO 4/7: Asegurando Proveedores...")
+        print("\nPASO 4/8: Asegurando Proveedores...")
         try:
             ensure_proveedor(cur, "Proveedor General", "S/D", "S/D", "general@proveedor.com")
             ensure_proveedor(cur, "Coca-Cola FEMSA", "Coca-Cola", "0800-123-4567", "pedidos@coca.com")
@@ -349,15 +398,13 @@ def main() -> None:
             print(f"✗ Error en proveedores: {e}")
             errores += 1
         
-        print("\nPASO 5/7: Asegurando Clientes (y deudas)...")
+        print("\nPASO 5/8: Asegurando Clientes (y deudas)...")
         try:
             ensure_cliente(cur, "Consumidor Final", "00000000", 0.00)
             ensure_cliente(cur, "Juan Perez", "30123456", 75000.00)
             ensure_cliente(cur, "Maria Gonzalez", "28999111", 100000.00)
             ensure_cliente(cur, "Kiosco 'ElPaso'", "30-12345678-9", 250000.00)
             
-            # --- CORRECCIÓN ---
-            # Asignar deuda inicial a Maria (valor negativo)
             set_cliente_deuda(cur, "Maria Gonzalez", -15750.50)
             
             print("✓ Clientes OK")
@@ -365,8 +412,9 @@ def main() -> None:
             print(f"✗ Error en clientes: {e}")
             errores += 1
         
-        print("\nPASO 6/7: Asegurando Productos...")
+        print("\nPASO 6/8: Asegurando Productos...")
         try:
+            # (El stock inicial es ANTES de las ventas/compras históricas)
             # Bebidas
             ensure_producto(cur, "Coca-Cola 1.5L", 1200.00, "Bebidas", 50, 10, False, "7790123456789")
             ensure_producto(cur, "Agua Villavicencio 2L", 700.00, "Bebidas", 40, 10, False, "7790987123456")
@@ -376,7 +424,7 @@ def main() -> None:
             ensure_producto(cur, "Yogur Frutilla 1L", 950.00, "Lácteos", 25, 5, False, "7790987654111")
             # Panadería
             ensure_producto(cur, "Pan Suelto (Kg)", 1500.00, "Panadería", 10.000, 2, True)
-            ensure_producto(cur, "Facturas (Docena)", 3800.00, "Panadería", 5, 1, False) # Usa precio unitario por docena
+            ensure_producto(cur, "Facturas (Docena)", 3800.00, "Panadería", 5, 1, False)
             # Carnes
             ensure_producto(cur, "Milanesa de Pollo (Kg)", 4500.00, "Carnes", 5.500, 1, True)
             ensure_producto(cur, "Carne Picada (Kg)", 5500.00, "Carnes", 8.000, 1, True)
@@ -388,10 +436,10 @@ def main() -> None:
             ensure_producto(cur, "Arroz Gallo Oro 1kg", 1300.00, "Almacén", 80, 20, False, "7792222333344")
             ensure_producto(cur, "Fideos Matarazzo 500g", 950.00, "Almacén", 100, 20, False, "7792222333355")
             ensure_producto(cur, "Aceite Girasol 1.5L", 1800.00, "Almacén", 50, 15, False, "7792222333366")
-            # Golosinas (NUEVO)
+            # Golosinas
             ensure_producto(cur, "Papas Fritas Lays 150g", 1500.00, "Golosinas", 50, 10, False, "7793333444455")
             ensure_producto(cur, "Alfajor Jorgito", 500.00, "Golosinas", 100, 20, False, "7793333444466")
-            # Congelados (NUEVO)
+            # Congelados
             ensure_producto(cur, "Medallones de Merluza (Kg)", 3800.00, "Congelados", 15.000, 3, True)
             ensure_producto(cur, "Papas Fritas Congeladas (Kg)", 2500.00, "Congelados", 20.000, 5, True)
             
@@ -400,29 +448,24 @@ def main() -> None:
             print(f"✗ Error en productos: {e}")
             errores += 1
         
-        print("\nPASO 7/7: Creando Ventas Históricas...")
+        print("\nPASO 7/8: Creando Ventas Históricas (DESCUENTA STOCK)...")
         try:
-            # Venta en efectivo
             ensure_venta_historica(cur, "Consumidor Final", "tomas", 
                                   [("Coca-Cola 1.5L", 2), ("Pan Suelto (Kg)", 0.5), ("Alfajor Jorgito", 3)], 
-                                  "efectivo", dias_atras=5) # 'efectivo' es un valor válido
+                                  "efectivo", dias_atras=5)
             
-            # Venta con C/C que GENERA DEUDA
             ensure_venta_historica(cur, "Juan Perez", "caja1", 
                                   [("Milanesa de Pollo (Kg)", 1.2), ("Papas Fritas Congeladas (Kg)", 1), ("Leche Entera 1L", 6)], 
-                                  "cuenta_corriente", dias_atras=3) # 'cuenta_corriente' es un valor válido
+                                  "cuenta_corriente", dias_atras=3)
             
-            # Venta con C/C a Kiosco
             ensure_venta_historica(cur, "Kiosco 'ElPaso'", "supervisor", 
                                   [("Coca-Cola 1.5L", 12), ("Alfajor Jorgito", 24), ("Papas Fritas Lays 150g", 10)], 
                                   "cuenta_corriente", dias_atras=2)
             
-            # Venta en efectivo simple
             ensure_venta_historica(cur, "Consumidor Final", "tomas", 
                                   [("Facturas (Docena)", 1)], 
                                   "efectivo", dias_atras=1)
             
-            # Venta a cliente que YA TENÍA DEUDA
             ensure_venta_historica(cur, "Maria Gonzalez", "caja1", 
                                   [("Arroz Gallo Oro 1kg", 5), ("Fideos Matarazzo 500g", 5), ("Aceite Girasol 1.5L", 2)], 
                                   "cuenta_corriente", dias_atras=1)
@@ -431,6 +474,34 @@ def main() -> None:
         except Exception as e:
             print(f"✗ Error en ventas históricas: {e}")
             errores += 1
+        
+        # --- ¡NUEVO PASO! ---
+        print("\nPASO 8/8: Creando Compras Históricas (SUMA STOCK)...")
+        try:
+            # Compra de bebidas (Costos inventados)
+            ensure_compra_historica(cur, "Coca-Cola FEMSA", "supervisor",
+                                    [("Coca-Cola 1.5L", 50, 700.00), # (Producto, Cantidad, PrecioCosto)
+                                     ("Agua Villavicencio 2L", 40, 400.00)],
+                                    dias_atras=10)
+            
+            # Compra de carnes
+            ensure_compra_historica(cur, "Frigorífico Rioplatense", "admin",
+                                    [("Asado (Kg)", 20.0, 4500.00),
+                                     ("Carne Picada (Kg)", 15.0, 3000.00)],
+                                    dias_atras=8)
+            
+            # Compra de golosinas
+            ensure_compra_historica(cur, "Arcor", "admin",
+                                    [("Alfajor Jorgito", 100, 250.00),
+                                     ("Papas Fritas Lays 150g", 50, 800.00)],
+                                    dias_atras=7)
+
+            print("✓ Compras Históricas OK")
+        except Exception as e:
+            print(f"✗ Error en compras históricas: {e}")
+            errores += 1
+        
+        # --- FIN NUEVO PASO ---
         
         if errores == 0:
             conn.commit()
@@ -443,7 +514,7 @@ def main() -> None:
             print(f"   ⚠️  COMPLETADO CON {errores} ERRORES")
             print("=" * 60)
             print("   Los datos se revirtieron. Revisa los errores arriba.")
-            sys.exit(1) # Salir con error si algo falló
+            sys.exit(1)
             
     except Exception as e:
         if conn:
