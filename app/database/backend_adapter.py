@@ -141,6 +141,15 @@ class BackendAdapter:
             raise 
     
     # ---------- Productos / Categorías ----------
+    # En app/database/backend_adapter.py
+
+    def crear_categoria(self, nombre: str, margen: float) -> bool:
+        fn = getattr(DB, "crear_categoria", None)
+        return bool(fn(nombre, margen)) if callable(fn) else False
+
+    def actualizar_categoria(self, id_categoria: int, nombre: str, margen: float) -> bool:
+        fn = getattr(DB, "actualizar_categoria", None)
+        return bool(fn(id_categoria, nombre, margen)) if callable(fn) else False
     def obtener_categorias(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_categorias", None)
         return list(fn() or []) if callable(fn) else []
@@ -237,6 +246,10 @@ class BackendAdapter:
             )
         
         return resultado
+
+    def actualizar_precio_producto(self, id_producto: int, nuevo_precio: float, id_usuario: int | None = None) -> bool:
+        """Actualiza solo el precio de venta (usado desde Compras)."""
+        return self.actualizar_producto(id_producto, precio=nuevo_precio, id_usuario=id_usuario)
 
 
     # ---------- Stock & mínimo ----------

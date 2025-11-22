@@ -41,7 +41,8 @@ ui_cuenta_corriente  = _safe_import("app.frontend.interfaz_cuenta_corriente", "u
 ui_compra            = _safe_import("app.frontend.interfaz_compra", "ui_compra")
 ui_historiales       = _safe_import("app.frontend.interfaz_historiales", "Historiales")
 ui_gestion_usuarios  = _safe_import("app.frontend.interfaz_gestion_usuarios", "ui_gestion_usuarios")
-
+ui_categorias = _safe_import("app.frontend.interfaz_categorias", "ui_categorias")
+ui_gestion_proveedores = _safe_import("app.frontend.interfaz_gestion_proveedores", "ui_gestion_proveedores")
 
 def _abrir_seguro(root: tk.Tk, backend, usuario: dict, fn, nombre: str):
     if not callable(fn):
@@ -254,7 +255,10 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     btn_hist = add_btn(gest, "🧾 Historiales", ui_historiales, 'ver_ventas', 0, 1)
     btn_tot  = add_btn(gest, "📊 Generador de Totales", ui_reportes, 'ver_reportes', 1, 1)
     btn_cli  = add_btn(gest, "👥 Clientes", ui_gestion_clientes, 'ver_clientes', 0, 2)
+    btn_prov = add_btn(gest, "🚚 Proveedores", ui_gestion_proveedores, 'ver_proveedores', 1, 1)
     btn_usr  = add_btn(gest, "⚙️ Usuarios", ui_gestion_usuarios, 'ver_usuarios', 1, 2)
+    btn_cat = add_btn(gest, "🏷️ Categorías", ui_categorias, 'ver_productos', 0, 3)
+    
 
     # Ancho fijo para botón venta
     if btn_venta:

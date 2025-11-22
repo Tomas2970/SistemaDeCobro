@@ -1,203 +1,185 @@
 # app/frontend/interfaz_asignar_productos.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Listbox, Scrollbar, SINGLE, EXTENDED, END, Toplevel
-from typing import Any
+from tkinter import ttk, messagebox, Toplevel
 
-# ¡NUEVO! Importar navegación por teclado
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 except ImportError:
-    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
-    def configurar_navegacion_ventana(win, confirmar_cierre=False):
-        pass
+    def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_proveedor: str):
     """
-    Abre una ventana para asignar productos a un proveedor específico.
+    Nueva interfaz de asignación rápida con Checkboxes simulados en Treeview.
     """
     win = Toplevel(parent)
     win.title(f"Asignar Productos a: {nombre_proveedor}")
-    win.geometry("800x500")
+    win.geometry("700x600")
     win.config(bg="#f4f4f8")
-    win.resizable(False, False)
+    win.resizable(False, True)
 
-    productos_asignados: list[dict] = []
-    productos_disponibles: list[dict] = []
-
-    def _fmt(p: dict):
-        return f"{p.get('id_producto')} | {p.get('nombre')}"
+    # Datos en memoria
+    # diccionario: {id_producto: {'nombre': str, 'asignado_original': bool, 'asignado_actual': bool}}
+    memoria_productos = {}
     
-    def _get_id_from_selection(listbox: Listbox) -> list[int]:
-        ids = []
+    # --- 1. Header y Búsqueda ---
+    frame_top = tk.Frame(win, bg="#f4f4f8", pady=10, padx=10)
+    frame_top.pack(fill=tk.X)
+    
+    tk.Label(frame_top, text="Buscar Producto:", bg="#f4f4f8").pack(side=tk.LEFT)
+    var_buscar = tk.StringVar()
+    ent_buscar = tk.Entry(frame_top, textvariable=var_buscar, width=40)
+    ent_buscar.pack(side=tk.LEFT, padx=10)
+    
+    tk.Label(frame_top, text="(Doble Clic o Espacio para marcar/desmarcar)", bg="#f4f4f8", fg="gray").pack(side=tk.LEFT)
+
+    # --- 2. Lista Central (Treeview) ---
+    frame_lista = tk.Frame(win, bg="#f4f4f8", padx=10)
+    frame_lista.pack(fill=tk.BOTH, expand=True)
+
+    # Columnas: Estado (Check), ID, Nombre, Categoría
+    cols = ("Estado", "ID", "Producto", "Categoría")
+    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", selectmode="browse")
+    
+    tree.heading("Estado", text="Selección")
+    tree.heading("ID", text="ID")
+    tree.heading("Producto", text="Nombre del Producto")
+    tree.heading("Categoría", text="Categoría")
+    
+    tree.column("Estado", width=80, anchor="center")
+    tree.column("ID", width=60, anchor="center")
+    tree.column("Producto", width=300)
+    tree.column("Categoría", width=150)
+    
+    ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=ys.set)
+    
+    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    ys.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # --- Lógica de Datos ---
+    def cargar_datos_iniciales():
+        # 1. Traer TODOS los productos activos
+        todos = backend.obtener_productos_full()
+        
+        # 2. Traer los que YA tiene asignados este proveedor
+        asignados = backend.obtener_productos_por_proveedor(id_proveedor)
+        ids_asignados = {p['id_producto'] for p in asignados}
+        
+        # 3. Llenar memoria
+        memoria_productos.clear()
+        for p in todos:
+            pid = p.get('id_producto') or p.get('id')
+            if not pid: continue
+            
+            es_asignado = pid in ids_asignados
+            memoria_productos[pid] = {
+                'nombre': p.get('nombre', ''),
+                'categoria': p.get('categoria') or p.get('nombre_categoria') or '',
+                'asignado_original': es_asignado,
+                'asignado_actual': es_asignado
+            }
+        
+        renderizar_lista()
+
+    def renderizar_lista(*args):
+        # Guardar selección actual si la hay
+        # (Omitido para simplificar, vuelve al inicio al filtrar)
+        
+        tree.delete(*tree.get_children())
+        filtro = var_buscar.get().lower().strip()
+        
+        # Ordenar por nombre para facilitar búsqueda
+        ids_ordenados = sorted(memoria_productos.keys(), key=lambda k: memoria_productos[k]['nombre'].lower())
+        
+        for pid in ids_ordenados:
+            data = memoria_productos[pid]
+            nombre = data['nombre']
+            
+            # Filtrado
+            if filtro and filtro not in nombre.lower() and filtro not in str(pid):
+                continue
+            
+            # Estado visual
+            icono = "☑ SÍ" if data['asignado_actual'] else "☐ NO"
+            # Opcional: cambiar color de fondo si está seleccionado (requiere tags)
+            
+            tree.insert("", tk.END, iid=str(pid), values=(
+                icono,
+                pid,
+                nombre,
+                data['categoria']
+            ))
+
+    var_buscar.trace_add("write", renderizar_lista)
+
+    # --- Lógica de Interacción ---
+    def toggle_seleccion(event=None):
+        sel = tree.selection()
+        if not sel: return
+        
+        pid_str = sel[0] # El iid es el ID del producto
+        pid = int(pid_str)
+        
+        # Invertir estado
+        estado_actual = memoria_productos[pid]['asignado_actual']
+        memoria_productos[pid]['asignado_actual'] = not estado_actual
+        
+        # Actualizar visualmente solo esa fila (para no recargar todo y perder scroll)
+        data = memoria_productos[pid]
+        icono = "☑ SÍ" if data['asignado_actual'] else "☐ NO"
+        
+        tree.item(pid_str, values=(icono, pid, data['nombre'], data['categoria']))
+
+    # Bindings
+    tree.bind("<Double-1>", toggle_seleccion)
+    tree.bind("<space>", toggle_seleccion)
+    tree.bind("<Return>", toggle_seleccion)
+
+    # --- Guardado ---
+    def guardar_cambios():
+        cambios = 0
+        errores = 0
+        
         try:
-            for i in listbox.curselection():
-                linea = listbox.get(i)
-                id_prod = int(linea.split("|")[0].strip())
-                ids.append(id_prod)
+            for pid, data in memoria_productos.items():
+                # Solo actuar si hubo cambios
+                if data['asignado_actual'] != data['asignado_original']:
+                    if data['asignado_actual']:
+                        # Asignar
+                        ok = backend.asignar_producto_a_proveedor(id_proveedor, pid)
+                    else:
+                        # Quitar
+                        ok = backend.quitar_producto_a_proveedor(id_proveedor, pid)
+                    
+                    if ok: 
+                        cambios += 1
+                    else:
+                        errores += 1
+            
+            if errores > 0:
+                messagebox.showwarning("Resultado", f"Se aplicaron {cambios} cambios, pero hubo {errores} errores.")
+            else:
+                messagebox.showinfo("Éxito", f"Se actualizaron correctamente los productos del proveedor.")
+            
+            win.destroy()
+            
         except Exception as e:
-            print(f"Error obteniendo ID de lista: {e}")
-        return ids
+            messagebox.showerror("Error crítico", f"Falló el guardado: {e}")
 
-    # --- Paneles principales ---
-    frame_izq = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
-    frame_izq.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    frame_centro = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
-    frame_centro.pack(side=tk.LEFT, fill=tk.Y, pady=100)
-
-    frame_der = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
-    frame_der.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    # --- Panel Izquierdo (Asignados) ---
-    tk.Label(frame_izq, text="Productos ASIGNADOS a este proveedor", bg="#f4f4f8", font=("Helvetica", 10, "bold")).pack(pady=5)
+    # --- 3. Botones Inferiores ---
+    frame_btns = tk.Frame(win, bg="#f4f4f8", pady=15)
+    frame_btns.pack(fill=tk.X, side=tk.BOTTOM)
     
-    var_filtro_asignados = tk.StringVar()
-    ent_filtro_asignados = tk.Entry(frame_izq, textvariable=var_filtro_asignados, width=40)
-    ent_filtro_asignados.pack(fill=tk.X, pady=(0, 5))
+    tk.Button(frame_btns, text="Guardar Cambios", command=guardar_cambios, 
+              bg="#4CAF50", fg="white", font=("Segoe UI", 11, "bold"), padx=20).pack(side=tk.RIGHT, padx=20)
     
-    frame_lista_izq = tk.Frame(frame_izq)
-    frame_lista_izq.pack(fill=tk.BOTH, expand=True)
-    
-    sc_izq = Scrollbar(frame_lista_izq, orient=tk.VERTICAL)
-    lista_asignados = Listbox(frame_lista_izq, selectmode=EXTENDED, yscrollcommand=sc_izq.set, height=18)
-    sc_izq.config(command=lista_asignados.yview)
-    sc_izq.pack(side=tk.RIGHT, fill=tk.Y)
-    lista_asignados.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    tk.Button(frame_btns, text="Cancelar", command=win.destroy, 
+              bg="#f44336", fg="white", padx=10).pack(side=tk.RIGHT, padx=10)
 
-    # --- Panel Derecho (Disponibles) ---
-    tk.Label(frame_der, text="Productos DISPONIBLES (Generales)", bg="#f4f4f8", font=("Helvetica", 10, "bold")).pack(pady=5)
-    
-    var_filtro = tk.StringVar()
-    ent_filtro = tk.Entry(frame_der, textvariable=var_filtro, width=40)
-    ent_filtro.pack(fill=tk.X, pady=(0, 5))
-    
-    frame_lista_der = tk.Frame(frame_der)
-    frame_lista_der.pack(fill=tk.BOTH, expand=True)
-    
-    sc_der = Scrollbar(frame_lista_der, orient=tk.VERTICAL)
-    lista_disponibles = Listbox(frame_lista_der, selectmode=EXTENDED, yscrollcommand=sc_der.set, height=18)
-    sc_der.config(command=lista_disponibles.yview)
-    sc_der.pack(side=tk.RIGHT, fill=tk.Y)
-    lista_disponibles.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    # --- Lógica de Carga de Datos ---
-    def cargar_listas():
-        nonlocal productos_asignados, productos_disponibles
-        try:
-            productos_asignados = backend.obtener_productos_por_proveedor(id_proveedor)
-            productos_disponibles = backend.obtener_productos_sin_asignar(id_proveedor)
-            _filtrar_listas()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron cargar las listas de productos:\n{e}", parent=win)
-
-    def _filtrar_listas(event=None):
-        lista_asignados.delete(0, END)
-        lista_disponibles.delete(0, END)
-        
-        filtro_asig = var_filtro_asignados.get().strip().lower()
-        filtro_disp = var_filtro.get().strip().lower()
-        
-        for p in productos_asignados:
-            nombre = (p.get('nombre') or '').lower()
-            id_str = str(p.get('id_producto'))
-            codigo = (p.get('codigo_barras') or '').lower()
-            
-            if (not filtro_asig or filtro_asig in nombre or filtro_asig == id_str or filtro_asig in codigo):
-                lista_asignados.insert(END, _fmt(p))
-            
-        for p in productos_disponibles:
-            nombre = (p.get('nombre') or '').lower()
-            id_str = str(p.get('id_producto'))
-            codigo = (p.get('codigo_barras') or '').lower()
-            
-            if (not filtro_disp or filtro_disp in nombre or filtro_disp == id_str or filtro_disp in codigo):
-                lista_disponibles.insert(END, _fmt(p))
-
-    # --- Lógica de Botones de Mapeo ---
-    def asignar():
-        ids = _get_id_from_selection(lista_disponibles)
-        if not ids: 
-            messagebox.showwarning("Atención", "Seleccione al menos un producto de la lista de disponibles.", parent=win)
-            return
-        
-        filtro_disp_actual = var_filtro.get()
-        filtro_asig_actual = var_filtro_asignados.get()
-        
-        try:
-            for id_prod in ids:
-                backend.asignar_producto_a_proveedor(id_proveedor, id_prod)
-            
-            cargar_listas()
-            var_filtro.set(filtro_disp_actual)
-            var_filtro_asignados.set(filtro_asig_actual)
-            _filtrar_listas()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron asignar los productos:\n{e}", parent=win)
-
-    def quitar():
-        ids = _get_id_from_selection(lista_asignados)
-        if not ids: 
-            messagebox.showwarning("Atención", "Seleccione al menos un producto de la lista de asignados.", parent=win)
-            return
-        
-        filtro_disp_actual = var_filtro.get()
-        filtro_asig_actual = var_filtro_asignados.get()
-        
-        try:
-            for id_prod in ids:
-                backend.quitar_producto_a_proveedor(id_proveedor, id_prod)
-            
-            cargar_listas()
-            var_filtro.set(filtro_disp_actual)
-            var_filtro_asignados.set(filtro_asig_actual)
-            _filtrar_listas()
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron quitar los productos:\n{e}", parent=win)
-
-    # --- Botones del Centro ---
-    btn_asignar = tk.Button(frame_centro, text="< Asignar", command=asignar, bg="#4CAF50", fg="white", width=10)
-    btn_asignar.pack(pady=10)
-    
-    btn_quitar = tk.Button(frame_centro, text="Quitar >", command=quitar, bg="#f44336", fg="white", width=10)
-    btn_quitar.pack(pady=10)
-
-    def limpiar_filtros():
-        var_filtro.set("")
-        var_filtro_asignados.set("")
-        _filtrar_listas()
-
-    btn_limpiar = tk.Button(frame_centro, text="Limpiar Filtros", command=limpiar_filtros, bg="#607D8B", fg="white", width=12)
-    btn_limpiar.pack(pady=10)
-
-    # --- Vincular eventos de filtrado ---
-    def on_filtro_change(*args):
-        _filtrar_listas()
-    
-    var_filtro.trace_add("write", on_filtro_change)
-    var_filtro_asignados.trace_add("write", on_filtro_change)
-
-    cargar_listas()
-    
-    # --- Atajos de teclado ---
-    def on_key_press(event):
-        if event.keysym == 'Escape':
-            limpiar_filtros()
-        elif event.state & 0x4 and event.keysym == 'a':
-            if event.widget == lista_disponibles:
-                lista_disponibles.selection_set(0, END)
-            elif event.widget == lista_asignados:
-                lista_asignados.selection_set(0, END)
-
-    win.bind('<KeyPress>', on_key_press)
-    lista_disponibles.bind('<KeyPress>', on_key_press)
-    lista_asignados.bind('<KeyPress>', on_key_press)
-    
-    # ¡NUEVO! Aplicar navegación por teclado
+    # Init
+    cargar_datos_iniciales()
     configurar_navegacion_ventana(win)
-    
-    # ¡NUEVO! Foco inicial en búsqueda de disponibles
-    win.after(50, lambda: ent_filtro.focus_set())
+    ent_buscar.focus_set()
     
     win.grab_set()
-    win.transient(parent)

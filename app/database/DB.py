@@ -339,12 +339,15 @@ def eliminar_cliente_logico(id_cliente: int) -> bool:
 # ======================================================
 # CATEGORÍAS
 # ======================================================
+# En app/database/DB.py
+
 def obtener_categorias() -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id_categoria, nombre FROM Categoria WHERE activa=1 ORDER BY nombre")
+        # --- ¡CAMBIO! Agregamos margen_ganancia a la consulta ---
+        cur.execute("SELECT id_categoria, nombre, margen_ganancia FROM Categoria WHERE activa=1 ORDER BY nombre")
         return list(cur.fetchall() or [])
     except Exception as e:
         logger.error(f"obtener_categorias: {e}")
@@ -355,7 +358,47 @@ def obtener_categorias() -> list[dict]:
             if conn: conn.close()
         except Exception:
             pass
+# En app/database/DB.py
 
+def crear_categoria(nombre: str, margen: float) -> bool:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO Categoria (nombre, margen_ganancia, activa) VALUES (%s, %s, 1)",
+            (nombre, float(margen))
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"crear_categoria: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
+
+def actualizar_categoria(id_categoria: int, nombre: str, margen: float) -> bool:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE Categoria SET nombre=%s, margen_ganancia=%s WHERE id_categoria=%s",
+            (nombre, float(margen), id_categoria)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"actualizar_categoria: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
 
 # ======================================================
 # PRODUCTOS / INVENTARIO

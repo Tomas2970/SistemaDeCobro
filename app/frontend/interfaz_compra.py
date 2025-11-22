@@ -1,378 +1,293 @@
 # app/frontend/interfaz_compra.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel, Listbox, Scrollbar, SINGLE, simpledialog
-from PIL import Image, ImageTk, ImageOps
-import os 
-from app.frontend.interfaz_crear_proveedor import ui_crear_proveedor
-from app.frontend.interfaz_gestion_proveedores import ui_gestion_proveedores
+from tkinter import ttk, messagebox, Toplevel, Listbox
+from typing import Any
 
-# ¡NUEVO! Importar navegación por teclado
 try:
+    from app.frontend.componentes_ui import EntryDecimal
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 except ImportError:
-    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
-    def configurar_navegacion_ventana(win, confirmar_cierre=False):
-        pass
+    def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
+    class EntryDecimal(tk.Entry): pass
 
-# Sistema de notificación de cambios de stock
 try:
     from app.frontend.stock_event_manager import stock_events
 except ImportError:
-    print("ADVERTENCIA: No se pudo importar stock_event_manager")
     class DummyStockEvents:
         def notificar_cambio_stock(self): pass
     stock_events = DummyStockEvents()
 
 def ui_compra(parent: tk.Misc, backend, usuario: dict):
     
-    proveedor_seleccionado: dict | None = None
-    carrito: list[dict] = []
-
     win = tk.Toplevel(parent)
-    win.title("Registrar Compra a Proveedor")
-    win.geometry("780x600")
+    win.title("Registrar Compra (Entrada de Mercadería)")
+    win.geometry("1050x700") 
     win.config(bg="#f4f4f8")
-    win.resizable(False, False)
-
-    tk.Label(win, text="Registrar Compra", bg="#f4f4f8", fg="#333",
-             font=("Helvetica", 14, "bold")).place(x=20, y=20)
-
-    # ==========================================
-    # 1. SELECCIÓN DE PROVEEDOR
-    # ==========================================
     
-    tk.Label(win, text="Proveedor:", bg="#f4f4f8", font=("Helvetica", 10, "bold")).place(x=30, y=70)
-    lbl_proveedor = tk.Label(win, text="(Ninguno seleccionado)", bg="#f4f4f8", fg="blue", font=("Helvetica", 10))
-    lbl_proveedor.place(x=120, y=70)
+    proveedor_sel: dict | None = None
+    carrito: list[dict] = [] 
+    
+    try:
+        categorias_cache = backend.obtener_categorias()
+    except:
+        categorias_cache = []
 
-    def abrir_selector_proveedor():
-        nonlocal proveedor_seleccionado
+    def obtener_margen(id_cat):
+        for c in categorias_cache:
+            if c['id_categoria'] == id_cat:
+                return float(c.get('margen_ganancia', 30.0))
+        return 30.0
+
+    # =================================================================
+    # 1. SECCIÓN SUPERIOR: PROVEEDOR
+    # =================================================================
+    frame_top = tk.Frame(win, bg="#f4f4f8", pady=15)
+    frame_top.pack(fill=tk.X, padx=20)
+
+    tk.Label(frame_top, text="Proveedor:", bg="#f4f4f8", font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT)
+    lbl_proveedor = tk.Label(frame_top, text="(Ninguno seleccionado)", fg="#0369a1", bg="#e0f2fe", font=("Segoe UI", 11), padx=10)
+    lbl_proveedor.pack(side=tk.LEFT, padx=10)
+
+    def seleccionar_proveedor():
+        nonlocal proveedor_sel
+        popup = Toplevel(win)
+        popup.title("Seleccionar Proveedor")
+        popup.geometry("500x400")
+        
+        lst = Listbox(popup, font=("Segoe UI", 10))
+        lst.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        provs = backend.obtener_proveedores()
+        for p in provs:
+            estado = "" if p['activo'] else " (Inactivo)"
+            lst.insert(tk.END, f"{p['id_proveedor']} - {p['nombre']}{estado}")
+            
+        def confirmar():
+            nonlocal proveedor_sel
+            sel = lst.curselection()
+            if not sel: return
+            idx = sel[0]
+            prov_data = provs[idx]
+            if not prov_data['activo']:
+                messagebox.showwarning("Atención", "No se puede registrar compras a un proveedor inactivo.", parent=popup)
+                return
+
+            proveedor_sel = prov_data
+            lbl_proveedor.config(text=proveedor_sel['nombre'])
+            btn_add_prod.config(state="normal") 
+            popup.destroy()
+
+        lst.bind("<Double-1>", lambda e: confirmar())
+        lst.bind("<Return>", lambda e: confirmar())
+
+        tk.Button(popup, text="Seleccionar", command=confirmar, bg="#4CAF50", fg="white").pack(pady=10)
+        configurar_navegacion_ventana(popup)
+
+    tk.Button(frame_top, text="Buscar...", command=seleccionar_proveedor).pack(side=tk.LEFT)
+    # SE ELIMINÓ EL BOTÓN DE CREAR NUEVO PROVEEDOR
+
+    # =================================================================
+    # 2. GRILLA
+    # =================================================================
+    frame_grilla = tk.Frame(win, bg="#f4f4f8")
+    frame_grilla.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+    cols = ("ID", "Producto", "Cantidad", "Costo Unit.", "Subtotal", "Precio Venta Nuevo")
+    tree = ttk.Treeview(frame_grilla, columns=cols, show="headings")
+    
+    tree.column("ID", width=50, anchor="center")
+    tree.column("Producto", width=300)
+    tree.column("Cantidad", width=80, anchor="e")    
+    tree.column("Costo Unit.", width=100, anchor="e") 
+    tree.column("Subtotal", width=100, anchor="e")
+    tree.column("Precio Venta Nuevo", width=120, anchor="e") 
+
+    for c in cols: tree.heading(c, text=c)
+
+    vsb = ttk.Scrollbar(frame_grilla, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=vsb.set)
+    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    frame_totales = tk.Frame(win, bg="#f4f4f8")
+    frame_totales.pack(fill=tk.X, padx=20, pady=5)
+    lbl_total = tk.Label(frame_totales, text="TOTAL: $ 0.00", font=("Segoe UI", 16, "bold"), bg="#f4f4f8", fg="#dc2626")
+    lbl_total.pack(side=tk.RIGHT)
+
+    # Lógica de Edición
+    def repintar_tabla():
+        for i in tree.get_children(): tree.delete(i)
+        total_gral = 0.0
+        for idx, item in enumerate(carrito):
+            subtotal = item['cant'] * item['costo']
+            total_gral += subtotal
+            cant_str = f"{item['cant']:.3f}" if item['cant'] % 1 != 0 else f"{int(item['cant'])}"
+            tree.insert("", tk.END, iid=str(idx), values=(
+                item['id'], item['nombre'], cant_str,
+                f"$ {item['costo']:.2f}", f"$ {subtotal:.2f}", f"$ {item['precio_venta']:.2f}"
+            ))
+        lbl_total.config(text=f"TOTAL: $ {total_gral:,.2f}")
+
+    def editar_celda(row_id, col_id):
         try:
-            def on_gestion_cierra():
-                try:
-                    proveedores = backend.obtener_proveedores(incluir_inactivos=False)
-                    if not proveedores:
-                        messagebox.showinfo("Sin Proveedores", "No hay proveedores activos creados. Use el botón '+ Crear'", parent=win)
-                        return
-                    mostrar_popup_lista(proveedores)
-                except Exception as e:
-                    messagebox.showerror("Error", f"No se pudo recargar proveedores.\n{e}", parent=win)
-            
-            def mostrar_popup_lista(proveedores: list):
-                sel = Toplevel(win)
-                sel.title("Seleccionar Proveedor")
-                sel.geometry("400x300")
-                sel.config(bg="#f4f4f8")
-                
-                # ¡NUEVO! Aplicar navegación al popup
-                configurar_navegacion_ventana(sel)
-                
-                frame_lista = tk.Frame(sel)
-                frame_lista.pack(expand=True, fill="both", padx=10, pady=10)
-                sc = Scrollbar(frame_lista)
-                sc.pack(side="right", fill="y")
-                lst = Listbox(frame_lista, selectmode=SINGLE, yscrollcommand=sc.set, width=50, height=12)
-                lst.pack(side="left", fill="both", expand=True)
-                sc.config(command=lst.yview)
-                
-                for p in proveedores:
-                    lst.insert(tk.END, f"{p.get('id_proveedor')} | {p.get('nombre')}")
-                
-                def tomar():
-                    nonlocal proveedor_seleccionado
-                    sel_idx = lst.curselection()
-                    if not sel_idx: return
-                    
-                    id_prov = int(lst.get(sel_idx[0]).split("|")[0].strip())
-                    proveedor_seleccionado = next((p for p in proveedores if p.get('id_proveedor') == id_prov), None)
-                    
-                    if proveedor_seleccionado:
-                        lbl_proveedor.config(text=proveedor_seleccionado.get('nombre'))
-                    sel.destroy()
-                    
-                frame_boton = tk.Frame(sel, bg="#f4f4f8")
-                frame_boton.pack(fill="x", pady=8)
-                btn_sel = tk.Button(frame_boton, text="Seleccionar", command=tomar, bg="#4CAF50", fg="white")
-                btn_sel.pack()
-                
-                # ¡NUEVO! Foco inicial en la lista
-                sel.after(50, lambda: lst.focus_set())
-                
-                sel.grab_set()
-                sel.transient(win)
-            
-            proveedores_actuales = backend.obtener_proveedores(incluir_inactivos=False)
-            if not proveedores_actuales:
-                 if messagebox.askyesno("Sin Proveedores", "No hay proveedores activos. ¿Desea crear uno ahora?"):
-                     ui_crear_proveedor(win, backend, id_proveedor_a_editar=None) 
-                     on_gestion_cierra() 
-            else:
-                 mostrar_popup_lista(proveedores_actuales)
+            idx = int(row_id)
+            item = carrito[idx]
+        except (ValueError, IndexError): return
 
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cargar proveedores.\n{e}", parent=win)
-            return
+        col_map = {'#3': 'cant', '#4': 'costo', '#6': 'precio_venta'}
+        if col_id not in col_map: return
 
-    btn_elegir = tk.Button(win, text="Elegir...", command=abrir_selector_proveedor)
-    btn_elegir.place(x=400, y=65)
-    
-    def abrir_gestion_proveedores():
-        nonlocal proveedor_seleccionado
-        
-        ui_gestion_proveedores(win, backend)
-        
-        if proveedor_seleccionado:
+        campo = col_map[col_id]
+        try:
+            x, y, w, h = tree.bbox(row_id, col_id)
+            if w == 0: return 
+        except Exception: return
+
+        valor_actual = item[campo]
+        entry = EntryDecimal(tree)
+        entry.place(x=x, y=y, width=w, height=h)
+        entry.insert(0, str(valor_actual))
+        entry.select_range(0, tk.END)
+        entry.focus_set()
+
+        def confirmar_y_saltar(e=None):
             try:
-                datos_nuevos = backend.obtener_proveedor_para_editar(proveedor_seleccionado.get('id_proveedor'))
-                if datos_nuevos and datos_nuevos.get('activo', True): 
-                    proveedor_seleccionado = datos_nuevos
-                    lbl_proveedor.config(text=proveedor_seleccionado.get('nombre'))
-                else:
-                    proveedor_seleccionado = None
-                    lbl_proveedor.config(text="(Ninguno seleccionado)")
-            except Exception:
-                proveedor_seleccionado = None
-                lbl_proveedor.config(text="(Ninguno seleccionado)")
+                val = float(entry.get())
+                if val < 0: raise ValueError
+                item[campo] = val
+                
+                if campo == 'costo':
+                    margen = item.get('margen', 30.0)
+                    item['precio_venta'] = val * (1 + margen/100)
 
-    def abrir_crear_nuevo():
-        ui_crear_proveedor(win, backend, id_proveedor_a_editar=None)
-    
-    btn_crear = tk.Button(win, text="+ Crear", command=abrir_crear_nuevo)
-    btn_crear.place(x=470, y=65)
-    
-    btn_gestionar = tk.Button(win, text="Gestionar Proveedores", command=abrir_gestion_proveedores)
-    btn_gestionar.place(x=540, y=65)
+                entry.destroy()
+                repintar_tabla()
+                
+                orden = ['#3', '#4', '#6']
+                try:
+                    curr_idx = orden.index(col_id)
+                    if curr_idx < len(orden) - 1:
+                        next_col = orden[curr_idx + 1]
+                        win.after(10, lambda: editar_celda(row_id, next_col))
+                    else:
+                        next_row_idx = int(row_id) + 1
+                        if next_row_idx < len(carrito):
+                            win.after(10, lambda: editar_celda(str(next_row_idx), '#3'))
+                except ValueError: pass
 
-    # ==========================================
-    # 2. SELECCIÓN DE PRODUCTOS
-    # ==========================================
-    
-    tk.Label(win, text="Agregar Productos:", bg="#f4f4f8", font=("Helvetica", 10, "bold")).place(x=30, y=120)
+            except ValueError:
+                messagebox.showwarning("Error", "Valor inválido")
+                entry.focus_set()
 
+        entry.bind("<Return>", confirmar_y_saltar)
+        entry.bind("<Tab>", confirmar_y_saltar)
+        entry.bind("<Escape>", lambda e: entry.destroy())
+        entry.bind("<FocusOut>", lambda e: entry.destroy())
+
+    def on_click(event):
+        region = tree.identify("region", event.x, event.y)
+        if region == "cell":
+            col = tree.identify_column(event.x)
+            row = tree.identify_row(event.y)
+            if row: editar_celda(row, col)
+
+    tree.bind("<Double-1>", on_click)
+
+    # Lógica de Agregar Producto
     def abrir_selector_producto():
-        if not proveedor_seleccionado:
-            messagebox.showwarning("Atención", "Primero debe seleccionar un proveedor.", parent=win)
-            return
-            
-        id_prov = proveedor_seleccionado.get('id_proveedor')
-        nombre_prov = proveedor_seleccionado.get('nombre')
+        if not proveedor_sel: return
+        popup = Toplevel(win)
+        popup.title("Agregar Producto al Carrito")
+        popup.geometry("500x450")
         
-        sel = Toplevel(win)
-        sel.title(f"Seleccionar Producto para: {nombre_prov}")
-        sel.geometry("400x350")
-        sel.config(bg="#f4f4f8")
+        tk.Label(popup, text="Buscar en productos de este proveedor:", bg="#f4f4f8").pack(pady=5)
+        var_bus = tk.StringVar()
+        ent_bus = tk.Entry(popup, textvariable=var_bus)
+        ent_bus.pack(fill=tk.X, padx=10)
+        ent_bus.focus_set()
+
+        lst = Listbox(popup, height=15)
+        lst.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # ¡NUEVO! Aplicar navegación al popup
-        configurar_navegacion_ventana(sel)
-        
-        tk.Label(sel, text="Buscar producto:", bg="#f4f4f8").pack(pady=5)
-        var_pat = tk.StringVar()
-        ent = tk.Entry(sel, textvariable=var_pat, width=40)
-        ent.pack(pady=4)
-        
-        frame_lista = tk.Frame(sel)
-        frame_lista.pack(expand=True, fill="both", padx=10, pady=10)
-        sc = Scrollbar(frame_lista)
-        sc.pack(side="right", fill="y")
-        lst = Listbox(frame_lista, selectmode=SINGLE, yscrollcommand=sc.set, width=50, height=12)
-        lst.pack(side="left", fill="both", expand=True)
-        sc.config(command=lst.yview)
-        
-        data = backend.obtener_productos_por_proveedor(id_prov)
-        
-        def render(filas):
-            lst.delete(0, tk.END)
-            [lst.insert(tk.END, f"{c.get('id_producto','')} | {c.get('nombre','')}") for c in filas]
-        render(data)
+        todos_prods = backend.obtener_productos_por_proveedor(proveedor_sel['id_proveedor'])
         
         def filtrar(*_):
-            q = var_pat.get().strip().lower()
-            if not q:
-                render(data)
-                return
-            filtrados = [p for p in data if q in str(p.get('nombre','')).lower() or q == str(p.get('id_producto'))]
-            render(filtrados)
-        var_pat.trace_add("write", filtrar)
+            lst.delete(0, tk.END)
+            q = var_bus.get().lower()
+            for p in todos_prods:
+                txt = f"{p['id_producto']} | {p['nombre']}"
+                if q in txt.lower(): lst.insert(tk.END, txt)
+        var_bus.trace_add("write", filtrar)
+        filtrar()
 
-        def tomar():
-            sel_idx = lst.curselection()
-            if not sel_idx: return
+        def agregar_al_carrito():
+            sel = lst.curselection()
+            if not sel: return
+            linea = lst.get(sel[0])
+            pid = int(linea.split("|")[0].strip())
             
-            id_prod = int(lst.get(sel_idx[0]).split("|")[0].strip())
-            producto = next((p for p in data if p.get('id_producto') == id_prod), None)
-            sel.destroy() 
+            prod_full = backend.buscar_producto_por_id(pid)
+            if not prod_full: return
+
+            id_cat = prod_full.get('id_categoria')
+            margen = obtener_margen(id_cat)
             
-            if producto:
-                agregar_al_carrito(producto) 
-        
-        frame_boton = tk.Frame(sel, bg="#f4f4f8")
-        frame_boton.pack(fill="x", pady=(0, 8))
-        btn_sel = tk.Button(frame_boton, text="Seleccionar", command=tomar, bg="#4CAF50", fg="white", width=15)
-        btn_sel.pack()
-        
-        # ¡NUEVO! Foco inicial en búsqueda
-        sel.after(50, lambda: ent.focus_set())
-        
-        sel.grab_set()
-        sel.transient(win)
-
-    def agregar_al_carrito(producto: dict):
-        es_pesable = producto.get('es_pesable', False)
-        
-        prompt_cantidad = f"¿Qué cantidad (unid/Kg) de '{producto.get('nombre')}'?"
-        if not es_pesable:
-            prompt_cantidad = f"¿Cuántas unidades de '{producto.get('nombre')}'?"
-
-        cantidad = simpledialog.askfloat("Cantidad", prompt_cantidad,
-                                           parent=win, minvalue=0.001)
-        
-        if not cantidad or cantidad <= 0:
-            return
+            nuevo_item = {
+                'id': pid, 'nombre': prod_full['nombre'],
+                'cant': 1.0, 'costo': 1.0, 'margen': margen,
+                'precio_venta': 1.0 * (1 + margen/100)
+            }
+            carrito.append(nuevo_item)
+            repintar_tabla()
+            popup.destroy()
             
-        # Si no es pesable, forzamos a entero
-        if not es_pesable:
-            if cantidad != int(cantidad):
-                 messagebox.showwarning("Cantidad Inválida", "Este producto no es pesable. Ingrese solo unidades enteras.", parent=win)
-                 return
-            cantidad = int(cantidad)
+            new_idx = str(len(carrito) - 1)
+            win.after(100, lambda: editar_celda(new_idx, '#3'))
 
-        precio_costo = simpledialog.askfloat("Precio de Costo", f"Ingrese el PRECIO DE COSTO por unidad:",
-                                             parent=win, minvalue=0.01)
-        if precio_costo is None or precio_costo <= 0: 
-            return
-            
-        carrito.append({
-            'id_producto': producto.get('id_producto'),
-            'nombre': producto.get('nombre'),
-            'cantidad': cantidad,
-            'precio_costo': precio_costo
-        })
-        refrescar_carrito()
+        lst.bind("<Double-1>", lambda e: agregar_al_carrito())
+        lst.bind("<Return>", lambda e: agregar_al_carrito())
 
-    btn_agregar_prod = tk.Button(win, text="+ Agregar Producto al Carrito", command=abrir_selector_producto, bg="#03A9F4", fg="white")
-    btn_agregar_prod.place(x=170, y=115)
+        fr_btns = tk.Frame(popup, bg="#f4f4f8", pady=10)
+        fr_btns.pack(fill=tk.X)
+        tk.Button(fr_btns, text="Agregar al Carrito (Enter)", bg="#2196F3", fg="white", 
+                  command=agregar_al_carrito, width=25).pack()
+        
+        configurar_navegacion_ventana(popup)
 
-    # ==========================================
-    # 3. CARRITO (Treeview)
-    # ==========================================
+    # Footer
+    frame_footer = tk.Frame(win, bg="#e5e7eb", height=60)
+    frame_footer.pack(fill=tk.X, side=tk.BOTTOM)
     
-    cols = ["ID", "Producto", "Cantidad", "Costo Unit.", "Subtotal"]
-    tree = ttk.Treeview(win, columns=cols, show="headings", height=12)
-    tree.place(x=30, y=160, width=720)
-    for c in cols: tree.heading(c, text=c)
-    tree.column("ID", width=70, anchor="center")
-    tree.column("Producto", width=300)
-    tree.column("Cantidad", width=100, anchor="e")
-    tree.column("Costo Unit.", width=120, anchor="e")
-    tree.column("Subtotal", width=120, anchor="e")
-    ys = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
-    tree.configure(yscroll=ys.set)
-    ys.place(x=750, y=160, height=tree.cget('height')*19)
-    
-    def refrescar_carrito():
-        for i in tree.get_children():
-            tree.delete(i)
-        
-        total_compra = 0.0
-        for item in carrito:
-            subtotal = item['cantidad'] * item['precio_costo']
-            total_compra += subtotal
-            
-            # Formatear cantidad
-            cant_str = item['cantidad']
-            if isinstance(cant_str, float) and cant_str != int(cant_str):
-                cant_str = f"{cant_str:.3f}"
-            
-            tree.insert("", tk.END, values=[
-                item['id_producto'],
-                item['nombre'],
-                cant_str,
-                f"$ {item['precio_costo']:.2f}",
-                f"$ {subtotal:.2f}"
-            ])
-            
-    def quitar_del_carrito():
-        selected_item = tree.selection()
-        if not selected_item:
-            messagebox.showwarning("Atención", "Seleccione un producto de la lista para quitar.", parent=win)
-            return
-            
-        item_values = tree.item(selected_item[0], "values")
-        if not item_values: return 
-        
-        item_id = int(item_values[0])
-        item_cant_str = str(item_values[2])
-        
-        item_a_quitar = None
-        for item in carrito:
-            cant_str = str(item['cantidad'])
-            if isinstance(item['cantidad'], float) and item['cantidad'] != int(item['cantidad']):
-                cant_str = f"{item['cantidad']:.3f}"
-                
-            if item['id_producto'] == item_id and cant_str == item_cant_str:
-                item_a_quitar = item
-                break
-        
-        if item_a_quitar:
-            carrito.remove(item_a_quitar)
-        
-        tree.delete(selected_item[0])
-        refrescar_carrito()
+    inner_footer = tk.Frame(frame_footer, bg="#e5e7eb")
+    inner_footer.pack(fill=tk.X, padx=20, pady=15)
 
-    btn_quitar = tk.Button(win, text="Quitar Seleccionado", command=quitar_del_carrito, bg="#f44336", fg="white")
-    btn_quitar.place(x=30, y=440)
+    btn_add_prod = tk.Button(inner_footer, text="+ Agregar Producto (F2)", command=abrir_selector_producto, 
+                             bg="#03A9F4", fg="white", font=("Segoe UI", 10, "bold"), state="disabled", padx=15, pady=5)
+    btn_add_prod.pack(side=tk.LEFT)
     
-    # ==========================================
-    # 4. GUARDAR O CANCELAR
-    # ==========================================
+    tk.Button(inner_footer, text="Cancelar", command=win.destroy, 
+              bg="#f44336", fg="white", font=("Segoe UI", 10), padx=10, pady=5).pack(side=tk.LEFT, padx=15)
+
     def guardar_compra():
-        if not proveedor_seleccionado:
-            messagebox.showerror("Error", "Debe seleccionar un proveedor.", parent=win)
+        if not proveedor_sel: return
+        if not carrito: 
+            messagebox.showerror("Error", "Carrito vacío")
             return
-        if not carrito:
-            messagebox.showerror("Error", "El carrito está vacío. Debe agregar al menos un producto.", parent=win)
-            return
-            
-        id_usuario = usuario.get("id_usuario")
-        id_prov = proveedor_seleccionado.get("id_proveedor")
-
         try:
-            id_compra = backend.insertar_compra(id_usuario=id_usuario, id_proveedor=id_prov)
-            if not id_compra:
-                messagebox.showerror("Error Fatal", "No se pudo crear el registro de Compra.", parent=win)
-                return
-
+            id_compra = backend.insertar_compra(usuario['id_usuario'], proveedor_sel['id_proveedor'])
+            if not id_compra: raise Exception("Error DB")
             for item in carrito:
-                backend.insertar_detalle_compra(
-                    id_compra=id_compra,
-                    id_producto=item['id_producto'],
-                    cantidad=item['cantidad'],
-                    precio_costo=item['precio_costo']
-                )
-            
-            messagebox.showinfo("Éxito", f"Compra #{id_compra} registrada correctamente.\nEl stock ha sido actualizado.", parent=win)
-            
-            # ¡NOTIFICAR CAMBIO DE STOCK!
+                backend.insertar_detalle_compra(id_compra, item['id'], item['cant'], item['costo'])
+                backend.actualizar_precio_producto(item['id'], item['precio_venta'], id_usuario=usuario['id_usuario'])
+            messagebox.showinfo("Éxito", "Compra registrada.")
             stock_events.notificar_cambio_stock()
-            
             win.destroy()
+        except Exception as e: messagebox.showerror("Error", str(e))
 
-        except Exception as e:
-            messagebox.showerror("Error al Guardar", f"Ocurrió un error:\n{e}", parent=win)
+    tk.Button(inner_footer, text="CONFIRMAR COMPRA", command=guardar_compra, 
+              bg="#16a34a", fg="white", font=("Segoe UI", 11, "bold"), padx=20, pady=5).pack(side=tk.RIGHT)
 
-    btn_guardar = tk.Button(win, text="Guardar Compra", bg="#4CAF50", fg="white",
-              font=("Helvetica", 10, "bold"), width=18, command=guardar_compra)
-    btn_guardar.place(x=250, y=550)
-
-    btn_cancelar = tk.Button(win, text="Cancelar", bg="#f44336", fg="white",
-              font=("Helvetica", 10, "bold"), width=15, command=win.destroy)
-    btn_cancelar.place(x=420, y=550)
-
-    # ¡NUEVO! Aplicar navegación por teclado con confirmación
+    win.bind("<F2>", lambda e: btn_add_prod.invoke())
     configurar_navegacion_ventana(win, confirmar_cierre=True)
-    
-    # ¡NUEVO! Foco inicial en botón elegir proveedor
-    win.after(50, lambda: btn_elegir.focus_set())
-    
     win.grab_set()

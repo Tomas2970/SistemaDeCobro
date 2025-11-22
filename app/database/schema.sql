@@ -1,7 +1,7 @@
 -- =========================================================
--- Supermercado Don Atilio - Esquema completo
+-- Supermercado Don Atilio - Esquema COMPLETO CORREGIDO
 -- Compatible MySQL 8.x / MariaDB 10.4+
--- VERSIÓN CORREGIDA - Compatible con MariaDB
+-- Fecha de Actualización: Fase 1 (Base de Datos)
 -- =========================================================
 
 -- 0) Base de datos
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS Usuario (
 CREATE TABLE IF NOT EXISTS Cliente (
   id_cliente INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(100) NOT NULL,
-  dni VARCHAR(15) NULL UNIQUE,
+  dni VARCHAR(15) NULL UNIQUE, -- Validaremos que sean 7-8 nums en el Frontend
   direccion VARCHAR(200),
   telefono VARCHAR(20),
   email VARCHAR(255) UNIQUE,
@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS Cliente (
   CHECK (email IS NULL OR email LIKE '%@%.%'),
   INDEX idx_cliente_nombre (nombre),
   INDEX idx_cliente_dni (dni),
-  INDEX idx_cliente_email (email),
   INDEX idx_cliente_activo (activo)
 ) ENGINE=InnoDB;
 
@@ -97,6 +96,7 @@ CREATE TABLE IF NOT EXISTS Categoria (
   nombre VARCHAR(50) NOT NULL UNIQUE,
   descripcion VARCHAR(200),
   activa BOOLEAN DEFAULT TRUE,
+  margen_ganancia DECIMAL(5,2) DEFAULT 30.00, -- ¡NUEVO! Para cálculo automático
   fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_categoria_nombre (nombre),
   INDEX idx_categoria_activa (activa)
@@ -262,7 +262,38 @@ CREATE TABLE IF NOT EXISTS DetalleVenta (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 6) Auditoría
+-- 6) Caja y Cierres (¡NUEVO!)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS AperturaCierreCaja (
+  id_caja INT AUTO_INCREMENT PRIMARY KEY,
+  id_usuario INT NOT NULL,
+  fecha_apertura DATETIME DEFAULT CURRENT_TIMESTAMP,
+  fecha_cierre DATETIME NULL,
+  monto_inicial DECIMAL(10,2) NOT NULL,
+  monto_final_real DECIMAL(10,2) NULL,
+  monto_sistema DECIMAL(10,2) NULL,
+  diferencia DECIMAL(10,2) NULL,
+  observaciones TEXT,
+  estado VARCHAR(20) DEFAULT 'abierta',
+  CONSTRAINT fk_caja_usuario FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario),
+  INDEX idx_caja_estado (estado),
+  INDEX idx_caja_fecha (fecha_apertura)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS MovimientoCaja (
+  id_movimiento INT AUTO_INCREMENT PRIMARY KEY,
+  id_caja INT NOT NULL,
+  tipo VARCHAR(20) NOT NULL, -- 'ingreso', 'egreso', 'venta_efectivo', 'gasto'
+  monto DECIMAL(10,2) NOT NULL,
+  descripcion VARCHAR(200),
+  fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_mov_caja FOREIGN KEY (id_caja) REFERENCES AperturaCierreCaja(id_caja)
+  ON DELETE CASCADE,
+  INDEX idx_mov_caja (id_caja)
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 7) Auditoría
 -- =========================================================
 CREATE TABLE IF NOT EXISTS AuditoriaInventario (
   id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
@@ -305,10 +336,11 @@ CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 7) Triggers
+-- 8) Triggers
 -- =========================================================
 DELIMITER $$
 
+-- Actualizar total Venta
 DROP TRIGGER IF EXISTS trg_detalle_venta_ai_total $$
 CREATE TRIGGER trg_detalle_venta_ai_total
 AFTER INSERT ON DetalleVenta
@@ -323,6 +355,7 @@ BEGIN
   WHERE id_venta = NEW.id_venta;
 END $$
 
+-- Actualizar total Compra
 DROP TRIGGER IF EXISTS trg_detalle_compra_ai_total $$
 CREATE TRIGGER trg_detalle_compra_ai_total
 AFTER INSERT ON DetalleCompra
@@ -337,6 +370,7 @@ BEGIN
   WHERE id_compra = NEW.id_compra;
 END $$
 
+-- Auditoría Inventario
 DROP TRIGGER IF EXISTS trg_auditoria_venta_inventario $$
 CREATE TRIGGER trg_auditoria_venta_inventario
 AFTER INSERT ON DetalleVenta
@@ -353,6 +387,7 @@ BEGIN
   END IF;
 END $$
 
+-- Mantener Cuenta Corriente actualizada
 DROP TRIGGER IF EXISTS trg_venta_au_cuentacorriente $$
 CREATE TRIGGER trg_venta_au_cuentacorriente
 AFTER UPDATE ON Venta
@@ -375,12 +410,28 @@ BEGIN
   END IF;
 END $$
 
-DELIMITER ;
+-- ¡NUEVO! Impactar Venta Efectivo en Caja
+DROP TRIGGER IF EXISTS trg_venta_a_caja $$
+CREATE TRIGGER trg_venta_a_caja
+AFTER UPDATE ON Venta
+FOR EACH ROW
+BEGIN
+    DECLARE v_id_caja INT;
+    
+    -- Si la venta pasa a completada y es en efectivo
+    IF NEW.estado = 'completada' AND NEW.tipo_pago = 'efectivo' AND OLD.estado <> 'completada' THEN
+        -- Buscar la caja ABIERTA más reciente (asumiendo una caja por turno/local por ahora)
+        SELECT id_caja INTO v_id_caja FROM AperturaCierreCaja 
+        WHERE estado = 'abierta' ORDER BY id_caja DESC LIMIT 1;
+        
+        IF v_id_caja IS NOT NULL THEN
+            INSERT INTO MovimientoCaja (id_caja, tipo, monto, descripcion)
+            VALUES (v_id_caja, 'venta_efectivo', NEW.total, CONCAT('Venta #', NEW.id_venta));
+        END IF;
+    END IF;
+END $$
 
--- =========================================================
--- 8) Datos iniciales (roles, categorías)
--- =========================================================
--- (Se movieron a 'app/tools/seed_initial_data.py')
+DELIMITER ;
 
 -- =========================================================
 -- 9) Vistas útiles
@@ -472,5 +523,6 @@ DELIMITER ;
 CALL ensure_index('Venta',               'idx_venta_fecha_cliente',       'fecha, id_cliente');
 CALL ensure_index('Producto',            'idx_producto_categoria_activo', 'id_categoria, activo');
 CALL ensure_index('AuditoriaInventario', 'idx_auditoria_producto_fecha',  'id_producto, fecha');
+CALL ensure_index('AperturaCierreCaja',  'idx_caja_usuario_estado',       'id_usuario, estado');
 
 DROP PROCEDURE IF EXISTS ensure_index;
