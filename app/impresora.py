@@ -464,3 +464,118 @@ if __name__ == "__main__":
     else:
         print("Ejecutando prueba rápida...")
         probar_impresion_rapida()
+    
+# app/impresora.py - Agregar al final del archivo
+
+def imprimir_resumen_diario(datos: dict):
+    """
+    Imprime un ticket con el resumen del día.
+    
+    Args:
+        datos: Dict con estructura de obtener_resumen_diario()
+    """
+    ticket = []
+    ticket.append("\n")
+    ticket.append(centrar_texto("SUPERMERCADO DON ATILIO"))
+    ticket.append(centrar_texto("==========================="))
+    ticket.append(centrar_texto("RESUMEN DEL DIA"))
+    ticket.append(linea_separadora())
+    
+    fecha_str = datetime.strptime(datos['fecha'], "%Y-%m-%d").strftime("%d/%m/%Y")
+    ticket.append(f"Fecha: {fecha_str}")
+    ticket.append(linea_separadora())
+    
+    # VENTAS POR CATEGORÍA
+    ticket.append("\nVENTAS POR CATEGORÍA:")
+    for cat in datos.get('categorias', []):
+        nombre = cat['nombre_categoria'][:20].ljust(20)
+        cant = f"({int(cat['cantidad_ventas'])})"
+        monto = formato_precio(cat['monto_total'])
+        ticket.append(justificar_texto(f"{nombre} {cant}", monto))
+    
+    ticket.append(linea_separadora('-'))
+    ticket.append(justificar_texto(
+        f"TOTAL VENTAS ({datos['total_ventas']})",
+        formato_precio(datos['monto_total'])
+    ))
+    ticket.append(linea_separadora('='))
+    
+    # MÉTODOS DE PAGO
+    ticket.append("\nDETALLE POR MÉTODO DE PAGO:")
+    metodos_nombres = {
+        'efectivo': 'Efectivo:',
+        'tarjeta': 'Tarjeta:',
+        'transferencia': 'Transferencia:',
+        'cuenta_corriente': 'Cuenta Corriente:'
+    }
+    
+    for metodo, monto in datos.get('metodos_pago', {}).items():
+        nombre = metodos_nombres.get(metodo, metodo + ':')
+        ticket.append(justificar_texto(nombre, formato_precio(monto)))
+    
+    ticket.append(linea_separadora('='))
+    
+    # MOVIMIENTOS DE CAJA
+    mov = datos.get('movimientos_caja', {})
+    if mov and (mov.get('cobros_cc', 0) > 0 or mov.get('egresos', 0) > 0):
+        ticket.append("\nMOVIMIENTOS DE CAJA:")
+        if mov.get('cobros_cc', 0) > 0:
+            ticket.append(justificar_texto("+ Cobros C.C.:", formato_precio(mov['cobros_cc'])))
+        if mov.get('egresos', 0) > 0:
+            ticket.append(justificar_texto("- Egresos:", formato_precio(mov['egresos'])))
+        ticket.append(linea_separadora('='))
+        ticket.append(justificar_texto("EFECTIVO EN CAJA:", formato_precio(mov['efectivo_final'])))
+        ticket.append(linea_separadora('='))
+    
+    
+    enviar_a_impresora('\n'.join(ticket))
+
+
+def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
+    """
+    Imprime el ticket de cierre de caja (Arqueo).
+    """
+    ticket = []
+    ticket.append("\n")
+    ticket.append(centrar_texto("SUPERMERCADO DON ATILIO"))
+    ticket.append(centrar_texto("==========================="))
+    ticket.append(centrar_texto("CIERRE DE CAJA"))
+    ticket.append(linea_separadora())
+    
+    fecha_actual = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ticket.append(f"Fecha Cierre: {fecha_actual}")
+    ticket.append(f"Cajero: {nombre_usuario}")
+    ticket.append(linea_separadora())
+    
+    # Detalles numéricos
+    monto_ini = datos_cierre.get('monto_inicial', 0)
+    ingresos = datos_cierre.get('total_ingresos', 0)
+    egresos = datos_cierre.get('total_egresos', 0)
+    esperado = datos_cierre.get('efectivo_esperado', 0)
+    contado = datos_cierre.get('efectivo_contado', 0)
+    diferencia = datos_cierre.get('diferencia', 0)
+    
+    ticket.append(justificar_texto("Saldo Inicial:", formato_precio(monto_ini)))
+    ticket.append(justificar_texto("(+) Ingresos:", formato_precio(ingresos)))
+    ticket.append(justificar_texto("(-) Egresos:", formato_precio(egresos)))
+    ticket.append(linea_separadora('-'))
+    
+    ticket.append(justificar_texto("Efec. Esperado:", formato_precio(esperado)))
+    ticket.append(justificar_texto("Efec. Real:", formato_precio(contado)))
+    
+    ticket.append(linea_separadora('='))
+    texto_dif = "DIFERENCIA:"
+    val_dif = formato_precio(diferencia)
+    ticket.append(justificar_texto(texto_dif, val_dif))
+    
+    # Observaciones si existen
+    obs = datos_cierre.get('observaciones', '')
+    if obs:
+        ticket.append(linea_separadora('.'))
+        ticket.append("OBSERVACIONES:")
+        ticket.append(obs)
+    
+    ticket.append("\n\n\n")
+    
+    # Enviar a imprimir
+    enviar_a_impresora('\n'.join(ticket))

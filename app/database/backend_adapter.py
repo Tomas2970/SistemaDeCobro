@@ -2,17 +2,14 @@
 from __future__ import annotations
 from typing import Any, Optional
 import logging
-import json # ¡NUEVO!
+import json
 
 try:
     from app.database import DB
 except Exception as e:
     raise ImportError("No se pudo importar app.database.DB.") from e
 
-# --- ¡CAMBIO! Corregir typo ---
-# logger = logging.getLoggaer(__name__) # <-- Tenía 'getLoggaer'
-logger = logging.getLogger(__name__)    # <-- Corregido a 'getLogger'
-# --- FIN CAMBIO ---
+logger = logging.getLogger(__name__)
 
 class BackendAdapter:
     
@@ -141,15 +138,13 @@ class BackendAdapter:
             raise 
     
     # ---------- Productos / Categorías ----------
-    # En app/database/backend_adapter.py
+    def crear_categoria(self, nombre: str, margen: float, es_pesable: bool = False) -> bool:
+            fn = getattr(DB, "crear_categoria", None)
+            return bool(fn(nombre, margen, es_pesable)) if callable(fn) else False
 
-    def crear_categoria(self, nombre: str, margen: float) -> bool:
-        fn = getattr(DB, "crear_categoria", None)
-        return bool(fn(nombre, margen)) if callable(fn) else False
-
-    def actualizar_categoria(self, id_categoria: int, nombre: str, margen: float) -> bool:
+    def actualizar_categoria(self, id_categoria: int, nombre: str, margen: float, es_pesable: bool) -> bool:
         fn = getattr(DB, "actualizar_categoria", None)
-        return bool(fn(id_categoria, nombre, margen)) if callable(fn) else False
+        return bool(fn(id_categoria, nombre, margen, es_pesable)) if callable(fn) else False
     def obtener_categorias(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_categorias", None)
         return list(fn() or []) if callable(fn) else []
@@ -182,7 +177,7 @@ class BackendAdapter:
         stock_inicial: int,
         stock_minimo: int = 10,
         es_pesable: bool = False,
-        id_usuario: int | None = None # ¡NUEVO!
+        id_usuario: int | None = None
     ) -> int | None:
         
         pid = DB.crear_producto_completo(nombre, precio, categoria_id, stock_inicial, stock_minimo, es_pesable)
@@ -215,7 +210,7 @@ class BackendAdapter:
         precio: Optional[float] = None,
         codigo_barras: Optional[str] = None,
         es_pesable: Optional[bool] = None,
-        id_usuario: int | None = None # ¡NUEVO!
+        id_usuario: int | None = None
     ) -> bool:
         
         # 1. Obtener datos anteriores PARA AUDITAR
@@ -316,7 +311,13 @@ class BackendAdapter:
         return resultado
 
     # ---------- Proveedores y Compras ----------
-    
+
+
+    def registrar_pago_proveedor(self, id_proveedor: int, monto: float, medio: str, id_usuario: int, obs: str) -> bool:
+        fn = getattr(DB, "registrar_pago_proveedor", None)
+        if callable(fn):
+            return fn(id_proveedor, monto, medio, id_usuario, obs)
+        return False
     def obtener_proveedores(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_proveedores", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
@@ -344,14 +345,31 @@ class BackendAdapter:
     def quitar_producto_a_proveedor(self, id_proveedor: int, id_producto: int) -> bool:
         fn = getattr(DB, "quitar_producto_a_proveedor", None)
         return bool(fn(id_proveedor, id_producto)) if callable(fn) else False
-    def insertar_compra(self, id_usuario: int, id_proveedor: int) -> int | None:
-        fn = getattr(DB, "insertar_compra", None)
-        return fn(id_usuario, id_proveedor) if callable(fn) else None
+
+    def insertar_compra(self, id_usuario: int, id_proveedor: int, items: list[dict] | None = None, medio_pago: str = 'efectivo') -> int | None:
+            """
+            Inserta compra permitiendo seleccionar medio de pago.
+            """
+            fn = getattr(DB, "insertar_compra", None)
+            if not callable(fn):
+                return None
+
+            try:
+                # Llamamos a la nueva firma de DB.insertar_compra
+                if items is not None:
+                    return fn(id_usuario, id_proveedor, items, medio_pago)
+                else:
+                    return fn(id_usuario, id_proveedor)
+            except TypeError:
+                # Fallback por si DB no se actualizó
+                if items is not None:
+                    return fn(id_usuario, id_proveedor, items)
+                return fn(id_usuario, id_proveedor)
+        
     def insertar_detalle_compra(self, id_compra: int, id_producto: int, cantidad: float, precio_costo: float) -> bool:
         fn = getattr(DB, "insertar_detalle_compra", None)
         return bool(fn(id_compra, id_producto, cantidad, precio_costo)) if callable(fn) else False
     
-    # ... (Resto de las secciones (Historiales, CC, Usuarios, Reportes) sin cambios) ...
     # ---------- Historiales (Venta/Compra) ----------
     def obtener_ventas_maestro(
         self, 
@@ -376,6 +394,18 @@ class BackendAdapter:
     def obtener_compra_detalle(self, id_compra: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_compra_detalle", None)
         return list(fn(id_compra) or []) if callable(fn) else []
+    
+    # ---------- Historial de Pagos ----------
+    def obtener_pagos_maestro(
+        self,
+        fecha_desde: Optional[str],
+        fecha_hasta: Optional[str],
+        id_cliente: Optional[int],
+        id_usuario: Optional[int]
+    ) -> list[dict[str, Any]]:
+        fn = getattr(DB, "obtener_pagos_maestro", None)
+        return list(fn(fecha_desde, fecha_hasta, id_cliente, id_usuario) or []) if callable(fn) else []
+    
     # ---------- Cuenta Corriente ----------
     def obtener_clientes_con_deuda(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_clientes_con_deuda", None)
@@ -389,6 +419,7 @@ class BackendAdapter:
     def registrar_pago_cuenta_corriente(self, id_cuenta: int, monto: float, metodo: str, id_usuario: int) -> bool:
         fn = getattr(DB, "registrar_pago_cuenta_corriente", None)
         return bool(fn(id_cuenta, monto, metodo, id_usuario)) if callable(fn) else False
+    
     # ---------- Gestión de Usuarios ----------
     def obtener_usuarios_con_rol(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_usuarios_con_rol", None)
@@ -408,6 +439,7 @@ class BackendAdapter:
     def desactivar_usuario(self, id_usuario: int) -> bool:
         fn = getattr(DB, "desactivar_usuario", None)
         return bool(fn(id_usuario)) if callable(fn) else False
+    
     # ---------- Reportes ----------
     def obtener_vendedores(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_vendedores", None)
@@ -418,3 +450,60 @@ class BackendAdapter:
     def obtener_ventas_diarias(self, desde: str | None = None, hasta: str | None = None) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_ventas_diarias", None)
         return list(fn(desde, hasta) or []) if callable(fn) else []
+
+# ---------- CAJA (SISTEMA INDIVIDUAL POR USUARIO) ----------
+    
+    def obtener_session_abierta(self, id_usuario: int) -> dict | None:
+        """
+        Obtiene la sesión de caja abierta DEL USUARIO ESPECÍFICO.
+        Sistema individual: cada usuario tiene su propia caja.
+        """
+        fn = getattr(DB, "obtener_session_abierta", None)
+        if not callable(fn): return None
+        
+        # Pasar el id_usuario para obtener SU caja
+        return fn(id_usuario)
+    
+    def abrir_caja_session(self, id_usuario: int, monto_inicial: float) -> bool:
+        fn = getattr(DB, "abrir_caja_session", None)
+        if not callable(fn): return False
+        try:
+            return bool(fn(id_usuario, monto_inicial))
+        except ValueError as e:
+            # Re-lanzar errores de validación (ej: "Usuario ya tiene caja abierta")
+            raise
+    
+    def registrar_movimiento_manual(self, id_session: int, tipo: str, monto: float, motivo: str, descripcion: str, id_usuario: int) -> bool:
+        fn = getattr(DB, "registrar_movimiento_manual", None)
+        return bool(fn(id_session, tipo, monto, motivo, descripcion, id_usuario)) if callable(fn) else False
+    
+    def obtener_resumen_cierre(self, id_session: int) -> dict:
+        fn = getattr(DB, "obtener_resumen_cierre", None)
+        return fn(id_session) if callable(fn) else {}
+    
+    def cerrar_caja_session(self, id_session: int, id_usuario_cierre: int, efectivo_esperado: float, efectivo_contado: float, diferencia: float, obs: str) -> bool:
+        fn = getattr(DB, "cerrar_caja_session", None)
+        return bool(fn(id_session, id_usuario_cierre, efectivo_esperado, efectivo_contado, diferencia, obs)) if callable(fn) else False
+    
+    # --- REPORTES DE CAJA ---
+    def obtener_resumen_diario(self, fecha: str | None = None) -> dict:
+        """
+        Obtiene resumen de ventas del día por categoría y método de pago.
+        Si fecha es None, usa hoy.
+        """
+        fn = getattr(DB, "obtener_resumen_diario", None)
+        return fn(fecha) if callable(fn) else {}
+    
+    def obtener_historial_movimientos_caja(
+        self,
+        fecha_desde: str | None = None,
+        fecha_hasta: str | None = None,
+        tipo: str | None = None,
+        motivo: str | None = None,
+        id_usuario: int | None = None
+    ) -> list[dict]:
+        """
+        Obtiene historial de movimientos de caja con filtros.
+        """
+        fn = getattr(DB, "obtener_historial_movimientos_caja", None)
+        return list(fn(fecha_desde, fecha_hasta, tipo, motivo, id_usuario) or []) if callable(fn) else []

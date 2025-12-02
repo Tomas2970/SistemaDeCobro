@@ -5,13 +5,10 @@ from tkinter import ttk, messagebox, simpledialog, Toplevel
 from typing import Optional, Any
 import logging
 
-# ¡NUEVO! Importar navegación por teclado
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 except ImportError:
-    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
-    def configurar_navegacion_ventana(win, confirmar_cierre=False):
-        pass
+    def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +25,7 @@ class CuentaCorriente:
         self.crear_widgets()
         self.cargar_deudores()
         
-        # ¡NUEVO! Aplicar navegación por teclado
         configurar_navegacion_ventana(self.win)
-        
-        # ¡NUEVO! Foco inicial en botón registrar pago
-        self.win.after(50, lambda: self.btn_pago.focus_set())
-        
         self.win.grab_set()
 
     def _fmt_mon(self, val: Any) -> str:
@@ -41,22 +33,16 @@ class CuentaCorriente:
         except: return "$ 0.00"
 
     def crear_widgets(self):
-        # --- Frame de Acciones ---
+        # Frame superior más limpio (solo la instrucción)
         frm_acciones = tk.Frame(self.win, bg="#f4f4f8", pady=15)
         frm_acciones.pack(fill=tk.X)
 
-        self.btn_pago = tk.Button(frm_acciones, text="Registrar un Pago", 
-                  command=self.abrir_ventana_pago, 
-                  bg="#4CAF50", fg="white", font=("Segoe UI", 10, "bold"), width=20, height=2)
-        self.btn_pago.pack(side=tk.LEFT, padx=20)
+        tk.Label(frm_acciones, text="💡 Doble Click en un cliente para registrar pago", 
+                 bg="#f4f4f8", fg="#555", font=("Segoe UI", 10, "italic")).pack(side=tk.LEFT, padx=20)
         
-        btn_recargar = tk.Button(frm_acciones, text="↻ Recargar Lista de Deudores", 
-                  command=self.cargar_deudores, 
-                  bg="#03A9F4", fg="white", font=("Segoe UI", 10, "bold"), width=25, height=2)
-        btn_recargar.pack(side=tk.LEFT, padx=10)
+        # (Botón recargar eliminado por redundante)
 
-        # --- Frame Maestro (Lista de Deudores) ---
-        frm_lista = tk.LabelFrame(self.win, text="Clientes con Deuda (Saldo Negativo)", bg="#f4f4f8", padx=10, pady=10)
+        frm_lista = tk.LabelFrame(self.win, text="Estado de Cuentas", bg="#f4f4f8", padx=10, pady=10)
         frm_lista.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         cols = ("ID Cliente", "Nombre", "Teléfono", "Email", "Saldo Actual", "Límite Crédito")
@@ -68,189 +54,173 @@ class CuentaCorriente:
         self.tree_deudores.configure(yscrollcommand=ys.set)
 
         for c in cols: self.tree_deudores.heading(c, text=c)
-        self.tree_deudores.column("ID Cliente", width=80, anchor="center")
+        
+        self.tree_deudores.column("ID Cliente", width=70, anchor="center")
         self.tree_deudores.column("Nombre", width=200)
-        self.tree_deudores.column("Teléfono", width=120)
-        self.tree_deudores.column("Email", width=200)
+        self.tree_deudores.column("Teléfono", width=100)
+        self.tree_deudores.column("Email", width=180)
         self.tree_deudores.column("Saldo Actual", width=120, anchor="e")
-        self.tree_deudores.column("Límite Crédito", width=120, anchor="e")
+        self.tree_deudores.column("Límite Crédito", width=100, anchor="e")
         
+        self.tree_deudores.tag_configure("deuda", foreground="#dc2626")
+        self.tree_deudores.tag_configure("favor", foreground="#16a34a")
+        self.tree_deudores.tag_configure("cero", foreground="black")
+
+        self.tree_deudores.bind("<Double-1>", self.on_doble_click)
+
+    def on_doble_click(self, event):
+        sel = self.tree_deudores.selection()
+        if not sel: return
+        item = self.tree_deudores.item(sel[0], "values")
+        # item[1] es el Nombre del cliente
+        self.abrir_ventana_pago(cliente_preseleccionado=item[1])
+
     def cargar_deudores(self):
-        # Limpiar tabla
-        for i in self.tree_deudores.get_children():
-            self.tree_deudores.delete(i)
-            
+        for i in self.tree_deudores.get_children(): self.tree_deudores.delete(i)
         try:
-            deudores = self.backend.obtener_clientes_con_deuda()
-            for d in deudores:
-                saldo = self._fmt_mon(d.get('saldo'))
-                limite = self._fmt_mon(d.get('limite_credito'))
+            clientes = self.backend.listar_clientes_con_saldos(incluir_inactivos=False)
+            clientes.sort(key=lambda x: float(x.get('saldo', 0.0)))
+
+            for d in clientes:
+                saldo = float(d.get('saldo', 0.0))
+                limite = float(d.get('limite_credito', 0.0))
                 
+                if saldo < -0.01:
+                    tag = "deuda"
+                    saldo_txt = f"- $ {abs(saldo):,.2f}"
+                elif saldo > 0.01:
+                    tag = "favor"
+                    saldo_txt = f"+ $ {saldo:,.2f}"
+                else:
+                    tag = "cero"
+                    saldo_txt = "$ 0.00"
+
                 self.tree_deudores.insert("", tk.END, values=[
-                    d.get('id_cliente'),
-                    d.get('nombre'),
-                    d.get('telefono') or "",
-                    d.get('email') or "",
-                    saldo,
-                    limite
-                ])
+                    d.get('id_cliente'), d.get('nombre'),
+                    d.get('telefono') or "", d.get('email') or "",
+                    saldo_txt, self._fmt_mon(limite)
+                ], tags=(tag,))
+                
         except Exception as e:
-            logger.exception("Error cargando deudores")
-            messagebox.showerror("Error", f"No se pudieron cargar los deudores:\n{e}", parent=self.win)
+            messagebox.showerror("Error", str(e), parent=self.win)
 
-    def abrir_ventana_pago(self):
-        # --- Ventana emergente para registrar el pago ---
+    def abrir_ventana_pago(self, cliente_preseleccionado=None):
         self.win_pago = Toplevel(self.win)
-        self.win_pago.title("Registrar Pago de Cliente")
-        self.win_pago.geometry("500x400")
+        self.win_pago.title("Registrar Pago")
+        self.win_pago.geometry("550x450")
         self.win_pago.config(bg="#f4f4f8")
-        self.win_pago.resizable(False, False)
-        
-        # ¡NUEVO! Aplicar navegación al popup
-        configurar_navegacion_ventana(self.win_pago)
-        
-        self.win_pago.grab_set()
         self.win_pago.transient(self.win)
+        self.win_pago.grab_set()
 
-        # --- Variables ---
-        self.cliente_seleccionado: dict | None = None
-        self.cuenta_seleccionada: dict | None = None
-        
-        # --- Widgets de la ventana de pago ---
+        self.cliente_seleccionado = None
+        self.cuenta_seleccionada = None
+        self.saldo_actual_cache = 0.0
+
         frame = tk.Frame(self.win_pago, bg="#f4f4f8")
         frame.pack(padx=20, pady=20, fill="both", expand=True)
 
-        tk.Label(frame, text="1. Seleccione el Cliente:", bg="#f4f4f8", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", columnspan=2)
+        tk.Label(frame, text="1. Seleccione Cliente:", bg="#f4f4f8", font=("bold")).grid(row=0, column=0, sticky="w")
         
         try:
-            clientes = self.backend.listar_clientes()
-            self.clientes_map = {c.get('nombre'): c for c in clientes}
-            nombres_clientes = ["Seleccione..."] + sorted(self.clientes_map.keys())
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron cargar clientes:\n{e}", parent=self.win_pago)
-            self.win_pago.destroy()
-            return
+            clis = self.backend.listar_clientes()
+            self.clientes_map = {c.get('nombre'): c for c in clis}
+            names = sorted(self.clientes_map.keys())
+        except: names = []
             
-        self.cb_clientes_pago = ttk.Combobox(frame, state="readonly", values=nombres_clientes, width=40)
-        self.cb_clientes_pago.grid(row=1, column=0, columnspan=2, pady=10)
-        self.cb_clientes_pago.current(0)
+        self.cb_clientes_pago = ttk.Combobox(frame, state="readonly", values=names, width=40)
+        self.cb_clientes_pago.grid(row=1, column=0, columnspan=2, pady=5)
         self.cb_clientes_pago.bind("<<ComboboxSelected>>", self.cargar_info_cuenta)
         
-        # --- Info de la cuenta ---
-        tk.Label(frame, text="Saldo Actual:", bg="#f4f4f8").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-        self.lbl_saldo = tk.Label(frame, text="-", bg="#f4f4f8", font=("Segoe UI", 12, "bold"), fg="blue")
-        self.lbl_saldo.grid(row=2, column=1, sticky="w", padx=5)
+        if cliente_preseleccionado and cliente_preseleccionado in names:
+            self.cb_clientes_pago.set(cliente_preseleccionado)
+            self.cargar_info_cuenta() 
         
-        tk.Label(frame, text="Límite de Crédito:", bg="#f4f4f8").grid(row=3, column=0, sticky="e", padx=5, pady=5)
-        self.lbl_limite = tk.Label(frame, text="-", bg="#f4f4f8")
-        self.lbl_limite.grid(row=3, column=1, sticky="w", padx=5)
-
-        tk.Label(frame, text="Crédito Disponible:", bg="#f4f4f8").grid(row=4, column=0, sticky="e", padx=5, pady=5)
-        self.lbl_disponible = tk.Label(frame, text="-", bg="#f4f4f8")
-        self.lbl_disponible.grid(row=4, column=1, sticky="w", padx=5)
+        tk.Label(frame, text="Saldo Actual:", bg="#f4f4f8").grid(row=2, column=0, sticky="e")
+        self.lbl_saldo = tk.Label(frame, text="-", bg="#f4f4f8", font=("bold"), fg="blue")
+        self.lbl_saldo.grid(row=2, column=1, sticky="w")
         
-        ttk.Separator(frame, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=15)
+        ttk.Separator(frame).grid(row=3, column=0, columnspan=2, sticky="ew", pady=10)
 
-        # --- Formulario de Pago ---
-        tk.Label(frame, text="2. Ingrese el Pago:", bg="#f4f4f8", font=("Segoe UI", 10, "bold")).grid(row=6, column=0, sticky="w", columnspan=2)
+        tk.Label(frame, text="2. Ingrese Pago:", bg="#f4f4f8", font=("bold")).grid(row=4, column=0, sticky="w")
 
-        tk.Label(frame, text="Monto a Pagar (*):", bg="#f4f4f8").grid(row=7, column=0, sticky="e", padx=5, pady=10)
+        tk.Label(frame, text="Monto ($):", bg="#f4f4f8").grid(row=5, column=0, sticky="e")
         self.entry_monto = tk.Entry(frame, width=15)
-        self.entry_monto.grid(row=7, column=1, sticky="w")
-        
-        tk.Label(frame, text="Método de Pago (*):", bg="#f4f4f8").grid(row=8, column=0, sticky="e", padx=5, pady=10)
-        self.cb_metodo = ttk.Combobox(frame, state="readonly", values=["efectivo", "tarjeta_debito", "transferencia", "cheque"], width=15)
-        self.cb_metodo.grid(row=8, column=1, sticky="w")
+        self.entry_monto.grid(row=5, column=1, sticky="w")
+        self.entry_monto.bind("<KeyRelease>", self.calcular_saldo_proyectado)
+        self.entry_monto.focus_set()
+
+        tk.Label(frame, text="Método:", bg="#f4f4f8").grid(row=6, column=0, sticky="e")
+        self.cb_metodo = ttk.Combobox(frame, state="readonly", values=["efectivo", "tarjeta_debito", "transferencia"], width=15)
+        self.cb_metodo.grid(row=6, column=1, sticky="w")
         self.cb_metodo.current(0)
         
-        # --- Botones ---
+        tk.Label(frame, text="Resultado:", bg="#f4f4f8").grid(row=7, column=0, sticky="e", pady=10)
+        self.lbl_resultado = tk.Label(frame, text="-", bg="#f4f4f8", font=("Arial", 11, "bold"))
+        self.lbl_resultado.grid(row=7, column=1, sticky="w", pady=10)
+
         btn_frame = tk.Frame(frame, bg="#f4f4f8")
-        btn_frame.grid(row=9, column=0, columnspan=2, pady=20)
-        
-        btn_confirmar = tk.Button(btn_frame, text="Confirmar Pago", command=self.confirmar_pago, bg="#4CAF50", fg="white", width=20)
-        btn_confirmar.pack(side=tk.LEFT, padx=10)
-        
-        btn_cancelar = tk.Button(btn_frame, text="Cancelar", command=self.win_pago.destroy, bg="#f44336", fg="white", width=15)
-        btn_cancelar.pack(side=tk.LEFT, padx=10)
-        
-        # ¡NUEVO! Foco inicial en el combo de clientes
-        self.win_pago.after(50, lambda: self.cb_clientes_pago.focus_set())
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=20)
+        tk.Button(btn_frame, text="Confirmar Pago", command=self.confirmar_pago, bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="Cancelar", command=self.win_pago.destroy, bg="#f44336", fg="white").pack(side=tk.LEFT, padx=10)
+
+        configurar_navegacion_ventana(self.win_pago)
 
     def cargar_info_cuenta(self, event=None):
-        # Resetea los labels
-        self.lbl_saldo.config(text="-", fg="blue")
-        self.lbl_limite.config(text="-")
-        self.lbl_disponible.config(text="-")
-        self.cliente_seleccionado = None
-        self.cuenta_seleccionada = None
-
-        nombre_cliente = self.cb_clientes_pago.get()
-        if nombre_cliente == "Seleccione...":
-            return
-            
-        self.cliente_seleccionado = self.clientes_map.get(nombre_cliente)
-        if not self.cliente_seleccionado:
-            return
-            
-        id_cliente = self.cliente_seleccionado.get('id_cliente')
+        nombre = self.cb_clientes_pago.get()
+        self.cliente_seleccionado = self.clientes_map.get(nombre)
+        if not self.cliente_seleccionado: return
         
         try:
-            self.backend.crear_cuenta_corriente_si_no_existe(id_cliente)
-            cuenta = self.backend.obtener_cuenta_por_cliente(id_cliente)
-            self.cuenta_seleccionada = cuenta
+            self.backend.crear_cuenta_corriente_si_no_existe(self.cliente_seleccionado['id_cliente'])
+            cta = self.backend.obtener_cuenta_por_cliente(self.cliente_seleccionado['id_cliente'])
+            self.cuenta_seleccionada = cta
             
-            if cuenta:
-                saldo = cuenta.get('saldo', 0.0)
-                limite = cuenta.get('limite_credito', 0.0)
-                disponible = saldo + limite
-                
-                self.lbl_saldo.config(text=self._fmt_mon(saldo), fg=("#ef4444" if saldo < 0 else "blue"))
-                self.lbl_limite.config(text=self._fmt_mon(limite))
-                self.lbl_disponible.config(text=self._fmt_mon(disponible))
+            self.saldo_actual_cache = float(cta.get('saldo', 0.0))
+            
+            if self.saldo_actual_cache < 0:
+                txt = f"- $ {abs(self.saldo_actual_cache):,.2f} (Deuda)"
+                col = "#dc2626"
             else:
-                self.lbl_saldo.config(text="Error al cargar", fg="#ef4444")
+                txt = f"+ $ {self.saldo_actual_cache:,.2f} (A Favor)"
+                col = "#16a34a"
+                
+            self.lbl_saldo.config(text=txt, fg=col)
+            self.calcular_saldo_proyectado()
+        except: pass
 
-        except Exception as e:
-            logger.exception("Error cargando info de cuenta")
-            messagebox.showerror("Error", f"No se pudo cargar la info de la cuenta:\n{e}", parent=self.win_pago)
+    def calcular_saldo_proyectado(self, event=None):
+        if not self.cuenta_seleccionada: return
+        try:
+            pago = float(self.entry_monto.get() or 0)
+        except: pago = 0.0
+        
+        nuevo_saldo = self.saldo_actual_cache + pago
+        
+        if nuevo_saldo >= 0:
+            self.lbl_resultado.config(text=f"Saldo Final: + $ {nuevo_saldo:,.2f} (A Favor)", fg="green")
+        else:
+            self.lbl_resultado.config(text=f"Saldo Final: - $ {abs(nuevo_saldo):,.2f} (Deuda)", fg="red")
 
     def confirmar_pago(self):
-        if not self.cliente_seleccionado or not self.cuenta_seleccionada:
-            messagebox.showwarning("Faltan datos", "Debe seleccionar un cliente válido.", parent=self.win_pago)
-            return
-            
-        id_cuenta = self.cuenta_seleccionada.get('id_cuenta')
-        id_usuario = self.usuario.get('id_usuario')
-
+        if not self.cliente_seleccionado: return
         try:
-            monto = float(self.entry_monto.get().strip())
-            if monto <= 0:
-                raise ValueError("El monto debe ser positivo")
-        except Exception:
-            messagebox.showwarning("Monto Inválido", "Ingrese un monto numérico positivo (ej: 1500.50).", parent=self.win_pago)
+            monto = float(self.entry_monto.get())
+            if monto <= 0: raise ValueError
+        except:
+            messagebox.showwarning("Error", "Monto inválido", parent=self.win_pago)
             return
             
-        metodo = self.cb_metodo.get()
-        
         try:
             ok = self.backend.registrar_pago_cuenta_corriente(
-                id_cuenta=id_cuenta,
-                monto=monto,
-                metodo=metodo,
-                id_usuario=id_usuario
+                self.cuenta_seleccionada['id_cuenta'],
+                monto, self.cb_metodo.get(), self.usuario['id_usuario']
             )
-            
             if ok:
-                messagebox.showinfo("Éxito", "Pago registrado correctamente.", parent=self.win_pago)
+                messagebox.showinfo("Éxito", "Pago registrado.", parent=self.win_pago)
                 self.win_pago.destroy()
-                self.cargar_deudores()
-            else:
-                messagebox.showerror("Error", "No se pudo registrar el pago.", parent=self.win_pago)
-                
-        except Exception as e:
-            logger.exception("Error al confirmar pago")
-            messagebox.showerror("Error", f"Ocurrió un error al guardar:\n{e}", parent=self.win_pago)
-
+                self.cargar_deudores() # Esto actualiza la lista automáticamente
+            else: messagebox.showerror("Error", "Error al guardar", parent=self.win_pago)
+        except Exception as e: messagebox.showerror("Error", str(e), parent=self.win_pago)
 
 def ui_cuenta_corriente(parent: tk.Misc, backend, usuario: dict):
     CuentaCorriente(parent, backend, usuario)

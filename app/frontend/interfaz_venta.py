@@ -1,6 +1,7 @@
 # ============================================
 # app/frontend/interfaz_venta.py
 # ¡MEJORADO! Con navegación por teclado completa
+# ✨ NUEVO: Validación de caja abierta para efectivo
 # ============================================
 from __future__ import annotations
 import tkinter as tk
@@ -83,7 +84,6 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         sel.config(bg="#f4f4f8")
         sel.resizable(False, False)
         
-        # ¡NUEVO! Aplicar navegación por teclado al popup
         configurar_navegacion_ventana(sel)
         
         tk.Label(sel, text="Buscar (nombre o DNI):", bg="#f4f4f8").pack(pady=6)
@@ -117,23 +117,25 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                 render(backend.buscar_cliente_por_nombre(q) if q else data)
         var_pat.trace_add("write", lambda *_: filtrar())
 
-        def tomar():
+        def tomar(event=None): # Aceptamos event para el bind
             nonlocal cliente_sel
             sel_idx = lst.curselection()
             if not sel_idx:
-                messagebox.showwarning("Atención", "Seleccione un cliente.")
-                return
+                return # Si es doble click en vacio no hace nada
             rid = int(lst.get(sel_idx[0]).split("|")[0].strip())
             cliente_sel = next((c for c in data if int(c.get("id_cliente",-1))==rid), None)
             _upd_cliente()
             sel.destroy()
+
+        # 🔥 AGREGADO: Doble click selecciona
+        lst.bind("<Double-1>", tomar)
+        lst.bind("<Return>", tomar)
 
         btn_seleccionar = tk.Button(sel, text="Seleccionar", command=tomar)
         btn_seleccionar.pack(pady=8)
         btn_cancelar = tk.Button(sel, text="Cancelar", command=sel.destroy)
         btn_cancelar.pack()
         
-        # ¡NUEVO! Foco inicial en el campo de búsqueda
         sel.after(100, lambda: ent.focus_set())
         
         sel.grab_set()
@@ -367,6 +369,33 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
 
         tipo_pago = info_pago['tipo_pago']
 
+        # 🔥 NUEVA VALIDACIÓN: Si es efectivo, verificar caja abierta
+        if tipo_pago == 'efectivo':
+            try:
+                caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
+                
+                if not caja_abierta:
+                    messagebox.showwarning(
+                        "⚠️ Caja Cerrada",
+                        "No puedes realizar ventas en EFECTIVO sin abrir tu caja.\n\n"
+                        "📍 Ve a: Menú Principal → Control de Caja → Abrir Caja\n\n"
+                        "💡 También puedes usar otro método de pago:\n"
+                        "   • Tarjeta\n"
+                        "   • Transferencia\n"
+                        "   • Cuenta Corriente (si hay cliente)",
+                        parent=win
+                    )
+                    return  # NO permite continuar con la venta
+                    
+            except Exception as e:
+                messagebox.showerror(
+                    "Error de Validación",
+                    f"No se pudo verificar el estado de la caja:\n{e}\n\n"
+                    "La venta no puede continuar.",
+                    parent=win
+                )
+                return
+
         if tipo_pago == "cuenta_corriente" and cliente_sel is None:
             messagebox.showerror("Error", "No se puede usar Cuenta Corriente sin un cliente seleccionado.", parent=win)
             return
@@ -477,8 +506,5 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     # ¡NUEVO! Aplicar navegación por teclado a la ventana principal
     # Con confirmación para evitar cerrar accidentalmente durante una venta
     configurar_navegacion_ventana(win, confirmar_cierre=True)
-    
-    # ¡CRÍTICO! Foco inicial en el campo de búsqueda
-    win.after(100, lambda: entry_producto.focus_set())
     
     win.grab_set()

@@ -132,8 +132,10 @@ def ui_inventario(parent: tk.Misc, backend, usuario: dict) -> None:
     tree.column("Código", width=160, anchor="center")
     tree.column("Nombre", width=320, anchor="w")
     tree.column("Categoría", width=220, anchor="w")
-    tree.column("Stock", width=100, anchor="e")
-    tree.column("Precio", width=100, anchor="e")
+    
+    # CORRECCIÓN: Usamos 'center' para evitar que se corten los números con el borde
+    tree.column("Stock", width=100, anchor="center")
+    tree.column("Precio", width=100, anchor="center")
 
     yscroll = ttk.Scrollbar(tree, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=yscroll.set)
@@ -182,6 +184,7 @@ def ui_inventario(parent: tk.Misc, backend, usuario: dict) -> None:
             tree.delete(i)
         for p in filas:
             n = _norm(p)
+            # CORRECCIÓN: Al usar 'center', ya no necesitamos el espacio extra
             tree.insert(
                 "",
                 tk.END,
@@ -343,7 +346,9 @@ def ui_inventario(parent: tk.Misc, backend, usuario: dict) -> None:
                 writer.writerow(cols)
                 for item_id in tree.get_children():
                     row = tree.item(item_id, "values")
-                    writer.writerow(row)
+                    # Limpieza estándar
+                    clean_row = [str(x).strip() for x in row]
+                    writer.writerow(clean_row)
 
             messagebox.showinfo(
                 "Exportado",

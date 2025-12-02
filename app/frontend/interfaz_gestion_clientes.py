@@ -1,338 +1,164 @@
 # app/frontend/interfaz_gestion_clientes.py
+from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
-
 from app.frontend.interfaz_crear_cliente import ui_crear_cliente
-from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 
+try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+except ImportError:
+    def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
-def ui_gestion_clientes(parent: tk.Misc, backend, usuario: dict):
+def _fmt_mon(val):
+    try: return f"$ {float(val):,.2f}"
+    except: return "$ 0.00"
+
+def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     win = tk.Toplevel(parent)
     win.title("Gestión de Clientes")
-    win.geometry("1100x500")
+    win.geometry("1000x550")
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
 
-    # ============================
-    # Frame: barra superior (búsqueda + checkbox)
-    # ============================
-    frame_top = tk.Frame(win, bg="#f4f4f8")
-    frame_top.pack(fill="x", padx=20, pady=(15, 0))
+    # --- BARRA DE BÚSQUEDA ---
+    frame_busqueda = tk.Frame(win, bg="#f4f4f8")
+    frame_busqueda.pack(pady=(15,0), padx=20, fill="x")
+    
+    tk.Label(frame_busqueda, text="🔍 Buscar (Nombre/DNI):", bg="#f4f4f8").pack(side=tk.LEFT)
+    var_busqueda = tk.StringVar()
+    entry_busqueda = tk.Entry(frame_busqueda, textvariable=var_busqueda, width=35)
+    entry_busqueda.pack(side=tk.LEFT, padx=10)
 
-    tk.Label(frame_top, text="Buscar (Nombre / DNI):", bg="#f4f4f8").pack(side=tk.LEFT)
-    var_buscar = tk.StringVar()
-    entry_buscar = tk.Entry(frame_top, textvariable=var_buscar, width=30)
-    entry_buscar.pack(side=tk.LEFT, padx=(5, 20))
-
-    # Checkbox para mostrar también inactivos
-    var_mostrar_inactivos = tk.BooleanVar(value=False)
-    chk_inactivos = tk.Checkbutton(
-        frame_top,
-        text="Mostrar también inactivos",
-        variable=var_mostrar_inactivos,
-        onvalue=True,
-        offvalue=False,
-        bg="#f4f4f8",
-    )
-    chk_inactivos.pack(side=tk.LEFT)
-
-    # ============================
-    # Frame: listado (Treeview)
-    # ============================
     frame_lista = tk.Frame(win, bg="#f4f4f8")
     frame_lista.pack(pady=10, padx=20, fill="both", expand=True)
 
-    cols = (
-        "ID",
-        "Nombre",
-        "DNI",
-        "Teléfono",
-        "Email",
-        "Activo",
-        "Saldo (Deuda)",
-        "Límite Crédito",
-    )
-
+    cols = ["ID", "Nombre", "DNI/CUIT", "Teléfono", "Email", "Saldo (Deuda)", "Límite Crédito", "Activo"]
     tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=15)
     tree.pack(side="left", fill="both", expand=True)
-
+    
     ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
     ys.pack(side="right", fill="y")
     tree.configure(yscrollcommand=ys.set)
+    
+    for c in cols: tree.heading(c, text=c)
+    
+    tree.column("ID", width=40, anchor="center")
+    tree.column("Nombre", width=180)
+    tree.column("DNI/CUIT", width=100)
+    tree.column("Teléfono", width=100)
+    tree.column("Email", width=150)
+    tree.column("Saldo (Deuda)", width=100, anchor="e")
+    tree.column("Límite Crédito", width=100, anchor="e")
+    tree.column("Activo", width=50, anchor="center")
 
-    for c in cols:
-        tree.heading(c, text=c)
+    tree.tag_configure("deuda", foreground="#dc2626")
+    tree.tag_configure("favor", foreground="#16a34a")
+    tree.tag_configure("cero", foreground="black")
 
-    tree.column("ID", width=60, anchor="center")
-    tree.column("Nombre", width=220, anchor="w")
-    tree.column("DNI", width=100, anchor="center")
-    tree.column("Teléfono", width=120, anchor="w")
-    tree.column("Email", width=200, anchor="w")
-    tree.column("Activo", width=70, anchor="center")
-    tree.column("Saldo (Deuda)", width=120, anchor="e")
-    tree.column("Límite Crédito", width=120, anchor="e")
+    var_mostrar_inactivos = tk.BooleanVar(value=False)
+    todos_clientes = []
 
-    # ============================
-    # Funciones auxiliares
-    # ============================
-    def _normalizar_cliente(c: dict) -> dict:
-        """Normaliza el diccionario del cliente a las columnas del Treeview."""
-        id_cli = c.get("id_cliente") or c.get("id") or ""
-        nombre = c.get("nombre") or ""
-        dni = c.get("dni") or ""
-        telefono = c.get("telefono") or ""
-        email = c.get("email") or ""
-        activo = "SI" if c.get("activo") else "NO"
-        try:
-            saldo = float(c.get("saldo") or 0.0)
-        except Exception:
-            saldo = 0.0
-        try:
-            limite = float(c.get("limite_credito") or 0.0)
-        except Exception:
-            limite = 0.0
-
-        return {
-            "ID": id_cli,
-            "Nombre": nombre,
-            "DNI": dni,
-            "Teléfono": telefono,
-            "Email": email,
-            "Activo": activo,
-            "Saldo (Deuda)": saldo,
-            "Límite Crédito": limite,
-        }
-
-    def _poblar_tree(clientes: list[dict]):
-        tree.delete(*tree.get_children())
-        for c in clientes:
-            n = _normalizar_cliente(c)
-            tree.insert(
-                "",
-                tk.END,
-                values=(
-                    n["ID"],
-                    n["Nombre"],
-                    n["DNI"],
-                    n["Teléfono"],
-                    n["Email"],
-                    n["Activo"],
-                    f"{n['Saldo (Deuda)']:.2f}",
-                    f"{n['Límite Crédito']:.2f}",
-                ),
-            )
-
-    # ============================
-    # Carga / Recarga de datos
-    # ============================
     def cargar_datos():
-        """Carga la lista completa según el checkbox y el filtro de búsqueda."""
+        nonlocal todos_clientes
         try:
-            incluir_inactivos = var_mostrar_inactivos.get()
-            clientes = backend.listar_clientes_con_saldos(
-                incluir_inactivos=incluir_inactivos
-            )
+            incluir = var_mostrar_inactivos.get()
+            todos_clientes = backend.listar_clientes_con_saldos(incluir_inactivos=incluir)
+            
+            # 🔥 ORDENAMIENTO PERSONALIZADO
+            # 1. Deudores (Saldo < 0)
+            # 2. A Favor (Saldo > 0)
+            # 3. Neutros (Saldo == 0)
+            def custom_sort(c):
+                saldo = float(c.get('saldo', 0.0))
+                if saldo < -0.01: return 0  # Primero: Rojos
+                if saldo > 0.01: return 1   # Segundo: Verdes
+                return 2                    # Tercero: Negros (0)
 
-            filtro = var_buscar.get().strip().lower()
-            if filtro:
-                filtrados: list[dict] = []
-                for c in clientes:
-                    nombre = (c.get("nombre") or "").lower()
-                    dni = (c.get("dni") or "").lower()
-                    if filtro in nombre or filtro in dni:
-                        filtrados.append(c)
-                clientes = filtrados
-
-            _poblar_tree(clientes)
+            todos_clientes.sort(key=custom_sort)
+            filtrar_lista()
         except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"No se pudieron cargar los clientes:\n{e}",
-                parent=win,
-            )
+            messagebox.showerror("Error", f"Error cargando: {e}", parent=win)
 
-    # ============================
-    # Acciones (botones)
-    # ============================
-    def accion_recargar():
-        var_buscar.set("")
-        cargar_datos()
+    def filtrar_lista(*args):
+        query = var_busqueda.get().lower().strip()
+        for i in tree.get_children(): tree.delete(i)
+        
+        for c in todos_clientes:
+            nom = str(c.get('nombre','')).lower()
+            dni = str(c.get('dni','')).lower()
+            
+            if query in nom or query in dni:
+                saldo = float(c.get('saldo', 0.0))
+                tag = "cero"
+                if saldo < -0.01: tag = "deuda"
+                elif saldo > 0.01: tag = "favor"
+                
+                saldo_vis = f"- $ {abs(saldo):,.2f}" if saldo < 0 else f"+ $ {saldo:,.2f}"
+                if abs(saldo) < 0.01: saldo_vis = "$ 0.00"
 
-    def _obtener_id_seleccionado() -> int | None:
+                activo = "SI" if c.get('activo') else "NO"
+                
+                tree.insert("", tk.END, values=[
+                    c.get('id_cliente'),
+                    c.get('nombre'),
+                    c.get('dni') or "-",
+                    c.get('telefono') or "-",
+                    c.get('email') or "-",
+                    saldo_vis,
+                    _fmt_mon(c.get('limite_credito')),
+                    activo
+                ], tags=(tag,))
+
+    var_busqueda.trace_add("write", filtrar_lista)
+
+    # --- Acciones ---
+    def accion_nuevo():
+        top = ui_crear_cliente(win, backend)
+        if isinstance(top, tk.Toplevel):
+            win.wait_window(top)
+            cargar_datos()
+        else:
+            win.after(1000, cargar_datos)
+
+    def abrir_editar():
         sel = tree.selection()
-        if not sel:
-            return None
-        item = sel[0]
-        vals = tree.item(item, "values")
-        if not vals:
-            return None
-        try:
-            return int(vals[0])
-        except Exception:
-            return None
-
-    def accion_crear():
-        try:
-            ui_crear_cliente(parent=win, backend=backend, usuario=usuario)
-            # Al cerrar el popup, recargar lista
-            win.after(100, cargar_datos)
-        except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"No se pudo abrir la ventana de creación de cliente:\n{e}",
-                parent=win,
-            )
-
-    def accion_editar():
-        id_cli = _obtener_id_seleccionado()
-        if id_cli is None:
-            messagebox.showwarning(
-                "Atención",
-                "Seleccione un cliente de la lista.",
-                parent=win,
-            )
+        if not sel: 
+            messagebox.showwarning("Atención", "Seleccione un cliente para editar.", parent=win)
             return
-        try:
-            ui_crear_cliente(
-                parent=win,
-                backend=backend,
-                usuario=usuario,
-                id_cliente_a_editar=id_cli,
-            )
-            win.after(100, cargar_datos)
-        except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"No se pudo abrir la ventana de edición:\n{e}",
-                parent=win,
-            )
-
-    def accion_desactivar():
-        id_cli = _obtener_id_seleccionado()
-        if id_cli is None:
-            messagebox.showwarning(
-                "Atención",
-                "Seleccione un cliente de la lista.",
-                parent=win,
-            )
-            return
-
-        if not messagebox.askyesno(
-            "Confirmar",
-            "¿Está seguro de desactivar este cliente?\n\n"
-            "No se podrá seleccionar para futuras ventas.",
-            parent=win,
-        ):
-            return
-
-        try:
-            if backend.eliminar_cliente_logico(id_cli):
-                messagebox.showinfo(
-                    "Éxito",
-                    "Cliente desactivado.",
-                    parent=win,
-                )
-                cargar_datos()
-            else:
-                messagebox.showerror(
-                    "Error",
-                    "No se pudo desactivar el cliente.",
-                    parent=win,
-                )
-        except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"Ocurrió un error al desactivar el cliente:\n{e}",
-                parent=win,
-            )
-
-    # ============================
-    # Frame: botones inferiores
-    # ============================
-    frame_botones = tk.Frame(win, bg="#f4f4f8")
-    frame_botones.pack(fill="x", padx=20, pady=(5, 15))
-
-    btn_recargar = tk.Button(
-        frame_botones,
-        text="↻ Recargar Lista",
-        command=accion_recargar,
-        bg="#03A9F4",
-        fg="white",
-        width=15,
-    )
-    btn_recargar.pack(side=tk.LEFT, padx=(0, 10))
-
-    btn_crear = tk.Button(
-        frame_botones,
-        text="+ Crear Cliente",
-        command=accion_crear,
-        bg="#4CAF50",
-        fg="white",
-        width=15,
-    )
-    btn_crear.pack(side=tk.LEFT, padx=10)
-
-    btn_editar = tk.Button(
-        frame_botones,
-        text="✎ Editar Cliente",
-        command=accion_editar,
-        bg="#FFB300",
-        fg="black",
-        width=15,
-    )
-    btn_editar.pack(side=tk.LEFT, padx=10)
-
-    btn_desactivar = tk.Button(
-        frame_botones,
-        text="⛔ Desactivar",
-        command=accion_desactivar,
-        bg="#E53935",
-        fg="white",
-        width=15,
-    )
-    btn_desactivar.pack(side=tk.LEFT, padx=10)
-
-    btn_cerrar = tk.Button(
-        frame_botones,
-        text="Cerrar",
-        command=win.destroy,
-        bg="#607D8B",
-        fg="white",
-        width=15,
-    )
-    btn_cerrar.pack(side=tk.RIGHT, padx=0)
-
-    # ============================
-    # Eventos adicionales
-    # ============================
+        item = tree.item(sel[0], "values")
+        
+        # Abrimos editor y esperamos
+        top = ui_crear_cliente(win, backend, id_cliente_a_editar=int(item[0]))
+        if isinstance(top, tk.Toplevel):
+            win.wait_window(top)
+            cargar_datos()
+    
+    # 🔥 DOBLE CLICK RESTAURADO
     def on_doble_click(event):
-        accion_editar()
+        abrir_editar()
 
     tree.bind("<Double-1>", on_doble_click)
 
-    def on_enter_buscar(event):
-        cargar_datos()
+    def desactivar():
+        sel = tree.selection()
+        if not sel: return
+        item = tree.item(sel[0], "values")
+        if messagebox.askyesno("Confirmar", f"¿Desactivar a {item[1]}?"):
+            backend.eliminar_cliente_logico(int(item[0]))
+            cargar_datos()
 
-    entry_buscar.bind("<Return>", on_enter_buscar)
+    frame_botones = tk.Frame(win, bg="#f4f4f8")
+    frame_botones.pack(pady=15, fill="x")
 
-    def on_toggle_inactivos():
-        cargar_datos()
+    tk.Button(frame_botones, text="+ Crear Cliente", command=accion_nuevo, bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=20)
+    tk.Button(frame_botones, text="✎ Editar", command=abrir_editar, bg="#FFC107").pack(side=tk.LEFT, padx=5)
+    tk.Button(frame_botones, text="⛔ Desactivar", command=desactivar, bg="#f44336", fg="white").pack(side=tk.LEFT, padx=5)
+    
+    tk.Checkbutton(frame_botones, text="Ver Inactivos", variable=var_mostrar_inactivos, bg="#f4f4f8", command=cargar_datos).pack(side=tk.LEFT, padx=20)
+    
+    tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#607D8B", fg="white").pack(side=tk.RIGHT, padx=20)
 
-    chk_inactivos.config(command=on_toggle_inactivos)
-
-    # ============================
-    # Boot: carga inicial y foco
-    # ============================
     cargar_datos()
+    entry_busqueda.focus_set()
     configurar_navegacion_ventana(win)
-
-    def _enfocar_inicial():
-        try:
-            win.focus_force()          # la ventana recibe el foco del teclado
-            entry_buscar.focus_set()   # empezamos en el campo de búsqueda
-        except Exception:
-            pass
-
-    win.after(50, _enfocar_inicial)
     win.grab_set()
-    win.transient(parent)

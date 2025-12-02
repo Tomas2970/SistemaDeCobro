@@ -113,39 +113,82 @@ def seed_database():
 def run_app():
     """Modo normal: iniciar la interfaz gráfica"""
     
-    # Importamos los módulos de la app AHORA
     from app.frontend.interfaz_iniciosesion import ui_login
     from app.frontend.interfaz_menu_principal import ui_menu_principal
     from app.database.backend_adapter import BackendAdapter
+    from app.database.permisos import tiene_permiso
     
     backend = BackendAdapter()
     
     # Bucle de sesión: Login -> Menú Principal -> (al cerrar) -> Login
     while True:
         root_login = tk.Tk()
-        root_login.withdraw()  # Ocultar la ventana raíz principal
+        root_login.withdraw()
         
         # 1. Mostrar Login
         usuario = ui_login(parent=root_login, backend=backend)
         
-        root_login.destroy()  # Destruir la ventana de login
+        root_login.destroy()
 
-        # 2. Si el usuario cerró el login (usuario=None), terminar
+        # 2. Si el usuario cerró el login, terminar
         if not usuario:
             logging.info("Login cancelado. Saliendo de la aplicación.")
-            break  # Rompe el 'while True' y termina el programa
+            break
 
-        # 3. Si el login fue exitoso, mostrar Menú Principal
+        # 3. Mostrar Menú Principal
         logging.info(f"Iniciando sesión como: {usuario.get('nombre')}")
         root_main = tk.Tk()
         
         ui_menu_principal(parent=root_main, backend=backend, usuario=usuario)
         
-        root_main.mainloop()  # La app se queda aquí hasta que se cierre el menú
+        root_main.mainloop()
         
-        # 4. Cuando el menú se cierra, el bucle vuelve a empezar
+        # 4. AL CERRAR SESIÓN: Verificar si hay caja abierta
         logging.info(f"Sesión cerrada para: {usuario.get('nombre')}")
-
+        
+        try:
+            # Verificar si hay caja abierta (sistema único compartido)
+            caja_abierta = backend.obtener_session_abierta(id_usuario=None)
+            
+            # Solo preguntar si el usuario tiene permisos para cerrar
+            if caja_abierta and tiene_permiso(usuario, 'cerrar_caja'):
+                root_temp = tk.Tk()
+                root_temp.withdraw()
+                
+                respuesta = tk.messagebox.askyesnocancel(
+                    "⚠️ Caja Abierta",
+                    f"Hay una caja abierta en el sistema.\n\n"
+                    f"¿Deseas cerrar la caja antes de salir?\n\n"
+                    f"• SÍ: Cerrar caja ahora (arqueo)\n"
+                    f"• NO: Salir sin cerrar (la caja queda abierta)\n"
+                    f"• CANCELAR: Volver al sistema",
+                    parent=root_temp
+                )
+                
+                root_temp.destroy()
+                
+                if respuesta is None:  # Cancelar -> Volver al sistema
+                    continue
+                elif respuesta:  # Sí -> Abrir ventana de cierre
+                    # Importar aquí para evitar ciclo
+                    from app.frontend.interfaz_reportes import ui_reportes
+                    
+                    root_cierre = tk.Tk()
+                    root_cierre.withdraw()
+                    
+                    # Abrir directamente la pestaña de caja
+                    ui_reportes(parent=root_cierre, backend=backend, usuario=usuario)
+                    root_cierre.mainloop()
+                    
+                    root_cierre.destroy()
+                    # Después de cerrar, volver al login
+                    continue
+                # else: No -> Salir sin cerrar
+                
+        except Exception as e:
+            logging.error(f"Error al verificar caja: {e}")
+        
+        # Si llegó aquí, continuar con el bucle (volver al login)
 
 # --- Punto de Entrada ---
 def main():
@@ -171,6 +214,7 @@ def main():
         except Exception:
             pass  # Si ni Tkinter funciona, no hay nada que hacer
         sys.exit(1)
+
 
 
 if __name__ == "__main__":

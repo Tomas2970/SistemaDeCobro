@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox, Toplevel, Listbox, MULTIPLE
 from typing import Optional
 
-# Importar navegación y componentes
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 except ImportError:
@@ -17,7 +16,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     
     win = tk.Toplevel(parent)
     win.title("Gestión de Productos")
-    win.geometry("600x580") # Un poco más alto para el botón de proveedores
+    win.geometry("650x700") # Un poco más alto por si acaso
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
 
@@ -49,31 +48,63 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     ent_nombre = tk.Entry(body, textvariable=var_nombre, width=45)
     add_row("Nombre:", ent_nombre)
     
-    # --- CATEGORÍA Y PESABLE INTELIGENTE ---
     combo_cat = ttk.Combobox(body, state="readonly", width=43)
     add_row("Categoría:", combo_cat)
     
     var_precio = tk.StringVar(value="0.00")
     ent_precio = EntryDecimal(body, textvariable=var_precio, width=15)
+    
+    try:
+        from app.database.permisos import tiene_permiso
+        if not tiene_permiso(usuario, 'modificar_precios'):
+            ent_precio.config(state='disabled')
+    except ImportError: pass
+    
     add_row("Precio Venta ($):", ent_precio)
     
     var_es_pesable = tk.BooleanVar(value=False)
-    chk_pesable = tk.Checkbutton(body, text="Es pesable (kg/lt)", variable=var_es_pesable, bg="#f4f4f8")
+    # Definimos el widget explícitamente para poder acceder a él luego
+    chk_pesable = tk.Checkbutton(body, text="Es pesable (kg) [Automático por Categoría]", variable=var_es_pesable, bg="#f4f4f8", fg="#555")
     add_row("", chk_pesable)
     
-    # Lógica para bloquear "Pesable"
-    def al_cambiar_categoria(event):
-        cat_actual = combo_cat.get().lower()
-        # Lista de palabras clave que NO suelen ser pesables
-        no_pesables = ["bebida", "limpieza", "golosina", "almacen", "cigarro"]
+    # --- LOGICA INTELIGENTE DE CATEGORÍA ---
+    categorias_data = []
+    cat_map = {}
+    
+    def cargar_categorias_memoria():
+        nonlocal categorias_data, cat_map
+        categorias_data = backend.obtener_categorias()
+        cat_map = {c['nombre']: c for c in categorias_data}
         
-        # Si la categoría contiene alguna de esas palabras, desmarcamos y deshabilitamos
-        if any(x in cat_actual for x in no_pesables):
-            var_es_pesable.set(False)
-            chk_pesable.config(state="disabled")
+        combo_cat['values'] = [c['nombre'] for c in categorias_data]
+        combo_cat.ids = [c['id_categoria'] for c in categorias_data]
+
+    # 🔥 CORRECCIÓN FUNDAMENTAL AQUÍ:
+    def al_cambiar_categoria(event=None):
+        # Esta función se ejecuta al elegir del combo O manualmente al cargar
+        nombre_cat = combo_cat.get()
+        datos_cat = cat_map.get(nombre_cat)
+        
+        if datos_cat:
+            # 1. Obtenemos qué dice la categoría (si es pesable o no)
+            es_pesable_default = bool(datos_cat.get('es_pesable_default', False))
+            
+            # 2. Seteamos el valor del checkbox
+            var_es_pesable.set(es_pesable_default)
+
+            # 3. 🔥 HABILITAMOS O DESHABILITAMOS EL WIDGET
+            if es_pesable_default:
+                # Si la categoría dice que SI es pesable, lo dejamos habilitado (normal)
+                # por si el usuario quiere desmarcarlo en una excepción.
+                chk_pesable.config(state="normal", text="Es pesable (kg)")
+            else:
+                # Si la categoría dice que NO es pesable (ej: Bebidas),
+                # lo DESHABILITAMOS para que no pueda marcarlo.
+                chk_pesable.config(state="disabled", text="Es pesable (kg) [Bloqueado por Categoría]")
         else:
-            # Si es Carnes, Verduras, etc., habilitamos
-            chk_pesable.config(state="normal")
+            # Si no hay categoría seleccionada, reseteamos
+            chk_pesable.config(state="normal", text="Es pesable (kg)")
+
 
     combo_cat.bind("<<ComboboxSelected>>", al_cambiar_categoria)
 
@@ -89,71 +120,71 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     ent_stock_min = EntryNumerico(body, textvariable=var_stock_min, width=15)
     add_row("Stock Mínimo:", ent_stock_min)
 
-    # --- GESTIONAR PROVEEDORES DEL PRODUCTO ---
-    def gestionar_proveedores():
-        pid_str = var_id.get()
-        if not pid_str:
-            messagebox.showwarning("Atención", "Primero debe guardar el producto para asignarle proveedores.", parent=win)
-            return
-        
-        pid = int(pid_str)
-        prod_nom = var_nombre.get()
-        
+    var_asignar_prov = tk.BooleanVar(value=False)
+    chk_asignar = tk.Checkbutton(body, text="Asignar a proveedores al guardar", 
+                                 variable=var_asignar_prov, bg="#f4f4f8", font=("Segoe UI", 9, "bold"))
+    chk_asignar.grid(row=row, column=1, sticky="w", padx=5, pady=10)
+    row += 1
+
+    # (La función abrir_popup_asignacion sigue igual...)
+    def abrir_popup_asignacion(pid, nombre_prod):
         pop = Toplevel(win)
-        pop.title(f"Proveedores de: {prod_nom}")
-        pop.geometry("400x400")
+        pop.title(f"Proveedores para: {nombre_prod}")
+        pop.geometry("450x450")
         
-        tk.Label(pop, text="Seleccione los proveedores que venden este producto:", bg="#f4f4f8", wraplength=380).pack(pady=10)
+        tk.Label(pop, text="Buscar Proveedor:", bg="#f4f4f8").pack(pady=(10,0))
+        var_filtro = tk.StringVar()
+        ent_filtro = tk.Entry(pop, textvariable=var_filtro)
+        ent_filtro.pack(fill=tk.X, padx=10, pady=5)
         
-        # Lista con checkbox simulado (Listbox multiple)
         lb = Listbox(pop, selectmode=MULTIPLE, height=15)
         lb.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         all_provs = backend.obtener_proveedores()
-        # Obtener quienes YA lo venden (necesitas implementar esto en backend o usar lógica inversa)
-        # Truco: Usamos obtener_productos_por_proveedor para cada proveedor (lento) o agregamos funcion nueva.
-        # Para simplificar AHORA sin tocar DB.py de nuevo, asumimos que marcamos de cero o usamos lógica simple.
-        # MEJOR: Vamos a asumir que están todos desmarcados y el usuario elige.
-        # (Para hacerlo perfecto necesitaríamos `backend.obtener_proveedores_de_producto(pid)`)
         
-        for p in all_provs:
-            lb.insert(tk.END, f"{p['id_proveedor']} - {p['nombre']}")
+        def filtrar_lista(*args):
+            query = var_filtro.get().lower()
+            lb.delete(0, tk.END)
+            for p in all_provs:
+                if not p['activo']: continue
+                texto = f"{p['id_proveedor']} - {p['nombre']}"
+                if query in texto.lower():
+                    lb.insert(tk.END, texto)
+        
+        var_filtro.trace_add("write", filtrar_lista)
+        filtrar_lista() 
             
         def guardar_asignaciones():
             sels = lb.curselection()
-            if not sels:
-                messagebox.showinfo("Info", "Ningún proveedor seleccionado.")
-                return
-            
             count = 0
             for idx in sels:
                 p_text = lb.get(idx)
                 p_id = int(p_text.split(" - ")[0])
-                # Asignar (backend ignora si ya existe gracias a IGNORE)
                 if backend.asignar_producto_a_proveedor(p_id, pid):
                     count += 1
             
-            messagebox.showinfo("Listo", f"Producto asignado a {count} proveedores.", parent=pop)
+            messagebox.showinfo("Listo", f"Asignado a {count} proveedores.", parent=pop)
             pop.destroy()
 
-        tk.Button(pop, text="Guardar Asignación", bg="#673AB7", fg="white", command=guardar_asignaciones).pack(pady=10)
-        configurar_navegacion_ventana(pop)
+        tk.Button(pop, text="Guardar Asignación", bg="#4CAF50", fg="white", command=guardar_asignaciones).pack(pady=10)
+        ent_filtro.focus_set()
+        pop.transient(win)
+        pop.grab_set()
+        win.wait_window(pop)
 
-    # Botón Proveedores (Solo habilitado si hay ID)
-    btn_provs = tk.Button(body, text="📦 Asignar a Proveedores", command=gestionar_proveedores, bg="#E1BEE7")
-    # Lo ponemos en la fila siguiente
-    btn_provs.grid(row=row, column=1, sticky="w", padx=5, pady=10)
-
-    # --- Botones Acciones ---
     actions = tk.Frame(win, bg="#f4f4f8", pady=10)
     actions.pack(fill=tk.X) 
     
     def guardar():
         try:
             nombre = var_nombre.get().strip()
-            precio = float(var_precio.get() or 0)
-            stock = float(var_stock.get() or 0)
-            minimo = int(var_stock_min.get() or 0)
+            try: precio = float(var_precio.get() or 0)
+            except: precio = 0.0
+            try: stock = float(var_stock.get() or 0)
+            except: stock = 0.0
+            try: minimo = int(var_stock_min.get() or 0)
+            except: minimo = 0
+            
             codigo = var_cod.get().strip() or None
             
             if not nombre:
@@ -163,20 +194,33 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
             idx = combo_cat.current()
             cat_id = combo_cat.ids[idx] if hasattr(combo_cat, 'ids') and idx >= 0 else None
 
-            pid = int(var_id.get()) if var_id.get().isdigit() else None
+            pid_str = var_id.get()
+            pid = int(pid_str) if pid_str.isdigit() else None
+            
+            producto_guardado_id = None
+
+            # IMPORTANTE: Usamos var_es_pesable.get(). 
+            # Si el checkbox estaba deshabilitado en FALSE, esto enviará FALSE.
             
             if pid:
                 backend.actualizar_producto(pid, nombre=nombre, precio=precio, codigo_barras=codigo, 
                                          es_pesable=var_es_pesable.get(), id_categoria=cat_id, id_usuario=usuario.get('id_usuario'))
                 backend.actualizar_inventario_absoluto(pid, stock, minimo, id_usuario=usuario.get('id_usuario'))
-                messagebox.showinfo("Éxito", "Producto actualizado.", parent=win)
+                producto_guardado_id = pid
+                msg = "Producto actualizado."
             else:
                 new_id = backend.crear_producto_completo(nombre, cat_id, codigo, precio, stock, minimo, var_es_pesable.get(), id_usuario=usuario.get('id_usuario'))
                 if new_id:
-                    var_id.set(str(new_id)) # Seteamos el ID para habilitar botón proveedores
-                    messagebox.showinfo("Éxito", "Producto creado. Ahora puede asignar proveedores.", parent=win)
+                    producto_guardado_id = new_id
+                    var_id.set(str(new_id))
+                    msg = "Producto creado."
             
             stock_events.notificar_cambio_stock()
+            
+            if producto_guardado_id and var_asignar_prov.get():
+                abrir_popup_asignacion(producto_guardado_id, nombre)
+            else:
+                messagebox.showinfo("Éxito", msg, parent=win)
             
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar: {e}", parent=win)
@@ -188,8 +232,13 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
         var_stock.set("0")
         var_stock_min.set("5")
         var_cod.set("")
-        var_es_pesable.set(False)
-        chk_pesable.config(state="normal")
+        
+        # 🔥 CORRECCIÓN EN LIMPIAR:
+        var_es_pesable.set(False) 
+        chk_pesable.config(state="normal", text="Es pesable (kg)") # Reseteamos estado
+        
+        var_asignar_prov.set(False)
+        combo_cat.set('')
         ent_nombre.focus_set()
 
     def buscar():
@@ -206,12 +255,17 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
             var_stock.set(f"{float(prod.get('stock')): .3f}")
             var_stock_min.set(str(prod.get('stock_minimo')))
             var_cod.set(prod.get('codigo_barras') or "")
+            
+            # Setear el valor actual de la base de datos
             var_es_pesable.set(bool(prod.get('es_pesable')))
             
             c_name = prod.get('categoria') or prod.get('nombre_categoria')
             if c_name and c_name in combo_cat['values']:
                 combo_cat.set(c_name)
-                al_cambiar_categoria(None) # Ejecutar lógica de pesable
+                # 🔥 CORRECCIÓN EN BUSCAR:
+                # Forzamos la ejecución de la lógica para bloquear/desbloquear
+                # el checkbox según la categoría que acabamos de cargar.
+                al_cambiar_categoria(None) 
         else:
             messagebox.showinfo("Info", "No se encontró el producto.", parent=win)
 
@@ -221,16 +275,17 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     tk.Button(actions, text="💾 Guardar", bg="#4CAF50", fg="white", width=20, command=guardar).pack(side=tk.LEFT, padx=40)
     tk.Button(actions, text="Cancelar", bg="#f44336", fg="white", width=15, command=win.destroy).pack(side=tk.RIGHT, padx=40)
 
-    # Carga inicial
-    cats = backend.obtener_categorias()
-    combo_cat['values'] = [c['nombre'] for c in cats]
-    combo_cat.ids = [c['id_categoria'] for c in cats]
-    if cats: combo_cat.current(0)
-    al_cambiar_categoria(None) # Init state
+    cargar_categorias_memoria()
+    if combo_cat['values']: combo_cat.current(0)
     
+    # Si cargamos un producto al iniciar, aplicar la lógica también
     if id_producto_a_cargar:
         var_token.set(str(id_producto_a_cargar))
         buscar()
+    else:
+        # Si es nuevo, aplicar lógica de la primera categoría por defecto
+        al_cambiar_categoria(None)
+
 
     configurar_navegacion_ventana(win, confirmar_cierre=True)
     win.after(50, lambda: ent_busqueda.focus_set())

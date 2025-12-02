@@ -1,7 +1,8 @@
 -- =========================================================
--- Supermercado Don Atilio - Esquema COMPLETO CORREGIDO
+-- Supermercado Don Atilio - Esquema DEFINITIVO
 -- Compatible MySQL 8.x / MariaDB 10.4+
--- Fecha de Actualización: Fase 1 (Base de Datos)
+-- Incluye: Gestión Avanzada de Caja Única, Auditoría y Compras con Medios de Pago
+-- Versión: 2.1 (Actualizado con medio_pago en Compras)
 -- =========================================================
 
 -- 0) Base de datos
@@ -42,7 +43,7 @@ CREATE TABLE IF NOT EXISTS Usuario (
 CREATE TABLE IF NOT EXISTS Cliente (
   id_cliente INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(100) NOT NULL,
-  dni VARCHAR(15) NULL UNIQUE, -- Validaremos que sean 7-8 nums en el Frontend
+  dni VARCHAR(15) NULL UNIQUE,
   direccion VARCHAR(200),
   telefono VARCHAR(20),
   email VARCHAR(255) UNIQUE,
@@ -96,7 +97,7 @@ CREATE TABLE IF NOT EXISTS Categoria (
   nombre VARCHAR(50) NOT NULL UNIQUE,
   descripcion VARCHAR(200),
   activa BOOLEAN DEFAULT TRUE,
-  margen_ganancia DECIMAL(5,2) DEFAULT 30.00, -- ¡NUEVO! Para cálculo automático
+  margen_ganancia DECIMAL(5,2) DEFAULT 30.00,
   fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_categoria_nombre (nombre),
   INDEX idx_categoria_activa (activa)
@@ -155,6 +156,7 @@ CREATE TABLE IF NOT EXISTS Proveedor (
   INDEX idx_proveedor_activo (activo)
 ) ENGINE=InnoDB;
 
+-- ✅ TABLA COMPRA CON medio_pago YA INCLUIDO
 CREATE TABLE IF NOT EXISTS Compra (
   id_compra INT AUTO_INCREMENT PRIMARY KEY,
   fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -163,8 +165,10 @@ CREATE TABLE IF NOT EXISTS Compra (
   id_proveedor INT NOT NULL,
   estado VARCHAR(20) DEFAULT 'pendiente',
   numero_factura VARCHAR(50),
+  medio_pago VARCHAR(50) DEFAULT 'efectivo',  -- <--- ✅ YA ESTÁ AQUÍ
   CHECK (total >= 0),
   CHECK (estado IN ('pendiente','recibida','cancelada')),
+  CHECK (medio_pago IN ('efectivo','transferencia','cuenta_corriente','tarjeta','cheque')),
   CONSTRAINT fk_compra_usuario
     FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
     ON DELETE SET NULL,
@@ -200,18 +204,11 @@ CREATE TABLE IF NOT EXISTS DetalleCompra (
 CREATE TABLE IF NOT EXISTS Proveedor_Producto (
     id_proveedor INT NOT NULL,
     id_producto INT NOT NULL,
-
     PRIMARY KEY (id_proveedor, id_producto),
-    
     CONSTRAINT fk_pp_proveedor
-        FOREIGN KEY (id_proveedor) 
-        REFERENCES Proveedor(id_proveedor)
-        ON DELETE CASCADE,
-    
+        FOREIGN KEY (id_proveedor) REFERENCES Proveedor(id_proveedor) ON DELETE CASCADE,
     CONSTRAINT fk_pp_producto
-        FOREIGN KEY (id_producto) 
-        REFERENCES Producto(id_producto)
-        ON DELETE CASCADE
+        FOREIGN KEY (id_producto) REFERENCES Producto(id_producto) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- =========================================================
@@ -262,38 +259,91 @@ CREATE TABLE IF NOT EXISTS DetalleVenta (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 6) Caja y Cierres (¡NUEVO!)
+-- 6) CAJA Y SESIONES (SISTEMA ÚNICO COMPARTIDO)
 -- =========================================================
-CREATE TABLE IF NOT EXISTS AperturaCierreCaja (
-  id_caja INT AUTO_INCREMENT PRIMARY KEY,
-  id_usuario INT NOT NULL,
+
+-- Tabla de Sesiones (Turnos de Caja)
+CREATE TABLE IF NOT EXISTS caja_session (
+  id_session INT AUTO_INCREMENT PRIMARY KEY,
+  id_usuario_apertura INT NOT NULL,
   fecha_apertura DATETIME DEFAULT CURRENT_TIMESTAMP,
+  monto_apertura DECIMAL(10,2) NOT NULL,
+  
+  id_usuario_cierre INT NULL,
   fecha_cierre DATETIME NULL,
-  monto_inicial DECIMAL(10,2) NOT NULL,
-  monto_final_real DECIMAL(10,2) NULL,
-  monto_sistema DECIMAL(10,2) NULL,
+  
+  efectivo_esperado DECIMAL(10,2) NULL,
+  efectivo_contado DECIMAL(10,2) NULL,
   diferencia DECIMAL(10,2) NULL,
-  observaciones TEXT,
-  estado VARCHAR(20) DEFAULT 'abierta',
-  CONSTRAINT fk_caja_usuario FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario),
+  observaciones_cierre TEXT NULL,
+  
+  estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
+  
+  FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
+  FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
   INDEX idx_caja_estado (estado),
   INDEX idx_caja_fecha (fecha_apertura)
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS MovimientoCaja (
+-- Tabla de Movimientos (Flujo de dinero)
+CREATE TABLE IF NOT EXISTS caja_movimiento (
   id_movimiento INT AUTO_INCREMENT PRIMARY KEY,
-  id_caja INT NOT NULL,
-  tipo VARCHAR(20) NOT NULL, -- 'ingreso', 'egreso', 'venta_efectivo', 'gasto'
-  monto DECIMAL(10,2) NOT NULL,
-  descripcion VARCHAR(200),
-  fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_mov_caja FOREIGN KEY (id_caja) REFERENCES AperturaCierreCaja(id_caja)
-  ON DELETE CASCADE,
-  INDEX idx_mov_caja (id_caja)
+  id_session INT NOT NULL,
+  tipo ENUM('ingreso', 'egreso') NOT NULL,
+  monto DECIMAL(10,2) NOT NULL CHECK (monto > 0),
+  medio ENUM('efectivo', 'tarjeta', 'transferencia', 'cuenta_corriente') NOT NULL,
+  
+  motivo ENUM(
+    'apertura_caja',
+    'venta_efectivo',
+    'pago_cuenta_corriente_efectivo', 
+    'pago_proveedor',
+    'gasto_vario',
+    'retiro_caja',
+    'devolucion_efectivo',
+    'ajuste_positivo',
+    'ajuste_negativo',
+    'otro'
+  ) NOT NULL,
+  
+  id_usuario INT NOT NULL,
+  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+  
+  -- Referencias para trazabilidad
+  id_venta INT NULL,
+  id_cliente INT NULL,
+  id_compra INT NULL,
+  
+  descripcion TEXT NULL,
+  
+  FOREIGN KEY (id_session) REFERENCES caja_session(id_session),
+  FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario),
+  FOREIGN KEY (id_venta) REFERENCES Venta(id_venta) ON DELETE SET NULL,
+  FOREIGN KEY (id_cliente) REFERENCES Cliente(id_cliente),
+  FOREIGN KEY (id_compra) REFERENCES Compra(id_compra),
+  
+  INDEX idx_mov_session (id_session),
+  INDEX idx_mov_tipo (tipo)
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 7) Auditoría
+-- 7) NOTAS DE CRÉDITO / DEVOLUCIONES
+-- =========================================================
+CREATE TABLE IF NOT EXISTS nota_credito (
+  id_nota_credito INT AUTO_INCREMENT PRIMARY KEY,
+  id_venta INT NOT NULL,
+  monto DECIMAL(10,2) NOT NULL,
+  tipo_devolucion ENUM('reembolso_efectivo', 'credito_a_favor') NOT NULL,
+  fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+  id_usuario INT NOT NULL,
+  motivo TEXT,
+  
+  FOREIGN KEY (id_venta) REFERENCES Venta(id_venta),
+  FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 8) Auditoría
 -- =========================================================
 CREATE TABLE IF NOT EXISTS AuditoriaInventario (
   id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
@@ -305,15 +355,8 @@ CREATE TABLE IF NOT EXISTS AuditoriaInventario (
   id_usuario INT,
   fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   observaciones TEXT,
-  CONSTRAINT fk_auditoria_inv_producto
-    FOREIGN KEY (id_producto) REFERENCES Producto(id_producto)
-    ON DELETE CASCADE,
-  CONSTRAINT fk_auditoria_inv_usuario
-    FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
-    ON DELETE SET NULL,
-  INDEX idx_auditoria_inv_producto (id_producto),
-  INDEX idx_auditoria_inv_fecha (fecha),
-  INDEX idx_auditoria_inv_tipo (tipo_movimiento)
+  FOREIGN KEY (id_producto) REFERENCES Producto(id_producto) ON DELETE CASCADE,
+  FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
@@ -325,18 +368,11 @@ CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
   datos_anteriores JSON,
   datos_nuevos JSON,
   fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  
-  CONSTRAINT fk_auditoria_acc_usuario
-    FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
-    ON DELETE SET NULL,
-    
-  INDEX idx_auditoria_acc_fecha (fecha),
-  INDEX idx_auditoria_acc_usuario (id_usuario),
-  INDEX idx_auditoria_acc_accion (accion)
+  FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 8) Triggers
+-- 9) Triggers
 -- =========================================================
 DELIMITER $$
 
@@ -348,11 +384,8 @@ FOR EACH ROW
 BEGIN
   UPDATE Venta
   SET total = (
-    SELECT COALESCE(SUM(subtotal),0)
-    FROM DetalleVenta
-    WHERE id_venta = NEW.id_venta
-  )
-  WHERE id_venta = NEW.id_venta;
+    SELECT COALESCE(SUM(subtotal),0) FROM DetalleVenta WHERE id_venta = NEW.id_venta
+  ) WHERE id_venta = NEW.id_venta;
 END $$
 
 -- Actualizar total Compra
@@ -363,11 +396,8 @@ FOR EACH ROW
 BEGIN
   UPDATE Compra
   SET total = (
-    SELECT COALESCE(SUM(subtotal),0)
-    FROM DetalleCompra
-    WHERE id_compra = NEW.id_compra
-  )
-  WHERE id_compra = NEW.id_compra;
+    SELECT COALESCE(SUM(subtotal),0) FROM DetalleCompra WHERE id_compra = NEW.id_compra
+  ) WHERE id_compra = NEW.id_compra;
 END $$
 
 -- Auditoría Inventario
@@ -378,16 +408,13 @@ FOR EACH ROW
 BEGIN
   DECLARE v_cant_anterior DECIMAL(10, 3) DEFAULT 0.000; 
   IF NEW.id_producto IS NOT NULL THEN
-    SELECT cantidad INTO v_cant_anterior
-    FROM Inventario WHERE id_producto = NEW.id_producto;
-    INSERT INTO AuditoriaInventario
-      (id_producto, cantidad_anterior, cantidad_nueva, tipo_movimiento, id_referencia, id_usuario)
-    VALUES
-      (NEW.id_producto, v_cant_anterior, GREATEST(v_cant_anterior - NEW.cantidad, 0), 'venta', NEW.id_venta, NULL);
+    SELECT cantidad INTO v_cant_anterior FROM Inventario WHERE id_producto = NEW.id_producto;
+    INSERT INTO AuditoriaInventario (id_producto, cantidad_anterior, cantidad_nueva, tipo_movimiento, id_referencia)
+    VALUES (NEW.id_producto, v_cant_anterior, GREATEST(v_cant_anterior - NEW.cantidad, 0), 'venta', NEW.id_venta);
   END IF;
 END $$
 
--- Mantener Cuenta Corriente actualizada
+-- Cuenta Corriente (Actualización de saldo)
 DROP TRIGGER IF EXISTS trg_venta_au_cuentacorriente $$
 CREATE TRIGGER trg_venta_au_cuentacorriente
 AFTER UPDATE ON Venta
@@ -395,57 +422,20 @@ FOR EACH ROW
 BEGIN
   IF NEW.id_cliente IS NOT NULL THEN
     IF NEW.tipo_pago = 'cuenta_corriente' AND OLD.tipo_pago <> 'cuenta_corriente' THEN
-      UPDATE CuentaCorriente
-      SET saldo = saldo - NEW.total 
-      WHERE id_cliente = NEW.id_cliente;
+      UPDATE CuentaCorriente SET saldo = saldo - NEW.total WHERE id_cliente = NEW.id_cliente;
     ELSEIF NEW.tipo_pago = 'cuenta_corriente' AND NEW.total <> OLD.total THEN
-      UPDATE CuentaCorriente
-      SET saldo = saldo - (NEW.total - OLD.total) 
-      WHERE id_cliente = NEW.id_cliente;
-    ELSEIF OLD.tipo_pago = 'cuenta_corriente' AND NEW.tipo_pago <> 'cuenta_corriente' THEN
-      UPDATE CuentaCorriente
-      SET saldo = saldo + OLD.total 
-      WHERE id_cliente = NEW.id_cliente;
+      UPDATE CuentaCorriente SET saldo = saldo - (NEW.total - OLD.total) WHERE id_cliente = NEW.id_cliente;
     END IF;
   END IF;
-END $$
-
--- ¡NUEVO! Impactar Venta Efectivo en Caja
-DROP TRIGGER IF EXISTS trg_venta_a_caja $$
-CREATE TRIGGER trg_venta_a_caja
-AFTER UPDATE ON Venta
-FOR EACH ROW
-BEGIN
-    DECLARE v_id_caja INT;
-    
-    -- Si la venta pasa a completada y es en efectivo
-    IF NEW.estado = 'completada' AND NEW.tipo_pago = 'efectivo' AND OLD.estado <> 'completada' THEN
-        -- Buscar la caja ABIERTA más reciente (asumiendo una caja por turno/local por ahora)
-        SELECT id_caja INTO v_id_caja FROM AperturaCierreCaja 
-        WHERE estado = 'abierta' ORDER BY id_caja DESC LIMIT 1;
-        
-        IF v_id_caja IS NOT NULL THEN
-            INSERT INTO MovimientoCaja (id_caja, tipo, monto, descripcion)
-            VALUES (v_id_caja, 'venta_efectivo', NEW.total, CONCAT('Venta #', NEW.id_venta));
-        END IF;
-    END IF;
 END $$
 
 DELIMITER ;
 
 -- =========================================================
--- 9) Vistas útiles
+-- 10) Vistas útiles
 -- =========================================================
 CREATE OR REPLACE VIEW vista_stock_bajo AS
-SELECT
-  p.id_producto,
-  p.nombre,
-  p.precio,
-  p.es_pesable,
-  c.nombre AS categoria,
-  i.cantidad,
-  i.stock_minimo,
-  (i.stock_minimo - i.cantidad) AS unidades_faltantes
+SELECT p.id_producto, p.nombre, p.precio, p.es_pesable, c.nombre AS categoria, i.cantidad, i.stock_minimo, (i.stock_minimo - i.cantidad) AS unidades_faltantes
 FROM Producto p
 JOIN Inventario i ON p.id_producto = i.id_producto
 LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
@@ -453,76 +443,29 @@ WHERE i.cantidad <= i.stock_minimo AND p.activo = 1
 ORDER BY i.cantidad ASC;
 
 CREATE OR REPLACE VIEW vista_ventas_diarias AS
-SELECT
-  DATE(v.fecha) AS fecha,
-  COUNT(v.id_venta) AS total_ventas,
-  SUM(v.total) AS monto_total
-FROM Venta v
-WHERE v.estado = 'completada'
-GROUP BY DATE(v.fecha)
-ORDER BY fecha DESC;
-
-CREATE OR REPLACE VIEW vista_productos_mas_vendidos AS
-SELECT
-  p.id_producto,
-  p.nombre,
-  p.precio,
-  c.nombre AS categoria,
-  SUM(dv.cantidad) AS total_vendido,
-  SUM(dv.subtotal) AS ingresos_generados
-FROM Producto p
-JOIN DetalleVenta dv ON p.id_producto = dv.id_producto
-JOIN Venta v ON dv.id_venta = v.id_venta
-LEFT JOIN Categoria c ON p.id_categoria = c.id_categoria
-WHERE v.estado = 'completada' AND p.activo = 1
-GROUP BY p.id_producto
-ORDER BY total_vendido DESC;
+SELECT DATE(v.fecha) AS fecha, COUNT(v.id_venta) AS total_ventas, SUM(v.total) AS monto_total
+FROM Venta v WHERE v.estado = 'completada' GROUP BY DATE(v.fecha) ORDER BY fecha DESC;
 
 CREATE OR REPLACE VIEW vista_clientes_deuda AS
-SELECT
-  c.id_cliente,
-  c.nombre,
-  c.dni,
-  c.telefono,
-  c.email,
-  cc.saldo,
-  cc.limite_credito,
-  (cc.limite_credito + cc.saldo) AS credito_disponible
+SELECT c.id_cliente, c.nombre, c.dni, c.telefono, c.email, cc.saldo, cc.limite_credito
 FROM Cliente c
 JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
 WHERE cc.saldo < 0 AND c.activo = 1
 ORDER BY cc.saldo ASC;
 
 -- =========================================================
--- 10) Índices compuestos adicionales
+-- 11) Índices
 -- =========================================================
 DELIMITER $$
-
 DROP PROCEDURE IF EXISTS ensure_index $$
-CREATE PROCEDURE ensure_index(
-  IN p_table VARCHAR(64),
-  IN p_index VARCHAR(64),
-  IN p_cols  VARCHAR(255)
-)
+CREATE PROCEDURE ensure_index(IN p_table VARCHAR(64), IN p_index VARCHAR(64), IN p_cols VARCHAR(255))
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM information_schema.statistics
-    WHERE table_schema = DATABASE()
-      AND table_name   = p_table
-      AND index_name   = p_index
-  ) THEN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = p_table AND index_name = p_index) THEN
     SET @sql = CONCAT('CREATE INDEX ', p_index, ' ON ', p_table, ' (', p_cols, ')');
-    PREPARE stmt FROM @sql;
-    EXECUTE stmt;
-    DEALLOCATE PREPARE stmt;
+    PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
   END IF;
 END $$
 DELIMITER ;
 
-CALL ensure_index('Venta',               'idx_venta_fecha_cliente',       'fecha, id_cliente');
-CALL ensure_index('Producto',            'idx_producto_categoria_activo', 'id_categoria, activo');
-CALL ensure_index('AuditoriaInventario', 'idx_auditoria_producto_fecha',  'id_producto, fecha');
-CALL ensure_index('AperturaCierreCaja',  'idx_caja_usuario_estado',       'id_usuario, estado');
-
-DROP PROCEDURE IF EXISTS ensure_index;
+CALL ensure_index('Venta', 'idx_venta_fecha_cliente', 'fecha, id_cliente');
+CALL ensure_index('Producto', 'idx_producto_categoria_activo', 'id_categoria, activo');

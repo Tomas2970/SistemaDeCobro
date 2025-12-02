@@ -1,12 +1,8 @@
-"""
-Sistema de Permisos por Rol
-Sistema de Cobro - Supermercado Don Atilio
-
-Define qué puede hacer cada rol en el sistema
-"""
+# app/database/permisos.py
 
 # =====================================
 # DEFINICIÓN DE PERMISOS POR ROL
+# OPCIÓN A: SEGURIDAD MÁXIMA
 # =====================================
 
 PERMISOS = {
@@ -23,24 +19,26 @@ PERMISOS = {
         'crear_productos',
         'editar_productos',
         'eliminar_productos',
-        'modificar_precios',
+        'modificar_precios',  # ← EXCLUSIVO Admin/Supervisor
+        'gestionar_categorias',
         
         # Inventario
         'ver_inventario',
-        'ajustar_inventario',
+        'ajustar_inventario_manual',  # ← Solo Admin/Supervisor (desde ABM)
         'ver_stock_bajo',
         
         # Ventas
         'realizar_ventas',
         'ver_ventas',
         'cancelar_ventas',
+        'procesar_devoluciones',
         
-        # Clientes
+        # Clientes (OPCIÓN A)
         'ver_clientes',
-        'crear_clientes',
-        'editar_clientes',
-        'eliminar_clientes',
-        'gestionar_cuenta_corriente',
+        'crear_clientes',        # ← Admin puede crear
+        'editar_clientes',       # ← Admin puede editar todo
+        'eliminar_clientes',     # ← Solo Admin
+        'gestionar_cuenta_corriente',  # Cobrar pagos
         
         # Proveedores y Compras
         'ver_proveedores',
@@ -49,9 +47,15 @@ PERMISOS = {
         
         # Reportes
         'ver_reportes',
-        'cierre_caja',
         'ver_estadisticas',
         'ver_auditoria',
+        
+        # CAJA (Sistema Individual)
+        'abrir_caja',
+        'cerrar_caja',
+        'movimientos_caja_manuales',
+        'ver_caja_todos',
+        'ver_historial_movimientos',
         
         # Configuración
         'configurar_sistema',
@@ -60,54 +64,71 @@ PERMISOS = {
     
     # SUPERVISOR: Puede gestionar inventario y ver reportes
     'supervisor': [
-        # Productos (solo ver y editar, no eliminar)
+        # Productos
         'ver_productos',
+        'crear_productos',
         'editar_productos',
+        'modificar_precios',  # ← Solo Admin/Supervisor
         
         # Inventario
         'ver_inventario',
-        'ajustar_inventario',
+        'ajustar_inventario_manual',
         'ver_stock_bajo',
         
         # Ventas
         'realizar_ventas',
         'ver_ventas',
+        'procesar_devoluciones',
         
-        # Clientes
+        # Clientes (OPCIÓN A)
         'ver_clientes',
-        'crear_clientes',
-        'editar_clientes',
-        'ver_cuenta_corriente',  # ← NUEVO: Puede ver cuánto deben
+        'crear_clientes',        # ← Supervisor puede crear
+        'editar_clientes',       # ← Supervisor puede editar
+        'gestionar_cuenta_corriente',  # Puede cobrar
+        # NO tiene 'eliminar_clientes'
         
         # Proveedores
         'ver_proveedores',
+        'crear_proveedores',
         'registrar_compras',
         
-        # Reportes (puede ver pero no cierre de caja total)
+        # Reportes
         'ver_reportes',
         'ver_estadisticas',
+        
+        # CAJA
+        'abrir_caja',
+        'cerrar_caja',
+        'movimientos_caja_manuales',
+        'ver_caja_todos',
+        'ver_historial_movimientos',
     ],
     
-    # VENDEDOR: Solo puede vender y gestionar clientes
+    # VENDEDOR: Solo Ventas y Consultas (MUY RESTRINGIDO)
     'vendedor': [
-        # Productos (solo ver)
+        # Productos (Solo lectura)
         'ver_productos',
+        # NO: crear_productos, editar_productos, modificar_precios
         
-        # Inventario (solo consultar)
+        # Inventario (Solo lectura)
         'ver_inventario',
         'ver_stock_bajo',
+        # NO: ajustar_inventario_manual
         
         # Ventas
         'realizar_ventas',
         'ver_ventas',  # Solo sus propias ventas
+        # NO: procesar_devoluciones, cancelar_ventas
         
-        # Clientes
-        'ver_clientes',
-        'crear_clientes',
-        'ver_cuenta_corriente',  # ← NUEVO: Puede ver cuánto deben
+        # Clientes (OPCIÓN A - SOLO CONSULTA)
+        'ver_clientes',  # ← Solo puede VER/BUSCAR clientes
+        # NO: crear_clientes, editar_clientes, eliminar_clientes
+        # NO: gestionar_cuenta_corriente (no puede cobrar)
         
-        # Reportes (solo su propio cierre)
-        'cierre_caja',  # Solo su propia caja
+        # Caja (Individual, sin movimientos manuales)
+        'abrir_caja',
+        'cerrar_caja',
+        # NO: movimientos_caja_manuales, ver_caja_todos, ver_historial_movimientos
     ]
 }
 
@@ -116,15 +137,7 @@ PERMISOS = {
 # =====================================
 
 def obtener_rol_nombre(id_rol):
-    """
-    Convierte ID de rol a nombre
-    
-    Args:
-        id_rol: 1=admin, 2=vendedor, 3=supervisor
-    
-    Returns:
-        Nombre del rol como string
-    """
+    """Convierte ID de rol a nombre"""
     roles = {
         1: 'admin',
         2: 'vendedor',
@@ -133,42 +146,18 @@ def obtener_rol_nombre(id_rol):
     return roles.get(id_rol, 'vendedor')
 
 def tiene_permiso(usuario, accion):
-    """
-    Verifica si un usuario tiene permiso para realizar una acción
-    
-    Args:
-        usuario: Dict con datos del usuario (debe tener 'id_rol')
-        accion: String con el nombre del permiso a verificar
-    
-    Returns:
-        True si tiene permiso, False si no
-    
-    Ejemplo:
-        if tiene_permiso(usuario_actual, 'crear_productos'):
-            # Mostrar botón de agregar producto
-    """
+    """Verifica si un usuario tiene permiso para realizar una acción"""
     if not usuario:
         return False
     
-    # Obtener rol del usuario
     id_rol = usuario.get('id_rol')
     nombre_rol = obtener_rol_nombre(id_rol)
-    
-    # Obtener permisos del rol
     permisos_rol = PERMISOS.get(nombre_rol, [])
     
-    # Verificar si tiene el permiso
     return accion in permisos_rol
 
 def requiere_permiso(accion):
-    """
-    Decorador para funciones que requieren un permiso específico
-    
-    Uso:
-        @requiere_permiso('crear_productos')
-        def agregar_producto():
-            # código...
-    """
+    """Decorador para funciones que requieren un permiso específico"""
     def decorador(func):
         def wrapper(usuario, *args, **kwargs):
             if not tiene_permiso(usuario, accion):
@@ -178,15 +167,7 @@ def requiere_permiso(accion):
     return decorador
 
 def obtener_permisos_usuario(usuario):
-    """
-    Obtiene lista completa de permisos de un usuario
-    
-    Args:
-        usuario: Dict con datos del usuario
-    
-    Returns:
-        Lista de strings con todos los permisos
-    """
+    """Obtiene lista completa de permisos de un usuario"""
     if not usuario:
         return []
     
@@ -195,85 +176,37 @@ def obtener_permisos_usuario(usuario):
     
     return PERMISOS.get(nombre_rol, [])
 
-def puede_ver_usuario(usuario_actual, usuario_objetivo):
-    """
-    Verifica si un usuario puede ver/editar a otro usuario
-    
-    Args:
-        usuario_actual: Usuario que intenta ver
-        usuario_objetivo: Usuario que se quiere ver
-    
-    Returns:
-        True si puede ver/editar, False si no
-    
-    Regla: Solo admin puede gestionar usuarios
-           Un usuario puede ver su propio perfil
-    """
-    # Admin puede ver todos
-    if tiene_permiso(usuario_actual, 'ver_usuarios'):
-        return True
-    
-    # Un usuario puede verse a sí mismo
-    if usuario_actual.get('id_usuario') == usuario_objetivo.get('id_usuario'):
-        return True
-    
-    return False
+def puede_modificar_precios(usuario):
+    """Verifica si puede modificar precios (Solo Admin/Supervisor)"""
+    return tiene_permiso(usuario, 'modificar_precios')
 
-def puede_ver_venta(usuario_actual, venta):
-    """
-    Verifica si un usuario puede ver una venta específica
-    
-    Args:
-        usuario_actual: Usuario que intenta ver la venta
-        venta: Dict con datos de la venta (debe tener 'id_usuario')
-    
-    Returns:
-        True si puede ver, False si no
-    
-    Regla: Admin y Supervisor pueden ver todas
-           Vendedor solo puede ver sus propias ventas
-    """
-    id_rol = usuario_actual.get('id_rol')
-    
-    # Admin y Supervisor pueden ver todas
-    if id_rol in [1, 3]:
-        return True
-    
-    # Vendedor solo puede ver sus propias ventas
-    if id_rol == 2:
-        return usuario_actual.get('id_usuario') == venta.get('id_usuario')
-    
-    return False
+def puede_ajustar_inventario_manual(usuario):
+    """Verifica si puede ajustar stock manualmente desde ABM"""
+    return tiene_permiso(usuario, 'ajustar_inventario_manual')
 
-def puede_ver_cierre_completo(usuario):
-    """
-    Verifica si puede ver cierre de caja de todos los vendedores
-    
-    Returns:
-        True si puede ver cierre completo, False si solo el suyo
-    """
-    # Solo Admin puede ver cierre completo
-    return tiene_permiso(usuario, 'ver_reportes')
+def puede_movimientos_caja_manuales(usuario):
+    """Verifica si puede hacer retiros/ingresos manuales en caja"""
+    return tiene_permiso(usuario, 'movimientos_caja_manuales')
+
+def puede_procesar_devoluciones(usuario):
+    """Verifica si puede procesar devoluciones"""
+    return tiene_permiso(usuario, 'procesar_devoluciones')
 
 # =====================================
 # FUNCIONES DE AYUDA PARA FRONTEND
 # =====================================
 
 def obtener_menu_items(usuario):
-    """
-    Genera items de menú según permisos del usuario
-    
-    Returns:
-        Dict con secciones del menú y si están habilitadas
-    """
+    """Genera items de menú según permisos del usuario"""
     return {
-        'dashboard': True,  # Todos pueden ver dashboard básico
+        'dashboard': True,
         
         'ventas': {
-            'habilitado': True,  # Todos pueden acceder a ventas
+            'habilitado': True,
             'nueva_venta': tiene_permiso(usuario, 'realizar_ventas'),
             'ver_ventas': tiene_permiso(usuario, 'ver_ventas'),
             'cancelar_venta': tiene_permiso(usuario, 'cancelar_ventas'),
+            'devoluciones': tiene_permiso(usuario, 'procesar_devoluciones'),
         },
         
         'productos': {
@@ -281,11 +214,12 @@ def obtener_menu_items(usuario):
             'agregar': tiene_permiso(usuario, 'crear_productos'),
             'editar': tiene_permiso(usuario, 'editar_productos'),
             'eliminar': tiene_permiso(usuario, 'eliminar_productos'),
+            'modificar_precios': tiene_permiso(usuario, 'modificar_precios'),
         },
         
         'inventario': {
             'habilitado': tiene_permiso(usuario, 'ver_inventario'),
-            'ajustar': tiene_permiso(usuario, 'ajustar_inventario'),
+            'ajustar_manual': tiene_permiso(usuario, 'ajustar_inventario_manual'),
             'alertas': tiene_permiso(usuario, 'ver_stock_bajo'),
         },
         
@@ -293,6 +227,7 @@ def obtener_menu_items(usuario):
             'habilitado': tiene_permiso(usuario, 'ver_clientes'),
             'agregar': tiene_permiso(usuario, 'crear_clientes'),
             'editar': tiene_permiso(usuario, 'editar_clientes'),
+            'eliminar': tiene_permiso(usuario, 'eliminar_clientes'),
             'cuenta_corriente': tiene_permiso(usuario, 'gestionar_cuenta_corriente'),
         },
         
@@ -302,10 +237,18 @@ def obtener_menu_items(usuario):
         },
         
         'reportes': {
-            'habilitado': tiene_permiso(usuario, 'ver_reportes') or tiene_permiso(usuario, 'cierre_caja'),
-            'cierre_caja': tiene_permiso(usuario, 'cierre_caja'),
+            'habilitado': tiene_permiso(usuario, 'ver_reportes'),
             'estadisticas': tiene_permiso(usuario, 'ver_estadisticas'),
             'auditoria': tiene_permiso(usuario, 'ver_auditoria'),
+        },
+        
+        'caja': {
+            'habilitado': True,
+            'abrir': tiene_permiso(usuario, 'abrir_caja'),
+            'cerrar': tiene_permiso(usuario, 'cerrar_caja'),
+            'movimientos_manuales': tiene_permiso(usuario, 'movimientos_caja_manuales'),
+            'ver_historial': tiene_permiso(usuario, 'ver_caja_todos'),
+            'ver_movimientos': tiene_permiso(usuario, 'ver_historial_movimientos'),
         },
         
         'usuarios': {
@@ -321,39 +264,45 @@ def obtener_menu_items(usuario):
     }
 
 def describir_rol(nombre_rol):
-    """
-    Devuelve una descripción de lo que puede hacer cada rol
-    
-    Returns:
-        String con descripción
-    """
+    """Devuelve una descripción de lo que puede hacer cada rol"""
     descripciones = {
         'admin': """
 ADMINISTRADOR - Acceso Total
 • Gestionar usuarios, productos y configuración
-• Ver todos los reportes y estadísticas
+• Modificar precios y ajustar stock manualmente
+• Crear y editar clientes con cuenta corriente
+• Eliminar clientes (único rol con este permiso)
+• Abrir y cerrar caja con movimientos manuales
+• Procesar devoluciones y cancelar ventas
+• Ver todos los reportes y auditoría
 • Acceso completo al sistema
-• Modificar precios y realizar ajustes
         """,
         
         'supervisor': """
 SUPERVISOR - Gestión Operativa
 • Realizar ventas y gestionar clientes
-• Administrar inventario y productos
+• Crear y editar clientes con cuenta corriente
+• Administrar inventario y productos (con precios)
+• Procesar devoluciones y registrar compras
+• Abrir y cerrar caja con movimientos manuales
 • Ver reportes y estadísticas
-• Registrar compras a proveedores
-• NO puede gestionar usuarios ni configuración
+• NO puede eliminar clientes
+• NO puede gestionar usuarios
         """,
         
         'vendedor': """
-VENDEDOR - Operaciones de Venta
-• Realizar ventas
-• Gestionar clientes
-• Consultar productos e inventario
-• Ver su propio cierre de caja
-• NO puede modificar productos ni ver reportes generales
+VENDEDOR - Solo Ventas y Consultas
+• Realizar ventas a clientes existentes
+• Consultar productos, inventario y precios
+• Consultar lista de clientes (solo búsqueda)
+• Abrir y cerrar su propia caja (sin movimientos manuales)
+• ❌ NO puede crear/editar/eliminar clientes
+• ❌ NO puede modificar precios ni productos
+• ❌ NO puede ajustar stock manualmente
+• ❌ NO puede cobrar cuenta corriente
+• ❌ NO puede procesar devoluciones
+• ❌ NO puede hacer retiros/ingresos de caja
         """
     }
     
     return descripciones.get(nombre_rol, "Rol desconocido")
-

@@ -1,4 +1,5 @@
 # app/frontend/interfaz_compra.py
+# ✨ CORREGIDO: Error de variable total_var solucionado
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox, Toplevel, Listbox
@@ -40,7 +41,7 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         return 30.0
 
     # =================================================================
-    # 1. SECCIÓN SUPERIOR: PROVEEDOR
+    # 1. SECCIÓN SUPERIOR: PROVEEDOR CON BUSCADOR
     # =================================================================
     frame_top = tk.Frame(win, bg="#f4f4f8", pady=15)
     frame_top.pack(fill=tk.X, padx=20)
@@ -53,39 +54,96 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         nonlocal proveedor_sel
         popup = Toplevel(win)
         popup.title("Seleccionar Proveedor")
-        popup.geometry("500x400")
+        popup.geometry("600x500")
+        popup.config(bg="#f4f4f8")
         
-        lst = Listbox(popup, font=("Segoe UI", 10))
-        lst.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Frame de búsqueda
+        frm_busqueda = tk.Frame(popup, bg="#f4f4f8", pady=10)
+        frm_busqueda.pack(fill=tk.X, padx=10)
+        
+        tk.Label(frm_busqueda, text="🔍 Buscar:", font=("Segoe UI", 10, "bold"), bg="#f4f4f8").pack(side=tk.LEFT, padx=5)
+        var_buscar = tk.StringVar()
+        entry_buscar = tk.Entry(frm_busqueda, textvariable=var_buscar, font=("Segoe UI", 10), width=40)
+        entry_buscar.pack(side=tk.LEFT, padx=5)
+        entry_buscar.focus_set()
+        
+        frm_lista = tk.Frame(popup, bg="#f4f4f8")
+        frm_lista.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        scroll = ttk.Scrollbar(frm_lista)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        lst = Listbox(frm_lista, font=("Segoe UI", 10), yscrollcommand=scroll.set)
+        lst.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.config(command=lst.yview)
         
         provs = backend.obtener_proveedores()
+        proveedores_texto = []
+        
         for p in provs:
             estado = "" if p['activo'] else " (Inactivo)"
-            lst.insert(tk.END, f"{p['id_proveedor']} - {p['nombre']}{estado}")
+            empresa = f" - {p['empresa']}" if p.get('empresa') else ""
+            texto = f"{p['id_proveedor']} - {p['nombre']}{empresa}{estado}"
+            proveedores_texto.append(texto)
+        
+        def filtrar_proveedores(*args):
+            lst.delete(0, tk.END)
+            texto_busqueda = var_buscar.get().strip().lower()
             
+            if not texto_busqueda:
+                for texto in proveedores_texto: lst.insert(tk.END, texto)
+            else:
+                for texto in proveedores_texto:
+                    if texto_busqueda in texto.lower(): lst.insert(tk.END, texto)
+            
+            if lst.size() > 0: lst.selection_set(0)
+        
+        var_buscar.trace_add("write", filtrar_proveedores)
+        filtrar_proveedores()
+        
         def confirmar():
             nonlocal proveedor_sel
             sel = lst.curselection()
-            if not sel: return
-            idx = sel[0]
-            prov_data = provs[idx]
+            if not sel:
+                messagebox.showwarning("Atención", "Seleccione un proveedor.", parent=popup)
+                return
+            
+            texto_seleccionado = lst.get(sel[0])
+            try:
+                id_prov = int(texto_seleccionado.split(" - ")[0].strip())
+            except:
+                messagebox.showerror("Error", "No se pudo identificar el proveedor.", parent=popup)
+                return
+            
+            prov_data = next((p for p in provs if p['id_proveedor'] == id_prov), None)
+            
+            if not prov_data: return
             if not prov_data['activo']:
                 messagebox.showwarning("Atención", "No se puede registrar compras a un proveedor inactivo.", parent=popup)
                 return
 
             proveedor_sel = prov_data
-            lbl_proveedor.config(text=proveedor_sel['nombre'])
+            texto_prov = proveedor_sel['nombre']
+            if proveedor_sel.get('empresa'): texto_prov += f" - {proveedor_sel['empresa']}"
+            
+            lbl_proveedor.config(text=texto_prov)
             btn_add_prod.config(state="normal") 
             popup.destroy()
 
         lst.bind("<Double-1>", lambda e: confirmar())
         lst.bind("<Return>", lambda e: confirmar())
-
-        tk.Button(popup, text="Seleccionar", command=confirmar, bg="#4CAF50", fg="white").pack(pady=10)
+        entry_buscar.bind("<Return>", lambda e: confirmar())
+        entry_buscar.bind("<Down>", lambda e: lst.focus_set())
+        
+        frm_botones = tk.Frame(popup, bg="#f4f4f8", pady=10)
+        frm_botones.pack(fill=tk.X)
+        tk.Button(frm_botones, text="✓ Seleccionar (Enter)", command=confirmar, bg="#4CAF50", fg="white", font=("Segoe UI", 10, "bold"), width=20).pack(pady=5)
+        tk.Button(frm_botones, text="Cancelar (Esc)", command=popup.destroy, font=("Segoe UI", 10), width=20).pack()
+        
         configurar_navegacion_ventana(popup)
 
-    tk.Button(frame_top, text="Buscar...", command=seleccionar_proveedor).pack(side=tk.LEFT)
-    # SE ELIMINÓ EL BOTÓN DE CREAR NUEVO PROVEEDOR
+    tk.Button(frame_top, text="🔍 Buscar Proveedor...", command=seleccionar_proveedor, 
+              bg="#2196F3", fg="white", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
 
     # =================================================================
     # 2. GRILLA
@@ -115,7 +173,6 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     lbl_total = tk.Label(frame_totales, text="TOTAL: $ 0.00", font=("Segoe UI", 16, "bold"), bg="#f4f4f8", fg="#dc2626")
     lbl_total.pack(side=tk.RIGHT)
 
-    # Lógica de Edición
     def repintar_tabla():
         for i in tree.get_children(): tree.delete(i)
         total_gral = 0.0
@@ -255,8 +312,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         
         configurar_navegacion_ventana(popup)
 
-    # Footer
-    frame_footer = tk.Frame(win, bg="#e5e7eb", height=60)
+    # Footer y Popup de Pago
+    frame_footer = tk.Frame(win, bg="#e5e7eb", height=70)
     frame_footer.pack(fill=tk.X, side=tk.BOTTOM)
     
     inner_footer = tk.Frame(frame_footer, bg="#e5e7eb")
@@ -269,24 +326,105 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     tk.Button(inner_footer, text="Cancelar", command=win.destroy, 
               bg="#f44336", fg="white", font=("Segoe UI", 10), padx=10, pady=5).pack(side=tk.LEFT, padx=15)
 
+    # --- FUNCIÓN DE POPUP PARA ELEGIR PAGO ---
+    def pedir_medio_pago():
+        dialog = tk.Toplevel(win)
+        dialog.title("Confirmar Compra")
+        dialog.geometry("400x300")
+        dialog.config(bg="white")
+        dialog.resizable(False, False)
+        dialog.transient(win)
+        dialog.grab_set()
+        
+        # Centrar
+        win.update_idletasks()
+        x = win.winfo_x() + (win.winfo_width() // 2) - 200
+        y = win.winfo_y() + (win.winfo_height() // 2) - 150
+        dialog.geometry(f"+{x}+{y}")
+
+        seleccion = {"valor": None}
+
+        # 🔥 CORRECCIÓN: Calcular total desde el carrito
+        total_pago = sum(item['cant'] * item['costo'] for item in carrito)
+
+        tk.Label(dialog, text="Finalizar Compra", font=("Segoe UI", 14, "bold"), bg="white").pack(pady=(15,5))
+        tk.Label(dialog, text=f"Total a Pagar: $ {total_pago:,.2f}", 
+                 font=("Segoe UI", 12), fg="#16a34a", bg="white").pack(pady=5)
+        
+        tk.Label(dialog, text="Seleccione el medio de pago:", bg="white").pack(pady=10)
+
+        frm_btns = tk.Frame(dialog, bg="white")
+        frm_btns.pack(fill="x", padx=40)
+
+        def set_pago(tipo):
+            seleccion["valor"] = tipo
+            dialog.destroy()
+
+        estilo_btn = {"font": ("Segoe UI", 10), "width": 30, "pady": 5, "cursor": "hand2"}
+        
+        tk.Button(frm_btns, text="💵 Efectivo (Descuenta de Caja)", bg="#dcfce7", 
+                  command=lambda: set_pago("efectivo"), **estilo_btn).pack(pady=5)
+        
+        tk.Button(frm_btns, text="🏦 Transferencia / Tarjeta", bg="#dbeafe", 
+                  command=lambda: set_pago("transferencia"), **estilo_btn).pack(pady=5)
+        
+        tk.Button(frm_btns, text="📋 Cuenta Corriente (Deuda)", bg="#fee2e2", 
+                  command=lambda: set_pago("cuenta_corriente"), **estilo_btn).pack(pady=5)
+
+        tk.Button(dialog, text="Cancelar", command=dialog.destroy, bg="#f4f4f5").pack(pady=15)
+        
+        win.wait_window(dialog)
+        return seleccion["valor"]
+
     def guardar_compra():
-        if not proveedor_sel: return
-        if not carrito: 
+        if not proveedor_sel:
+            messagebox.showwarning("Atención", "Seleccione un proveedor antes de confirmar la compra.")
+            return
+
+        if not carrito:
             messagebox.showerror("Error", "Carrito vacío")
             return
+
+        medio = pedir_medio_pago()
+        if not medio: return
+
         try:
-            id_compra = backend.insertar_compra(usuario['id_usuario'], proveedor_sel['id_proveedor'])
-            if not id_compra: raise Exception("Error DB")
+            id_compra = backend.insertar_compra(
+                usuario['id_usuario'],
+                proveedor_sel['id_proveedor'],
+                carrito,
+                medio_pago=medio
+            )
+
+            if not id_compra:
+                raise Exception("Error al guardar compra (DB devolvió None)")
+
             for item in carrito:
-                backend.insertar_detalle_compra(id_compra, item['id'], item['cant'], item['costo'])
-                backend.actualizar_precio_producto(item['id'], item['precio_venta'], id_usuario=usuario['id_usuario'])
-            messagebox.showinfo("Éxito", "Compra registrada.")
+                backend.actualizar_precio_producto(
+                    item['id'],
+                    item['precio_venta'],
+                    id_usuario=usuario['id_usuario']
+                )
+
+            msj_extra = ""
+            if medio == 'efectivo':
+                msj_extra = "\n💰 Se descontó el dinero de la Caja."
+            elif medio == 'cuenta_corriente':
+                msj_extra = "\n📋 Se registró la deuda con el proveedor."
+            else:
+                msj_extra = f"\n📄 Registrado como {medio.upper()}."
+
+            messagebox.showinfo("Éxito", f"Compra registrada correctamente.{msj_extra}")
             stock_events.notificar_cambio_stock()
             win.destroy()
-        except Exception as e: messagebox.showerror("Error", str(e))
 
-    tk.Button(inner_footer, text="CONFIRMAR COMPRA", command=guardar_compra, 
-              bg="#16a34a", fg="white", font=("Segoe UI", 11, "bold"), padx=20, pady=5).pack(side=tk.RIGHT)
+        except ValueError as ve:
+            messagebox.showwarning("No se pudo registrar", str(ve))
+        except Exception as e:
+            messagebox.showerror("Error Crítico", str(e))
+
+    tk.Button(inner_footer, text="CONFIRMAR COMPRA", command=guardar_compra,
+            bg="#16a34a", fg="white", font=("Segoe UI", 11, "bold"), padx=20, pady=5).pack(side=tk.RIGHT)
 
     win.bind("<F2>", lambda e: btn_add_prod.invoke())
     configurar_navegacion_ventana(win, confirmar_cierre=True)
