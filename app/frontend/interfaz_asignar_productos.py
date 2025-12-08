@@ -1,4 +1,5 @@
 # app/frontend/interfaz_asignar_productos.py
+# 🎨 ACTUALIZADO: Estilo de botones unificado
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox, Toplevel
@@ -9,37 +10,64 @@ except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_proveedor: str):
-    """
-    Nueva interfaz de asignación rápida con Checkboxes simulados en Treeview.
-    """
+    """Nueva interfaz de asignación rápida con Checkboxes simulados en Treeview"""
     win = Toplevel(parent)
     win.title(f"Asignar Productos a: {nombre_proveedor}")
-    win.geometry("700x600")
+    win.geometry("750x650")
     win.config(bg="#f4f4f8")
     win.resizable(False, True)
 
-    # Datos en memoria
-    # diccionario: {id_producto: {'nombre': str, 'asignado_original': bool, 'asignado_actual': bool}}
+    # 🔥 ESTILOS MODERNOS
+    style = ttk.Style()
+    style.theme_use('clam')
+    
+    style.configure("Modern.Treeview",
+                    background="#ffffff",
+                    foreground="#1f2937",
+                    rowheight=32,
+                    fieldbackground="#ffffff",
+                    borderwidth=0,
+                    font=('Segoe UI', 10))
+    
+    style.configure("Modern.Treeview.Heading",
+                    background="#f3f4f6",
+                    foreground="#374151",
+                    relief="flat",
+                    borderwidth=1,
+                    font=('Segoe UI', 10, 'bold'))
+
     memoria_productos = {}
     
     # --- 1. Header y Búsqueda ---
-    frame_top = tk.Frame(win, bg="#f4f4f8", pady=10, padx=10)
-    frame_top.pack(fill=tk.X)
+    frame_top = tk.Frame(win, bg="#ffffff", pady=12, padx=15)
+    frame_top.pack(fill=tk.X, padx=10, pady=(10, 5))
     
-    tk.Label(frame_top, text="Buscar Producto:", bg="#f4f4f8").pack(side=tk.LEFT)
+    tk.Label(
+        frame_top, 
+        text="Buscar Producto:", 
+        bg="#ffffff",
+        font=("Segoe UI", 10, "bold"),
+        fg="#1f2937"
+    ).pack(side=tk.LEFT, padx=5)
+    
     var_buscar = tk.StringVar()
-    ent_buscar = tk.Entry(frame_top, textvariable=var_buscar, width=40)
+    ent_buscar = tk.Entry(frame_top, textvariable=var_buscar, width=40, font=("Segoe UI", 10))
     ent_buscar.pack(side=tk.LEFT, padx=10)
     
-    tk.Label(frame_top, text="(Doble Clic o Espacio para marcar/desmarcar)", bg="#f4f4f8", fg="gray").pack(side=tk.LEFT)
+    tk.Label(
+        frame_top, 
+        text="(Doble Clic o Espacio para marcar/desmarcar)", 
+        bg="#ffffff", 
+        fg="#6b7280",
+        font=("Segoe UI", 9)
+    ).pack(side=tk.LEFT)
 
     # --- 2. Lista Central (Treeview) ---
     frame_lista = tk.Frame(win, bg="#f4f4f8", padx=10)
     frame_lista.pack(fill=tk.BOTH, expand=True)
 
-    # Columnas: Estado (Check), ID, Nombre, Categoría
     cols = ("Estado", "ID", "Producto", "Categoría")
-    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", selectmode="browse")
+    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", selectmode="browse", style="Modern.Treeview")
     
     tree.heading("Estado", text="Selección")
     tree.heading("ID", text="ID")
@@ -48,8 +76,8 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     
     tree.column("Estado", width=80, anchor="center")
     tree.column("ID", width=60, anchor="center")
-    tree.column("Producto", width=300)
-    tree.column("Categoría", width=150)
+    tree.column("Producto", width=350)
+    tree.column("Categoría", width=180)
     
     ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=ys.set)
@@ -59,14 +87,10 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
 
     # --- Lógica de Datos ---
     def cargar_datos_iniciales():
-        # 1. Traer TODOS los productos activos
         todos = backend.obtener_productos_full()
-        
-        # 2. Traer los que YA tiene asignados este proveedor
         asignados = backend.obtener_productos_por_proveedor(id_proveedor)
         ids_asignados = {p['id_producto'] for p in asignados}
         
-        # 3. Llenar memoria
         memoria_productos.clear()
         for p in todos:
             pid = p.get('id_producto') or p.get('id')
@@ -83,26 +107,19 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
         renderizar_lista()
 
     def renderizar_lista(*args):
-        # Guardar selección actual si la hay
-        # (Omitido para simplificar, vuelve al inicio al filtrar)
-        
         tree.delete(*tree.get_children())
         filtro = var_buscar.get().lower().strip()
         
-        # Ordenar por nombre para facilitar búsqueda
         ids_ordenados = sorted(memoria_productos.keys(), key=lambda k: memoria_productos[k]['nombre'].lower())
         
         for pid in ids_ordenados:
             data = memoria_productos[pid]
             nombre = data['nombre']
             
-            # Filtrado
             if filtro and filtro not in nombre.lower() and filtro not in str(pid):
                 continue
             
-            # Estado visual
-            icono = "☑ SÍ" if data['asignado_actual'] else "☐ NO"
-            # Opcional: cambiar color de fondo si está seleccionado (requiere tags)
+            icono = "☑ SI" if data['asignado_actual'] else "☐ NO"
             
             tree.insert("", tk.END, iid=str(pid), values=(
                 icono,
@@ -118,20 +135,17 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
         sel = tree.selection()
         if not sel: return
         
-        pid_str = sel[0] # El iid es el ID del producto
+        pid_str = sel[0]
         pid = int(pid_str)
         
-        # Invertir estado
         estado_actual = memoria_productos[pid]['asignado_actual']
         memoria_productos[pid]['asignado_actual'] = not estado_actual
         
-        # Actualizar visualmente solo esa fila (para no recargar todo y perder scroll)
         data = memoria_productos[pid]
-        icono = "☑ SÍ" if data['asignado_actual'] else "☐ NO"
+        icono = "☑ SI" if data['asignado_actual'] else "☐ NO"
         
         tree.item(pid_str, values=(icono, pid, data['nombre'], data['categoria']))
 
-    # Bindings
     tree.bind("<Double-1>", toggle_seleccion)
     tree.bind("<space>", toggle_seleccion)
     tree.bind("<Return>", toggle_seleccion)
@@ -143,13 +157,10 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
         
         try:
             for pid, data in memoria_productos.items():
-                # Solo actuar si hubo cambios
                 if data['asignado_actual'] != data['asignado_original']:
                     if data['asignado_actual']:
-                        # Asignar
                         ok = backend.asignar_producto_a_proveedor(id_proveedor, pid)
                     else:
-                        # Quitar
                         ok = backend.quitar_producto_a_proveedor(id_proveedor, pid)
                     
                     if ok: 
@@ -171,13 +182,35 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     frame_btns = tk.Frame(win, bg="#f4f4f8", pady=15)
     frame_btns.pack(fill=tk.X, side=tk.BOTTOM)
     
-    tk.Button(frame_btns, text="Guardar Cambios", command=guardar_cambios, 
-              bg="#4CAF50", fg="white", font=("Segoe UI", 11, "bold"), padx=20).pack(side=tk.RIGHT, padx=20)
+    # 🔥 BOTONES ESTILO NUEVO
+    tk.Button(
+        frame_btns, 
+        text="Cancelar", 
+        command=win.destroy, 
+        bg="#6b7280", 
+        fg="white",
+        font=("Segoe UI", 10),
+        relief="flat",
+        padx=15,
+        pady=10,
+        cursor="hand2",
+        activebackground="#4b5563"
+    ).pack(side=tk.RIGHT, padx=10)
     
-    tk.Button(frame_btns, text="Cancelar", command=win.destroy, 
-              bg="#f44336", fg="white", padx=10).pack(side=tk.RIGHT, padx=10)
+    tk.Button(
+        frame_btns, 
+        text="✓ Guardar Cambios", 
+        command=guardar_cambios, 
+        bg="#10b981", 
+        fg="white", 
+        font=("Segoe UI", 11, "bold"),
+        relief="flat",
+        padx=25,
+        pady=10,
+        cursor="hand2",
+        activebackground="#059669"
+    ).pack(side=tk.RIGHT, padx=10)
 
-    # Init
     cargar_datos_iniciales()
     configurar_navegacion_ventana(win)
     ent_buscar.focus_set()

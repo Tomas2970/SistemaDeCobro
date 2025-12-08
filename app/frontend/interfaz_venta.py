@@ -1,24 +1,16 @@
 # ============================================
 # app/frontend/interfaz_venta.py
-# ¡MEJORADO! Con navegación por teclado completa
-# ✨ NUEVO: Validación de caja abierta para efectivo
+# 🎨 ACTUALIZADO: Estilo de botones unificado
 # ============================================
 from __future__ import annotations
 import tkinter as tk
-from tkinter import messagebox, Toplevel, Listbox, Scrollbar, SINGLE, EXTENDED
-from tkinter import ttk
+from tkinter import messagebox, Toplevel, ttk, Listbox, SINGLE
 from typing import Any
 
-try:
-    from app.frontend.stock_alerts import check_low_stock_after_sale 
-except ImportError:
-    def check_low_stock_after_sale(*args, **kwargs):
-        print("Advertencia: Módulo 'stock_alerts' no encontrado.")
 
 try:
     from app.frontend.stock_event_manager import stock_events
 except ImportError:
-    print("ADVERTENCIA: No se pudo importar stock_event_manager")
     class DummyStockEvents:
         def notificar_cambio_stock(self): pass
     stock_events = DummyStockEvents()
@@ -33,69 +25,114 @@ try:
     import impresora
     imprimir_ticket = impresora.imprimir_ticket
 except ImportError as e:
-    print(f"ADVERTENCIA: impresora.py no encontrado. Error: {e}")
-    def imprimir_ticket(*args, **kwargs):
-        messagebox.showerror("Error de Impresora", "No se encontró el archivo 'impresora.py'.")
-        return False
+    def imprimir_ticket(*args, **kwargs): return False
 
 try:
     from app.frontend.interfaz_forma_pago import mostrar_ventana_pago
 except ImportError as e:
-    print(f"ADVERTENCIA: No se pudo importar interfaz_forma_pago: {e}")
     def mostrar_ventana_pago(parent, total_venta, cliente_seleccionado):
-        messagebox.showerror("Error Crítico", "No se encontró 'interfaz_forma_pago.py'.")
         return {'tipo_pago': 'efectivo', 'monto_pagado': total_venta, 'vuelto': 0}
 
-# ¡NUEVO! Importar navegación por teclado
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 except ImportError:
-    print("ADVERTENCIA: navegacion_teclado_comun.py no encontrado")
-    def configurar_navegacion_ventana(win):
-        pass
+    def configurar_navegacion_ventana(win): pass
 
 
 def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     win = tk.Toplevel(parent)
-    win.title("Interfaz de Venta")
-    win.geometry("820x540") 
+    win.title("Punto de Venta - Supermercado Don Atilio")
+    win.geometry("1000x700") 
     win.config(bg="#f4f4f8")
-    win.resizable(False, False)
+    win.resizable(True, True) 
+
+    # 🔥 Estilos modernos para Treeview
+    style = ttk.Style()
+    style.theme_use('clam')
+    
+    # Estilo para el Treeview
+    style.configure("Modern.Treeview",
+                    background="#ffffff",
+                    foreground="#1f2937",
+                    rowheight=32,
+                    fieldbackground="#ffffff",
+                    borderwidth=0,
+                    font=('Segoe UI', 10))
+    
+    # Estilo para los encabezados (más sutil y moderno)
+    style.configure("Modern.Treeview.Heading",
+                    background="#f3f4f6",
+                    foreground="#374151",
+                    relief="flat",
+                    borderwidth=1,
+                    font=('Segoe UI', 10, 'bold'))
+    
+    style.map("Modern.Treeview.Heading",
+              background=[('active', '#e5e7eb')])
+    
+    # Colores alternados para filas
+    style.map('Modern.Treeview',
+              background=[('selected', '#3b82f6')],
+              foreground=[('selected', 'white')])
+
+    # --- Validadores ---
+    def validar_len_30(t): return len(t) <= 30
+    def validar_len_10(t): return len(t) <= 10
+    
+    vc_30 = (win.register(validar_len_30), '%P')
+    vc_10 = (win.register(validar_len_10), '%P')
 
     items: list[tuple[int | None, str, int, float, str]] = []
     cliente_sel: dict[str, Any] | None = None
     total_venta: float = 0.0 
 
-    # ---------------- Cabecera: Cliente ----------------
-    tk.Label(win, text="Cliente:", bg="#f4f4f8", font=("Helvetica", 10, "bold")).place(x=30, y=20)
-    lbl_cliente = tk.Label(win, text="(ninguno)", bg="#f4f4f8", fg="blue"); lbl_cliente.place(x=100, y=20)
+    # ================================================================
+    # ESTRUCTURA DE LAYOUT (FRAMES)
+    # ================================================================
+    
+    # 1. HEADER (Cliente)
+    frm_header = tk.Frame(win, bg="#ffffff", pady=12, padx=15, relief="flat", bd=0)
+    frm_header.pack(fill="x", padx=10, pady=(10, 5))
 
-    def _upd_cliente():
-        if cliente_sel:
-            lbl_cliente.config(text=f"{cliente_sel.get('id_cliente','')} - {cliente_sel.get('nombre','')}")
-        else:
-            lbl_cliente.config(text="(ninguno)")
+    # 2. INPUTS (Producto y Cantidad)
+    frm_inputs = tk.Frame(win, bg="#f4f4f8", pady=8)
+    frm_inputs.pack(fill="x", padx=10, pady=5)
+
+    # 3. LISTA (Treeview)
+    frm_lista = tk.Frame(win, bg="#f4f4f8", relief="flat", bd=0)
+    frm_lista.pack(fill="both", expand=True, padx=10, pady=5)
+
+    # 4. FOOTER (Total y Botones)
+    frm_footer = tk.Frame(win, bg="#f4f4f8", pady=15, padx=10)
+    frm_footer.pack(fill="x", side="bottom")
+
+    # ================================================================
+    # 1. SECCIÓN CLIENTE
+    # ================================================================
+    tk.Label(frm_header, text="👤 Cliente:", bg="#ffffff", font=("Segoe UI", 11, "bold"), fg="#1f2937").pack(side="left")
+    
+    lbl_cliente = tk.Label(frm_header, text="(Consumidor Final)", bg="#ffffff", font=("Segoe UI", 11), fg="#6b7280")
+    lbl_cliente.pack(side="left", padx=(5, 20))
 
     def abrir_selector_cliente():
         nonlocal cliente_sel
         sel = Toplevel(win)
-        sel.title("Elegir cliente")
-        sel.geometry("460x420")
+        sel.title("Seleccionar Cliente")
+        sel.geometry("500x450")
         sel.config(bg="#f4f4f8")
-        sel.resizable(False, False)
         
         configurar_navegacion_ventana(sel)
         
-        tk.Label(sel, text="Buscar (nombre o DNI):", bg="#f4f4f8").pack(pady=6)
+        tk.Label(sel, text="Buscar (nombre o DNI):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
         var_pat = tk.StringVar()
-        ent = tk.Entry(sel, textvariable=var_pat, width=40)
-        ent.pack(pady=4)
+        ent = tk.Entry(sel, textvariable=var_pat, width=40, font=("Segoe UI", 10))
+        ent.pack(pady=5)
         
-        frame = tk.Frame(sel)
-        frame.pack(expand=True, fill="both", padx=10, pady=10)
-        sc = Scrollbar(frame)
+        frame_list = tk.Frame(sel)
+        frame_list.pack(expand=True, fill="both", padx=15, pady=5)
+        sc = tk.Scrollbar(frame_list)
         sc.pack(side="right", fill="y")
-        lst = Listbox(frame, selectmode=SINGLE, yscrollcommand=sc.set, width=52, height=12)
+        lst = Listbox(frame_list, selectmode=SINGLE, yscrollcommand=sc.set, width=50, height=12, font=("Segoe UI", 10))
         lst.pack(side="left", fill="both", expand=True)
         sc.config(command=lst.yview)
         
@@ -104,8 +141,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         def render(filas):
             lst.delete(0, tk.END)
             for c in filas:
-                dni_texto = c.get('dni') or ""
-                lst.insert(tk.END, f"{c.get('id_cliente','')} | {c.get('nombre','')} | DNI:{dni_texto}")
+                dni_texto = c.get('dni') or "-"
+                lst.insert(tk.END, f"{c.get('id_cliente','')} | {c.get('nombre','')} | DNI: {dni_texto}")
         render(data)
 
         def filtrar(*_):
@@ -117,84 +154,150 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                 render(backend.buscar_cliente_por_nombre(q) if q else data)
         var_pat.trace_add("write", lambda *_: filtrar())
 
-        def tomar(event=None): # Aceptamos event para el bind
+        def tomar(event=None): 
             nonlocal cliente_sel
             sel_idx = lst.curselection()
-            if not sel_idx:
-                return # Si es doble click en vacio no hace nada
+            if not sel_idx: return 
             rid = int(lst.get(sel_idx[0]).split("|")[0].strip())
             cliente_sel = next((c for c in data if int(c.get("id_cliente",-1))==rid), None)
             _upd_cliente()
             sel.destroy()
 
-        # 🔥 AGREGADO: Doble click selecciona
         lst.bind("<Double-1>", tomar)
         lst.bind("<Return>", tomar)
 
-        btn_seleccionar = tk.Button(sel, text="Seleccionar", command=tomar)
-        btn_seleccionar.pack(pady=8)
-        btn_cancelar = tk.Button(sel, text="Cancelar", command=sel.destroy)
-        btn_cancelar.pack()
+        btn_frm = tk.Frame(sel, bg="#f4f4f8")
+        btn_frm.pack(pady=10)
+        
+        # 🔥 BOTONES ESTILO NUEVO
+        btn_sel = tk.Button(btn_frm, text="✓ Seleccionar", command=tomar, 
+                           bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                           relief="flat", padx=20, pady=8, cursor="hand2",
+                           activebackground="#059669", activeforeground="white")
+        btn_sel.pack(side="left", padx=5)
+        
+        btn_canc = tk.Button(btn_frm, text="Cancelar", command=sel.destroy,
+                            bg="#6b7280", fg="white", font=("Segoe UI", 10),
+                            relief="flat", padx=15, pady=8, cursor="hand2",
+                            activebackground="#4b5563", activeforeground="white")
+        btn_canc.pack(side="left", padx=5)
         
         sel.after(100, lambda: ent.focus_set())
-        
         sel.grab_set()
         sel.transient(win)
 
     def quitar_cliente():
-        nonlocal cliente_sel
-        cliente_sel = None
-        _upd_cliente()
+        nonlocal cliente_sel; cliente_sel = None; _upd_cliente()
 
-    btn_elegir_cliente = tk.Button(win, text="Elegir cliente", command=abrir_selector_cliente)
-    btn_elegir_cliente.place(x=320, y=16)
-    btn_quitar_cliente = tk.Button(win, text="Quitar", command=quitar_cliente)
-    btn_quitar_cliente.place(x=420, y=16)
+    def _upd_cliente():
+        if cliente_sel:
+            lbl_cliente.config(text=f"{cliente_sel.get('nombre','')} (ID: {cliente_sel.get('id_cliente','')})", 
+                             fg="#1f2937", font=("Segoe UI", 11, "bold"))
+        else:
+            lbl_cliente.config(text="(Consumidor Final)", fg="#6b7280", font=("Segoe UI", 11, "normal"))
 
-    # ---------------- Entrada de productos (por código/ID) ----------------
-    tk.Label(win, text="Código de barras o ID:", bg="#f4f4f8").place(x=30, y=60)
-    entry_producto = tk.Entry(win, width=34)
-    entry_producto.place(x=190, y=60)
+    # 🔥 BOTONES ESTILO NUEVO (Cliente)
+    btn_cli = tk.Button(frm_header, text="🔍 Buscar Cliente", command=abrir_selector_cliente, 
+                       bg="#3b82f6", fg="white", font=("Segoe UI", 10, "bold"),
+                       relief="flat", padx=15, pady=8, cursor="hand2",
+                       activebackground="#2563eb", activeforeground="white")
+    btn_cli.pack(side="left", padx=5)
     
-    tk.Label(win, text="Cantidad (o Kg):", bg="#f4f4f8").place(x=30, y=95)
-    entry_cantidad = tk.Entry(win, width=10)
+    btn_no_cli = tk.Button(frm_header, text="× Quitar", command=quitar_cliente, 
+                          bg="#ef4444", fg="white", font=("Segoe UI", 9),
+                          relief="flat", padx=12, pady=8, cursor="hand2",
+                          activebackground="#dc2626", activeforeground="white")
+    btn_no_cli.pack(side="left", padx=5)
+
+    # ================================================================
+    # 2. SECCIÓN INPUTS
+    # ================================================================
+    tk.Label(frm_inputs, text="Código / Nombre:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side="left", padx=(0, 5))
+    
+    entry_producto = tk.Entry(frm_inputs, width=30, font=("Segoe UI", 11), validate="key", validatecommand=vc_30)
+    entry_producto.pack(side="left", padx=5)
+    
+    tk.Label(frm_inputs, text="Cant:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side="left", padx=(15, 5))
+    
+    entry_cantidad = tk.Entry(frm_inputs, width=8, font=("Segoe UI", 11), justify="center", validate="key", validatecommand=vc_10)
     entry_cantidad.insert(0, "1")
-    entry_cantidad.place(x=130, y=95)
+    entry_cantidad.pack(side="left", padx=5)
     
-    btn_agregar = tk.Button(win, text="+ Agregar")
-    btn_agregar.place(x=260, y=92)
+    # 🔥 BOTÓN AGREGAR ESTILO NUEVO
+    btn_agregar = tk.Button(frm_inputs, text="+ Agregar", 
+                           bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                           relief="flat", padx=20, pady=8, cursor="hand2",
+                           activebackground="#059669", activeforeground="white")
+    btn_agregar.pack(side="left", padx=10)
 
-    # ---------------- Lista de ítems ----------------
-    lista = tk.Listbox(win, width=96, height=16, selectmode=EXTENDED, font=("Courier New", 10))
-    lista.place(x=30, y=140) 
+    # ================================================================
+    # 3. LISTA (TREEVIEW) - 🔥 ESTILO MODERNO
+    # ================================================================
+    cols = ("ID", "Producto", "Precio", "Cant", "Subtotal")
+    tree = ttk.Treeview(frm_lista, columns=cols, show="headings", style="Modern.Treeview")
+    
+    tree.column("ID", width=50, anchor="center")
+    tree.column("Producto", width=400, anchor="w")
+    tree.column("Precio", width=100, anchor="e")
+    tree.column("Cant", width=80, anchor="center")
+    tree.column("Subtotal", width=120, anchor="e")
+    
+    tree.heading("ID", text="ID")
+    tree.heading("Producto", text="Producto")
+    tree.heading("Precio", text="Precio Unit.")
+    tree.heading("Cant", text="Cant.")
+    tree.heading("Subtotal", text="Subtotal")
+    
+    vsb = ttk.Scrollbar(frm_lista, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=vsb.set)
+    
+    tree.pack(side="left", fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
 
-    btn_quitar = tk.Button(win, text="Quitar seleccionados")
-    btn_quitar.place(x=30, y=470) 
+    # ================================================================
+    # 4. FOOTER (TOTALES Y ACCIONES)
+    # ================================================================
+    
+    # Lado Izquierdo: Botones secundarios
+    # 🔥 BOTÓN QUITAR ESTILO NUEVO
+    btn_quitar = tk.Button(frm_footer, text="🗑️ Quitar Seleccionado", 
+                          bg="#f3f4f6", fg="#ef4444", font=("Segoe UI", 9, "bold"),
+                          relief="flat", padx=15, pady=8, cursor="hand2",
+                          activebackground="#e5e7eb", activeforeground="#dc2626")
+    btn_quitar.pack(side="left")
 
-    total_var = tk.StringVar(value="$ 0.00")
-    tk.Label(win, text="Total:", bg="#f4f4f8").place(x=560, y=470) 
-    tk.Entry(win, width=15, textvariable=total_var, state="readonly").place(x=600, y=470) 
+    # Lado Derecho: Total y Confirmar
+    frame_totales = tk.Frame(frm_footer, bg="#f4f4f8")
+    frame_totales.pack(side="right")
 
-    # ---------------- Utilidades ----------------
+    lbl_total_titulo = tk.Label(frame_totales, text="TOTAL A PAGAR:", font=("Segoe UI", 12), bg="#f4f4f8", fg="#6b7280")
+    lbl_total_titulo.pack(side="left", padx=5)
+    
+    lbl_total_monto = tk.Label(frame_totales, text="$ 0.00", font=("Segoe UI", 24, "bold"), bg="#f4f4f8", fg="#059669")
+    lbl_total_monto.pack(side="left", padx=10)
+
+    # 🔥 BOTONES PRINCIPALES ESTILO NUEVO
+    btn_confirmar = tk.Button(frame_totales, text="✓ COBRAR", 
+                             bg="#10b981", fg="white", font=("Segoe UI", 12, "bold"),
+                             relief="flat", padx=30, pady=10, cursor="hand2",
+                             activebackground="#059669", activeforeground="white")
+    btn_confirmar.pack(side="left", padx=(20, 5))
+    
+    btn_cancelar = tk.Button(frame_totales, text="Cancelar", 
+                            bg="#6b7280", fg="white", font=("Segoe UI", 10),
+                            relief="flat", padx=15, pady=10, cursor="hand2",
+                            activebackground="#4b5563", activeforeground="white")
+    btn_cancelar.pack(side="left", padx=5)
+
+    # ================================================================
+    # LÓGICA
+    # ================================================================
+    
     def _resolver_producto(token: str) -> dict | None:
-        token = token.strip()
-        if not token: return None
-        
-        if token.isdigit():
-            prod = backend.buscar_producto_por_id(int(token))
-            if prod: return prod
-        
-        fn_cod = getattr(backend, "buscar_producto_por_codigo_barras", None)
-        if callable(fn_cod):
-            prod = fn_cod(token)
-            if prod: return prod
-        
-        res = backend.buscar_producto_por_nombre(token) or []
-        return res[0] if res else None
+        return backend.buscar_producto_inteligente(token)
 
     def _stock_en_carrito(id_producto: int | None) -> float: 
-        if id_producto is None:
-            return 0.0
+        if id_producto is None: return 0.0
         return sum(c for pid, _, c, _, _ in items if pid == id_producto)
 
     def _agregar_o_sumar(id_producto: int | None, nombre: str, cant: float, precio: float, codigo: str) -> None: 
@@ -207,78 +310,65 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                 return
         items.append((id_producto, nombre, cant, precio, codigo))
 
-    NAME_W = 56
-    QTY_W = 6 
-    TOT_W = 12
-    def _fmt_line(nombre: str, cant: float, parcial: float) -> str:
-        n = (nombre[:NAME_W] + "…") if len(nombre) > NAME_W else nombre.ljust(NAME_W)
-        
-        if cant == int(cant): 
-            qty_str = f"x{int(cant)}" 
-        else:
-            qty_str = f"x{cant:.3f}" 
-            
-        qty = qty_str.ljust(QTY_W)
-        total = f"${parcial:,.2f}".rjust(TOT_W)
-        return f"{n} {qty} = {total}"
-
     def _refrescar_lista() -> None:
         nonlocal total_venta
-        lista.delete(0, tk.END)
+        for i in tree.get_children(): tree.delete(i)
+        
         total_venta = 0.0 
-        for _, nombre, cant, precio, _ in items:
+        for pid, nombre, cant, precio, _ in items:
             parcial = cant * precio
             total_venta += parcial
-            lista.insert(tk.END, _fmt_line(nombre, cant, parcial))
-        total_var.set(f"$ {total_venta:,.2f}")
+            
+            cant_str = f"{int(cant)}" if cant == int(cant) else f"{cant:.3f}"
+            
+            tree.insert("", "end", values=(
+                pid if pid else "-",
+                nombre,
+                f"$ {precio:,.2f}",
+                cant_str,
+                f"$ {parcial:,.2f}"
+            ))
+            
+        lbl_total_monto.config(text=f"$ {total_venta:,.2f}")
 
-    def quitar_seleccion():
-        sel = list(lista.curselection())
+    def quitar_seleccion(event=None):
+        sel = tree.selection()
         if not sel: return
-        sel.reverse()
-        for i in sel: items.pop(i)
+        indices = []
+        for s in sel:
+            idx = tree.index(s)
+            indices.append(idx)
+        
+        indices.sort(reverse=True)
+        for i in indices:
+            items.pop(i)
+        
         _refrescar_lista()
 
     btn_quitar.config(command=quitar_seleccion)
+    tree.bind("<Delete>", quitar_seleccion)
     
     def _reiniciar_venta_completa():
-        """Limpia la pantalla para una nueva venta."""
         nonlocal items, cliente_sel, total_venta
-        
-        items.clear()
-        cliente_sel = None
-        total_venta = 0.0
-        
-        _refrescar_lista() 
-        _upd_cliente()     
-        
-        entry_producto.delete(0, tk.END)
-        entry_cantidad.delete(0, tk.END)
-        entry_cantidad.insert(0, "1")
-        
-        entry_producto.focus_set()
+        items.clear(); cliente_sel = None; total_venta = 0.0
+        _refrescar_lista(); _upd_cliente()     
+        entry_producto.delete(0, tk.END); entry_cantidad.delete(0, tk.END)
+        entry_cantidad.insert(0, "1"); entry_producto.focus_set()
 
     def manejar_escaneo_producto(event=None):
-        """
-        Maneja el escaneo/búsqueda de producto.
-        Si es pesable, NO lo agrega automáticamente sino que pone foco en cantidad.
-        """
         token = entry_producto.get().strip()
         if not token:
-            messagebox.showwarning("Atención", "Ingrese un código, ID o nombre de producto.", parent=win)
+            messagebox.showwarning("Atención", "Ingrese un código, ID o nombre.", parent=win)
             return
-        
         prod = _resolver_producto(token)
         if not prod:
             messagebox.showwarning("No encontrado", "No se encontró el producto.", parent=win)
             return
-
-        es_pesable = bool(prod.get("es_pesable", False))
         
+        es_pesable = bool(prod.get("es_pesable", False))
         if es_pesable:
             entry_cantidad.delete(0, tk.END)
             entry_cantidad.focus_set()
-            
             entry_producto.config(bg="#fff3cd")
             win.after(500, lambda: entry_producto.config(bg="white"))
             return
@@ -290,39 +380,23 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     def agregar_producto():
         token = entry_producto.get().strip()
         if not token:
-            messagebox.showwarning("Atención", "Ingrese un código, ID o nombre de producto.", parent=win)
-            return
-        
+            messagebox.showwarning("Atención", "Ingrese un código.", parent=win); return
         prod = _resolver_producto(token)
         if not prod:
-            messagebox.showwarning("No encontrado", "No se encontró el producto.", parent=win)
-            return
+            messagebox.showwarning("No encontrado", "No se encontró el producto.", parent=win); return
 
         es_pesable = bool(prod.get("es_pesable", False))
         cantidad_str = entry_cantidad.get().strip().replace(",", ".") or "1"
-        
         try:
-            if es_pesable:
-                cant = float(cantidad_str)
+            if es_pesable: cant = float(cantidad_str)
             else:
                 cant_float = float(cantidad_str)
                 if cant_float != int(cant_float):
-                    messagebox.showwarning("Error de Cantidad", 
-                        f"El producto '{prod.get('nombre')}' no es pesable.\n"
-                        "Solo se vende por unidades enteras (ej: 1, 2, 3).", parent=win)
-                    return
+                    messagebox.showwarning("Error", "Producto no pesable. Use enteros.", parent=win); return
                 cant = int(cant_float)
-                
-            if cant <= 0: raise ValueError("Cantidad debe ser positiva")
-                
+            if cant <= 0: raise ValueError
         except ValueError:
-            msg = "Cantidad inválida."
-            if es_pesable:
-                msg += " Use '1' o '1.250'."
-            else:
-                msg += " Use solo números enteros."
-            messagebox.showwarning("Atención", msg, parent=win)
-            return
+            messagebox.showwarning("Atención", "Cantidad inválida.", parent=win); return
 
         pid = int(prod.get("id_producto") or prod.get("id"))
         nombre = str(prod.get("nombre",""))
@@ -332,22 +406,24 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
 
         ya_en_carrito = _stock_en_carrito(pid)
         disp_para_agregar = stock_actual - ya_en_carrito
+        
         if cant > disp_para_agregar:
-            message = (
-                f"Stock insuficiente para '{nombre}'.\n\n"
-                f"Disponible: {stock_actual:.3f}\n"
-                f"En carrito: {ya_en_carrito:.3f}\n"
-                f"Máximo agregable: {max(0, disp_para_agregar):.3f}"
-            )
-            messagebox.showwarning("Sin stock", message, parent=win)
-            return
+             messagebox.showerror(
+                 "Stock Insuficiente", 
+                 f"No hay stock suficiente para agregar {cant} unidades.\n\n"
+                 f"• Disponible real: {stock_actual:.3f}\n"
+                 f"• Ya en carrito: {ya_en_carrito:.3f}\n"
+                 f"• Máximo agregable: {max(0, disp_para_agregar):.3f}",
+                 parent=win
+             )
+             return
 
         _agregar_o_sumar(pid, nombre, cant, precio, codigo)
         _refrescar_lista()
+        
         entry_producto.delete(0, tk.END)
         entry_cantidad.delete(0, tk.END)
         entry_cantidad.insert(0, "1")
-        
         entry_producto.focus_set()
 
     btn_agregar.config(command=agregar_producto)
@@ -355,50 +431,30 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     
     def confirmar_venta():
         if not items:
-            messagebox.showwarning("Atención", "Agregue al menos un producto.", parent=win)
-            return
+            messagebox.showwarning("Atención", "Carrito vacío.", parent=win); return
         
-        info_pago = mostrar_ventana_pago(
-            parent=win,
-            total_venta=total_venta,
-            cliente_seleccionado=(cliente_sel is not None)
-        )
-        
-        if info_pago is None:
-            return
+        info_pago = mostrar_ventana_pago(parent=win, total_venta=total_venta, cliente_seleccionado=(cliente_sel is not None))
+        if info_pago is None: return
 
         tipo_pago = info_pago['tipo_pago']
 
-        # 🔥 NUEVA VALIDACIÓN: Si es efectivo, verificar caja abierta
         if tipo_pago == 'efectivo':
             try:
-                caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
+                id_usuario = usuario.get("id_usuario") or usuario.get("id", 0) 
+                caja_abierta = backend.obtener_session_abierta(id_usuario=id_usuario)
                 
                 if not caja_abierta:
                     messagebox.showwarning(
-                        "⚠️ Caja Cerrada",
-                        "No puedes realizar ventas en EFECTIVO sin abrir tu caja.\n\n"
-                        "📍 Ve a: Menú Principal → Control de Caja → Abrir Caja\n\n"
-                        "💡 También puedes usar otro método de pago:\n"
-                        "   • Tarjeta\n"
-                        "   • Transferencia\n"
-                        "   • Cuenta Corriente (si hay cliente)",
+                        "⚠️ Caja Cerrada", 
+                        "No se puede registrar una venta en EFECTIVO sin abrir la caja primero.", 
                         parent=win
                     )
-                    return  # NO permite continuar con la venta
-                    
+                    return 
             except Exception as e:
-                messagebox.showerror(
-                    "Error de Validación",
-                    f"No se pudo verificar el estado de la caja:\n{e}\n\n"
-                    "La venta no puede continuar.",
-                    parent=win
-                )
-                return
+                messagebox.showerror("Error", f"Error verificación caja: {e}", parent=win); return
 
         if tipo_pago == "cuenta_corriente" and cliente_sel is None:
-            messagebox.showerror("Error", "No se puede usar Cuenta Corriente sin un cliente seleccionado.", parent=win)
-            return
+            messagebox.showerror("Error", "Se requiere cliente para Cta. Cte.", parent=win); return
 
         if tipo_pago == "cuenta_corriente":
             try:
@@ -406,105 +462,60 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                 cuenta = backend.obtener_cuenta_por_cliente(id_cli) 
                 saldo_actual = float(cuenta.get('saldo', 0.0))
                 limite_credito = float(cuenta.get('limite_credito', 0.0))
+                
                 saldo_proyectado = saldo_actual - total_venta 
                 
                 if saldo_proyectado < -limite_credito:
-                    disponible = limite_credito + saldo_actual 
+                    es_deuda = saldo_actual < 0
+                    limite_credito_abs = abs(limite_credito)
+                    credito_disponible_bruto = limite_credito_abs + saldo_actual 
+                    monto_faltante = total_venta - credito_disponible_bruto
+                    
                     msg = (
-                        f"¡Límite de crédito excedido para {cliente_sel.get('nombre')}!\n\n"
-                        f"Crédito Disponible: $ {disponible:,.2f}\n"
-                        f"Esta venta de $ {total_venta:,.2f} NO puede ser procesada."
+                        "Crédito Insuficiente (Límite Excedido)\n\n"
+                        f"• Límite Total de Crédito: $ {limite_credito_abs:,.2f}\n"
+                        f"• Saldo Actual: {'-' if es_deuda else '+'} $ {abs(saldo_actual):,.2f} ({'Deuda Pendiente' if es_deuda else 'A Favor'})\n"
+                        f"• **Crédito Disponible: $ {max(0, credito_disponible_bruto):,.2f}**\n\n"
+                        f"La venta de $ {total_venta:,.2f} excede el límite por $ {monto_faltante:,.2f}."
                     )
-                    messagebox.showerror("Límite Excedido", msg, parent=win)
+                    
+                    messagebox.showerror("⚠️ Límite de Crédito Excedido", msg, parent=win)
                     return 
+                    
             except Exception as e:
-                messagebox.showerror("Error de Verificación", f"No se pudo verificar el límite de crédito:\n{e}", parent=win)
-                return
+                messagebox.showerror("Error", f"Error verificación crédito: {e}", parent=win); return
 
         id_usuario = usuario.get("id_usuario") or usuario.get("id", 0)
         id_cliente = cliente_sel.get("id_cliente") if cliente_sel else None
 
         try:
-            id_venta = backend.registrar_venta_completa(
-                id_usuario=id_usuario,
-                id_cliente=id_cliente,
-                items=items,
-                tipo_pago=tipo_pago
-            )
-            
+            id_venta = backend.registrar_venta_completa(id_usuario=id_usuario, id_cliente=id_cliente, items=items, tipo_pago=tipo_pago)
             if not id_venta:
-                messagebox.showerror("Error", "La venta no pudo ser registrada (ID nulo).", parent=win)
-                return
-
+                messagebox.showerror("Error", "ID de venta nulo.", parent=win); return
         except Exception as e:
-            messagebox.showerror("Error al Guardar Venta", f"La venta fue revertida.\n\nMotivo: {e}", parent=win)
-            return
+            messagebox.showerror("Error", f"Venta revertida.\n{e}", parent=win); return
 
         try:
-            msg_pregunta = f"Venta #{id_venta} registrada.\n¿Desea imprimir el ticket?"
-            if messagebox.askyesno("Venta Registrada", msg_pregunta, parent=win):
-                
-                args_impresora = {
-                    "id_venta": id_venta,
-                    "items_de_la_venta": items,
-                    "nombre_vendedor": usuario.get("nombre", "Vendedor"),
-                    "metodo_pago": info_pago['tipo_pago'],
-                    "monto_entregado": info_pago.get('monto_pagado', 0.0),
-                    "vuelto": info_pago.get('vuelto', 0.0),
-                    "cliente": cliente_sel.get('nombre', 'Consumidor Final') if cliente_sel else 'Consumidor Final'
-                }
-                
-                imprimir_ticket(**args_impresora)
-                
+            if messagebox.askyesno("Venta Registrada", "Imprimir ticket?", parent=win):
+                imprimir_ticket(id_venta=id_venta, items_de_la_venta=items, nombre_vendedor=usuario.get("nombre", "Vendedor"), 
+                                metodo_pago=info_pago['tipo_pago'], monto_entregado=info_pago.get('monto_pagado', 0.0), 
+                                vuelto=info_pago.get('vuelto', 0.0), cliente=cliente_sel.get('nombre', 'Consumidor Final') if cliente_sel else 'Consumidor Final')
         except Exception as e:
-            messagebox.showerror("Error de Impresión", f"La venta se guardó, pero no se pudo imprimir el ticket.\n\nError: {e}", parent=win)
+            messagebox.showerror("Error", f"Error Impresión: {e}", parent=win)
 
-        mensaje = f"✓ Venta #{id_venta} registrada exitosamente\n\n"
-        mensaje += f"Total: ${total_venta:,.2f}\n"
-        
-        tipos_texto = {
-            'efectivo': 'Efectivo',
-            'tarjeta': 'Tarjeta Déb/Créd',
-            'transferencia': 'Transferencia',
-            'cuenta_corriente': 'Cuenta Corriente'
-        }
-        mensaje += f"Método: {tipos_texto.get(tipo_pago, tipo_pago)}\n"
-        
-        if tipo_pago == 'efectivo':
-            mensaje += f"Paga con: ${info_pago['monto_pagado']:,.2f}\n"
-            if info_pago['vuelto'] > 0:
-                mensaje += f"\n💵 VUELTO: ${info_pago['vuelto']:,.2f}"
-        
-        messagebox.showinfo("Venta Exitosa", mensaje, parent=win)
-
+        messagebox.showinfo("Venta Exitosa", f"Venta #{id_venta} OK.\nTotal: ${total_venta:,.2f}", parent=win)
         _reiniciar_venta_completa()
-        
         win.after(100, lambda: stock_events.notificar_cambio_stock())
 
-    btn_confirmar = tk.Button(win, text="Confirmar Venta", bg="#4CAF50", fg="white", command=confirmar_venta)
-    btn_confirmar.place(x=640, y=16)
-    
-    btn_cancelar = tk.Button(win, text="Cancelar", bg="#f44336", fg="white", command=win.destroy)
-    btn_cancelar.place(x=755, y=16)
+    btn_confirmar.config(command=confirmar_venta)
+    btn_cancelar.config(command=win.destroy)
 
     _upd_cliente()
     
-    # ¡NUEVO! Atajos de teclado globales
-    def atajo_confirmar(event):
-        confirmar_venta()
-        return "break"
-
-    def atajo_cancelar(event):
-        win.destroy()
-        return "break"
-
-    win.bind("<r>", atajo_confirmar)
-    win.bind("<R>", atajo_confirmar)  # Mayúscula también
-    win.bind("<c>", atajo_cancelar)
-    win.bind("<C>", atajo_cancelar)
+    win.bind("<F2>", lambda e: abrir_selector_cliente())
+    win.bind("<F5>", lambda e: confirmar_venta())
+    win.bind("<Escape>", lambda e: win.destroy())
     
-    # ¡NUEVO! Aplicar navegación por teclado a la ventana principal
-    # Con confirmación para evitar cerrar accidentalmente durante una venta
-    configurar_navegacion_ventana(win, confirmar_cierre=True)
-    
+    configurar_navegacion_ventana(win)
+    win.after(50, lambda: entry_producto.focus_set())
     win.grab_set()

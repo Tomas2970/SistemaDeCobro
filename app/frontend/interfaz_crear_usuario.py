@@ -13,10 +13,11 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class CrearEditarUsuario:
-    def __init__(self, parent: tk.Misc, backend, usuario_existente: Optional[dict] = None):
+    def __init__(self, parent: tk.Misc, backend, usuario_existente: Optional[dict] = None, callback_on_save: Optional[callable] = None):
         self.parent = parent
         self.backend = backend
         self.usuario_existente = usuario_existente
+        self.callback_on_save = callback_on_save
         
         self.win = tk.Toplevel(parent)
         self.win.config(bg="#f4f4f8")
@@ -30,7 +31,7 @@ class CrearEditarUsuario:
         configurar_navegacion_ventana(self.win)
         
         if self.usuario_existente:
-            self.win.after(50, lambda: self.combo_rol.focus_set())
+            self.win.after(50, lambda: self.entry_nombre.focus_set())
         else:
             self.win.after(50, lambda: self.entry_nombre.focus_set())
         
@@ -41,13 +42,20 @@ class CrearEditarUsuario:
         frame = tk.Frame(self.win, bg="#f4f4f8")
         frame.pack(padx=20, pady=20, fill="both", expand=True)
 
+        # VALIDACIÓN: Límite 20 chars. 
+        def check_user(t): return len(t) <= 20
+        vc_user = (self.win.register(check_user), '%P')
+
         row = 0
-        tk.Label(frame, text="Nombre (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
+        
+        # CAMPO NOMBRE (Ahora editable en modo edición)
+        tk.Label(frame, text="👤 Nombre (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
         self.var_nombre = tk.StringVar()
-        self.entry_nombre = tk.Entry(frame, textvariable=self.var_nombre, width=40)
+        self.entry_nombre = tk.Entry(frame, textvariable=self.var_nombre, width=40, validate="key", validatecommand=vc_user)
         self.entry_nombre.grid(row=row, column=1, pady=5)
         row += 1
 
+        # CAMPO ROL
         tk.Label(frame, text="Rol (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
         self.combo_rol = ttk.Combobox(frame, state="readonly", width=38)
         self.combo_rol.grid(row=row, column=1, pady=5)
@@ -55,7 +63,6 @@ class CrearEditarUsuario:
         
         if self.usuario_existente:
             self.win.title("Editar Usuario")
-            self.entry_nombre.config(state="readonly")
             
             self.btn_reset_pass = tk.Button(frame, text="Resetear Contraseña", command=self.resetear_password, bg="#ff9800", fg="white")
             self.btn_reset_pass.grid(row=row, column=1, pady=10, sticky="w")
@@ -65,17 +72,16 @@ class CrearEditarUsuario:
             self.win.title("Crear Nuevo Usuario")
             tk.Label(frame, text="Contraseña (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
             self.var_pass1 = tk.StringVar()
-            self.entry_pass1 = tk.Entry(frame, textvariable=self.var_pass1, width=40, show="*")
+            self.entry_pass1 = tk.Entry(frame, textvariable=self.var_pass1, width=40, show="*", validate="key", validatecommand=vc_user)
             self.entry_pass1.grid(row=row, column=1, pady=5)
             row += 1
             
             tk.Label(frame, text="Confirmar Contraseña (*):", bg="#f4f4f8").grid(row=row, column=0, sticky="e", pady=5, padx=5)
             self.var_pass2 = tk.StringVar()
-            self.entry_pass2 = tk.Entry(frame, textvariable=self.var_pass2, width=40, show="*")
+            self.entry_pass2 = tk.Entry(frame, textvariable=self.var_pass2, width=40, show="*", validate="key", validatecommand=vc_user)
             self.entry_pass2.grid(row=row, column=1, pady=5)
             row += 1
 
-            # --- NUEVO: CHECKBOX MOSTRAR CONTRASEÑA ---
             self.var_mostrar = tk.BooleanVar(value=False)
             self.chk_mostrar = tk.Checkbutton(frame, text="Mostrar contraseña", variable=self.var_mostrar, 
                                               command=self.toggle_password, bg="#f4f4f8")
@@ -92,10 +98,9 @@ class CrearEditarUsuario:
         self.btn_cancelar.pack(side=tk.LEFT, padx=10)
 
     def toggle_password(self):
-        """Alterna entre ver asteriscos o texto plano"""
         show_char = "" if self.var_mostrar.get() else "*"
-        self.entry_pass1.config(show=show_char)
-        self.entry_pass2.config(show=show_char)
+        if hasattr(self, 'entry_pass1'): self.entry_pass1.config(show=show_char)
+        if hasattr(self, 'entry_pass2'): self.entry_pass2.config(show=show_char)
 
     def cargar_datos_iniciales(self):
         try:
@@ -112,7 +117,7 @@ class CrearEditarUsuario:
             rol_nombre_actual = self.usuario_existente.get('rol_nombre', '')
             if rol_nombre_actual in self.roles_map:
                 self.combo_rol.set(rol_nombre_actual)
-            self.btn_guardar.config(text="Actualizar Rol")
+            self.btn_guardar.config(text="Actualizar Usuario")
         else:
             if self.combo_rol["values"]: self.combo_rol.current(0)
 
@@ -124,22 +129,26 @@ class CrearEditarUsuario:
             messagebox.showwarning("Campos vacíos", "Los campos Nombre y Rol son obligatorios.", parent=self.win)
             return
             
-        # --- VALIDACIÓN NUEVA: NO NÚMEROS EN NOMBRE ---
-        if any(char.isdigit() for char in nombre):
-            messagebox.showwarning("Error", "El nombre de usuario no puede contener números.", parent=self.win)
-            return
-
         id_rol = self.roles_map.get(rol_nombre)
         
         try:
             if self.usuario_existente:
                 id_usuario = self.usuario_existente.get('id_usuario')
-                ok = self.backend.actualizar_rol_usuario(id_usuario, id_rol)
-                if ok:
-                    messagebox.showinfo("Éxito", f"Rol de '{nombre}' actualizado.", parent=self.win)
+                
+                # Intentar actualizar nombre y rol/nombre_rol al mismo tiempo
+                ok_rol_nombre = self.backend.actualizar_rol_usuario(
+                    id_usuario, 
+                    id_rol, 
+                    nuevo_nombre=nombre
+                )
+                
+                if ok_rol_nombre:
+                    messagebox.showinfo("Éxito", f"Usuario '{nombre}' actualizado.", parent=self.win)
+                    if self.callback_on_save: 
+                        self.callback_on_save()
                     self.win.destroy()
                 else:
-                    messagebox.showerror("Error", "No se pudo actualizar el rol.", parent=self.win)
+                    messagebox.showerror("Error", "No se pudo actualizar el usuario. Verifique el nombre y la conexión.", parent=self.win)
             else:
                 pass1 = self.var_pass1.get()
                 pass2 = self.var_pass2.get()
@@ -154,13 +163,24 @@ class CrearEditarUsuario:
                 nuevo_id = self.backend.crear_usuario(nombre, pass1, id_rol)
                 if nuevo_id:
                     messagebox.showinfo("Éxito", f"Usuario '{nombre}' creado.", parent=self.win)
+                    if self.callback_on_save: 
+                        self.callback_on_save()
                     self.win.destroy()
                 else:
                     messagebox.showerror("Error", "No se pudo crear (¿Nombre duplicado?).", parent=self.win)
 
+        except ValueError as ve:
+            # Captura del error específico de duplicado
+            if "NOMBRE_DUPLICADO" in str(ve):
+                messagebox.showerror("Error de Duplicado", 
+                                     f"El nombre de usuario '{nombre}' ya existe. Elija otro.", 
+                                     parent=self.win)
+            else:
+                messagebox.showerror("Error", f"Error de Validación:\n{ve}", parent=self.win)
+        
         except Exception as e:
             logger.exception("Error al guardar usuario")
-            messagebox.showerror("Error", f"Ocurrió un error inesperado:\n{e}", parent=self.win)
+            messagebox.showerror("Error Crítico", f"Ocurrió un error inesperado:\n{e}", parent=self.win)
 
     def resetear_password(self):
         if not self.usuario_existente: return
@@ -175,12 +195,10 @@ class CrearEditarUsuario:
         except Exception as e:
             messagebox.showerror("Error", f"Error: {e}", parent=self.win)
 
-def ui_crear_usuario(parent: tk.Misc, backend, id_usuario_a_editar=None):
-    # Wrapper para mantener compatibilidad si se llamaba con ID en lugar de dict
+def ui_crear_usuario(parent: tk.Misc, backend, id_usuario_a_editar=None, callback_on_save=None):
     usuario_existente = None
     if id_usuario_a_editar:
-        # Buscamos el usuario en la lista actual del backend (truco rápido)
         users = backend.obtener_usuarios_con_rol()
         usuario_existente = next((u for u in users if u['id_usuario'] == id_usuario_a_editar), None)
     
-    CrearEditarUsuario(parent, backend, usuario_existente)
+    CrearEditarUsuario(parent, backend, usuario_existente, callback_on_save=callback_on_save)

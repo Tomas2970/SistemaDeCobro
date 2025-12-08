@@ -1,4 +1,6 @@
-# app/frontend/interfaz_gestion_proveedores.py
+# ============================================
+# ARCHIVO 3: interfaz_gestion_proveedores.py
+# ============================================
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox, Toplevel
@@ -24,7 +26,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     
     win = tk.Toplevel(parent)
     win.title("Gestión de Proveedores")
-    win.geometry("1050x650") 
+    win.geometry("1250x650")
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
     
@@ -32,17 +34,16 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     frame_busqueda = tk.Frame(win, bg="#f4f4f8")
     frame_busqueda.pack(pady=(15,0), padx=20, fill="x")
     
-    tk.Label(frame_busqueda, text="🔍 Buscar (Nombre/Empresa):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side=tk.LEFT)
+    tk.Label(frame_busqueda, text="🔍", bg="#f4f4f8", font=("Segoe UI", 14)).pack(side=tk.LEFT)
+    tk.Label(frame_busqueda, text="Buscar:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(5,10))
     var_busqueda = tk.StringVar()
-    entry_busqueda = tk.Entry(frame_busqueda, textvariable=var_busqueda, width=35)
-    entry_busqueda.pack(side=tk.LEFT, padx=10)
-    
-    # -------------------------
+    entry_busqueda = tk.Entry(frame_busqueda, textvariable=var_busqueda, width=35, font=("Segoe UI", 10))
+    entry_busqueda.pack(side=tk.LEFT)
 
     frame_lista = tk.Frame(win, bg="#f4f4f8")
     frame_lista.pack(pady=10, padx=20, fill="both", expand=True)
 
-    cols = ["ID", "Nombre", "Empresa", "Teléfono", "Email", "Saldo (Deuda)", "Activo"]
+    cols = ["ID", "Nombre", "Empresa", "DNI", "CUIT", "Teléfono", "Email", "Dirección", "Saldo (Deuda)", "Activo"]
     tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=15)
     tree.pack(side="left", fill="both", expand=True)
     
@@ -52,12 +53,15 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     
     for c in cols: tree.heading(c, text=c)
     
-    tree.column("ID", width=50, anchor="center")
-    tree.column("Nombre", width=180)
-    tree.column("Empresa", width=150)
+    tree.column("ID", width=40, anchor="center")
+    tree.column("Nombre", width=120) 
+    tree.column("Empresa", width=120) 
+    tree.column("DNI", width=80)
+    tree.column("CUIT", width=100)
     tree.column("Teléfono", width=100)
-    tree.column("Email", width=150)
-    tree.column("Saldo (Deuda)", width=120, anchor="e") 
+    tree.column("Email", width=140)
+    tree.column("Dirección", width=150)
+    tree.column("Saldo (Deuda)", width=100, anchor="e")
     tree.column("Activo", width=60, anchor="center")
     
     tree.tag_configure("deuda", foreground="#dc2626")
@@ -65,8 +69,6 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     tree.tag_configure("cero", foreground="black")
 
     var_mostrar_inactivos = tk.BooleanVar(value=False)
-
-    # Cache de proveedores para filtrar sin ir a BD cada vez
     todos_proveedores = []
 
     def cargar_datos():
@@ -75,7 +77,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             incluir_inactivos = var_mostrar_inactivos.get()
             todos_proveedores = backend.obtener_proveedores(incluir_inactivos=incluir_inactivos)
             todos_proveedores.sort(key=lambda x: float(x.get('saldo', 0.0)))
-            filtrar_lista() # Aplicar filtro actual
+            filtrar_lista()
         except Exception as e:
             messagebox.showerror("Error", f"Error cargando: {e}", parent=win)
 
@@ -86,9 +88,10 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         for p in todos_proveedores:
             nombre = str(p.get('nombre', '')).lower()
             empresa = str(p.get('empresa', '')).lower()
+            dni = str(p.get('dni', '')).lower()
+            cuit = str(p.get('cuit', '')).lower()
             
-            # Filtro simple
-            if query in nombre or query in empresa:
+            if query in nombre or query in empresa or query in dni or query in cuit:
                 
                 estado = "SI" if p.get('activo') else "NO"
                 saldo = float(p.get('saldo', 0.0))
@@ -104,20 +107,22 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
                     p.get('id_proveedor', ''), 
                     p.get('nombre', ''), 
                     p.get('empresa', ''),
+                    p.get('dni', '-'),
+                    p.get('cuit', '-'),
                     p.get('telefono', ''), 
                     p.get('email', ''), 
+                    p.get('direccion', '-'),
                     saldo_vis, 
                     estado
                 ], tags=(tag,))
 
     var_busqueda.trace_add("write", filtrar_lista)
 
-    frame_botones = tk.Frame(win, bg="#f4f4f8")
-    frame_botones.pack(pady=15, fill="x")
+    def recargar_lista_callback():
+        win.after(100, cargar_datos)
 
     def accion_nuevo():
-        ui_crear_proveedor(win, backend)
-        win.after(100, cargar_datos)
+        ui_crear_proveedor(win, backend, callback_on_save=recargar_lista_callback)
 
     def abrir_editar_proveedor():
         sel = tree.selection()
@@ -125,8 +130,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             messagebox.showwarning("Atención", "Seleccione un proveedor.", parent=win)
             return
         item = tree.item(sel[0], "values")
-        ui_crear_proveedor(win, backend, id_proveedor_a_editar=int(item[0]))
-        cargar_datos()
+        ui_crear_proveedor(win, backend, id_proveedor_a_editar=int(item[0]), callback_on_save=recargar_lista_callback)
     
     def on_doble_click(event):
         abrir_editar_proveedor()
@@ -176,9 +180,16 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
                 messagebox.showinfo("Éxito", "Pago registrado.", parent=pop)
                 pop.destroy()
                 cargar_datos()
-            except ValueError as ve: messagebox.showwarning("Error", str(ve), parent=pop)
-            except Exception as e: messagebox.showerror("Error Crítico", str(e), parent=pop)
-
+                
+            except ValueError as ve:
+                error_msg = str(ve)
+                if "SALDO INSUFICIENTE" in error_msg:
+                    messagebox.showerror("Saldo Insuficiente en Caja", error_msg, parent=pop)
+                else:
+                    messagebox.showwarning("Error", error_msg, parent=pop)
+            except Exception as e:
+                messagebox.showerror("Error Crítico", str(e), parent=pop)
+                
         tk.Button(pop, text="CONFIRMAR PAGO", command=confirmar_pago, bg="#16a34a", fg="white").pack(pady=20)
         configurar_navegacion_ventana(pop)
 
@@ -197,6 +208,12 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         sel = tree.selection()
         if not sel: return
         item = tree.item(sel[0], "values")
+        
+        rol_id = usuario_actual.get('id_rol')
+        if rol_id != 1:
+            messagebox.showwarning("Acceso Denegado", "Solo el administrador puede desactivar proveedores.", parent=win)
+            return
+            
         if messagebox.askyesno("Confirmar", f"¿Desactivar a '{item[1]}'?", parent=win):
             try:
                 if backend.eliminar_proveedor_logico(int(item[0])):
@@ -205,15 +222,86 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             except Exception as e:
                 messagebox.showerror("Error", f"{e}", parent=win)
 
-    tk.Button(frame_botones, text="+ Nuevo", command=accion_nuevo, bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=10)
-    tk.Button(frame_botones, text="✎ Editar", command=abrir_editar_proveedor, bg="#FFC107").pack(side=tk.LEFT, padx=5)
-    tk.Button(frame_botones, text="💲 PAGAR DEUDA", command=abrir_pagar_deuda, bg="#0ea5e9", fg="white", font=("bold", 9)).pack(side=tk.LEFT, padx=10)
-    tk.Button(frame_botones, text="📦 Productos", command=abrir_asignar_productos, bg="#7c3aed", fg="white").pack(side=tk.LEFT, padx=5)
+    def activar_proveedor():
+        sel = tree.selection()
+        if not sel: return
+        item = tree.item(sel[0], "values")
+        
+        rol_id = usuario_actual.get('id_rol')
+        if rol_id != 1:
+            messagebox.showwarning("Acceso Denegado", "Solo el administrador puede activar proveedores.", parent=win)
+            return
+
+        if item[9] == 'SI':
+             messagebox.showwarning("Atención", "El proveedor ya está activo.", parent=win)
+             return
+
+        if messagebox.askyesno("Confirmar", f"¿Activar a '{item[1]}'?", parent=win):
+            try:
+                if backend.activar_proveedor_logico(int(item[0])):
+                    messagebox.showinfo("Éxito", "Activado.", parent=win)
+                    cargar_datos()
+            except Exception as e:
+                messagebox.showerror("Error", f"{e}", parent=win)
+
+    # 🔥 FRAME DE BOTONES MODERNO
+    frame_botones = tk.Frame(win, bg="#f4f4f8")
+    frame_botones.pack(pady=15, fill="x", padx=20)
+
+    frame_acciones = tk.Frame(frame_botones, bg="#f4f4f8")
+    frame_acciones.pack(side=tk.LEFT)
+
+    tk.Button(
+        frame_acciones, text="➕ Nuevo", command=accion_nuevo, 
+        bg="#16a34a", fg="white", font=("Segoe UI", 10, "bold"), 
+        relief="flat", padx=15, pady=8, cursor="hand2"
+    ).pack(side=tk.LEFT, padx=5)
     
-    tk.Checkbutton(frame_botones, text="Inactivos", variable=var_mostrar_inactivos, bg="#f4f4f8", command=cargar_datos).pack(side=tk.LEFT, padx=20)
+    tk.Button(
+        frame_acciones, text="💳 PAGAR", command=abrir_pagar_deuda, 
+        bg="#0ea5e9", fg="white", font=("Segoe UI", 9, "bold"), 
+        relief="flat", padx=12, pady=7, cursor="hand2"
+    ).pack(side=tk.LEFT, padx=5)
     
-    tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#607D8B", fg="white").pack(side=tk.RIGHT, padx=10)
-    tk.Button(frame_botones, text="Borrar", command=desactivar_proveedor, bg="#f44336", fg="white").pack(side=tk.RIGHT, padx=5)
+    tk.Button(
+        frame_acciones, text="📦 Productos", command=abrir_asignar_productos, 
+        bg="#7c3aed", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=12, pady=7, cursor="hand2"
+    ).pack(side=tk.LEFT, padx=5)
+    
+    tk.Button(
+        frame_acciones, text="🗑️ Desactivar", command=desactivar_proveedor, 
+        bg="#dc2626", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=12, pady=7, cursor="hand2"
+    ).pack(side=tk.LEFT, padx=5)
+
+    # 🔥 Botón Activar CONDICIONAL
+    btn_activar = tk.Button(
+        frame_acciones, text="✅ Activar", command=activar_proveedor, 
+        bg="#059669", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=12, pady=7, cursor="hand2"
+    )
+
+    def toggle_mostrar_inactivos():
+        cargar_datos()
+        if var_mostrar_inactivos.get():
+            btn_activar.pack(side=tk.LEFT, padx=5)
+        else:
+            btn_activar.pack_forget()
+
+    frame_filtros = tk.Frame(frame_botones, bg="#f4f4f8")
+    frame_filtros.pack(side=tk.LEFT, padx=30)
+
+    tk.Checkbutton(
+        frame_filtros, text="Ver Inactivos", variable=var_mostrar_inactivos, 
+        bg="#f4f4f8", font=("Segoe UI", 9), command=toggle_mostrar_inactivos
+    ).pack(side=tk.LEFT)
+
+    tk.Button(
+        frame_botones, text="Cerrar", command=win.destroy, 
+        bg="#64748b", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=15, pady=7, cursor="hand2"
+    ).pack(side=tk.RIGHT)
 
     cargar_datos()
     entry_busqueda.focus_set()

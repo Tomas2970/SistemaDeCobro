@@ -1,9 +1,10 @@
 # app/frontend/interfaz_reportes.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, Toplevel, Listbox, SINGLE
 from datetime import date, datetime, timedelta
 import logging
+from typing import Any
 
 try:
     from app.frontend.componentes_ui import EntryDecimal, SelectorFecha
@@ -31,6 +32,19 @@ logger = logging.getLogger(__name__)
 
 def _fmt(v): return f"$ {float(v):,.2f}"
 
+# Helper para Oscurecer color (usado en Historiales, copiado aquí)
+def _darken_color(hex_color):
+    colors = {
+        "#3b82f6": "#2563eb",
+        "#10b981": "#059669",
+        "#16a34a": "#059669",
+        "#03A9F4": "#0288d1",
+        "#ef4444": "#dc2626",
+        "#f59e0b": "#d97706",
+        "#6b7280": "#4b5563"
+    }
+    return colors.get(hex_color, hex_color)
+
 def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja'):
     """
     modo_vista: 'caja' para Control de Caja, 'reportes' para Reportes de Ventas
@@ -38,6 +52,32 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja
     win = tk.Toplevel(parent)
     win.config(bg="#f4f4f8")
     
+    # 🔥 ESTILOS MODERNOS
+    style = ttk.Style()
+    style.theme_use('clam')
+
+    style.configure("Modern.Treeview",
+                    background="#ffffff",
+                    foreground="#1f2937",
+                    rowheight=32,
+                    fieldbackground="#ffffff",
+                    borderwidth=0,
+                    font=('Segoe UI', 10))
+
+    style.configure("Modern.Treeview.Heading",
+                    background="#f3f4f6",
+                    foreground="#374151",
+                    relief="flat",
+                    borderwidth=1,
+                    font=('Segoe UI', 10, 'bold'))
+
+    style.map("Modern.Treeview.Heading",
+              background=[('active', '#e5e7eb')])
+
+    # Variables de selección
+    win.var_vendedor_sel = {"id": None, "nombre": "(Todos)"}
+    win.vendedores_full_list = backend.obtener_vendedores() # Cache de vendedores
+
     if modo_vista == 'caja':
         win.title("📦 Control de Caja")
         win.geometry("900x650")
@@ -50,8 +90,114 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja
     configurar_navegacion_ventana(win)
     win.grab_set()
 
+# --- SELECTOR DE ENTIDAD MODAL (Reimplementado de Historiales para Reportes) ---
+def _crear_selector_entidad_reportes(win: tk.Toplevel, tipo: str, var_seleccion: dict, lista_datos: list):
+    """Abre un modal para buscar y seleccionar Usuario/Vendedor."""
+    popup = Toplevel(win)
+    popup.title(f"Seleccionar {tipo}")
+    popup.geometry("500x450")
+    popup.config(bg="#f4f4f8")
+    
+    configurar_navegacion_ventana(popup)
+
+    tk.Label(popup, text=f"Buscar {tipo} (ID/Nombre):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
+    var_pat = tk.StringVar()
+    ent = tk.Entry(popup, textvariable=var_pat, width=40, font=("Segoe UI", 10))
+    ent.pack(pady=5, padx=15, fill=tk.X)
+    
+    frame_list = tk.Frame(popup)
+    frame_list.pack(expand=True, fill="both", padx=15, pady=5)
+    sc = tk.Scrollbar(frame_list)
+    sc.pack(side="right", fill="y")
+    
+    cols = ("ID", "Nombre")
+    tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
+    tree_sel.pack(side="left", fill="both", expand=True)
+    sc.config(command=tree_sel.yview)
+    tree_sel.configure(yscrollcommand=sc.set)
+    
+    tree_sel.column("ID", width=60, anchor="center")
+    tree_sel.column("Nombre", width=350, anchor="w")
+    tree_sel.heading("ID", text="ID")
+    tree_sel.heading("Nombre", text="Nombre")
+    
+    # Opcion 'Todos'
+    tree_sel.insert("", "end", iid="opt_all", values=["-", "(Todos)"])
+
+    def render(filas):
+        for i in tree_sel.get_children(): 
+            if i != "opt_all": tree_sel.delete(i)
+
+        for c in filas:
+            id_val = c.get('id_usuario')
+            nombre_val = c.get('nombre')
+            tree_sel.insert("", "end", values=[id_val, nombre_val])
+
+    render(lista_datos)
+    
+    def filtrar(*_):
+        q = var_pat.get().strip().lower()
+        
+        if not q:
+            render(lista_datos)
+            return
+
+        filas_filtradas = [d for d in lista_datos 
+                           if str(d.get('id_usuario', '')).startswith(q) or q in d.get('nombre', '').lower()]
+                
+        render(filas_filtradas)
+
+    var_pat.trace_add("write", filtrar)
+
+    def tomar(event=None): 
+        sel_id = tree_sel.focus()
+        if not sel_id: return 
+        
+        if sel_id == "opt_all":
+            var_seleccion["id"] = None
+            var_seleccion["nombre"] = "(Todos)"
+        else:
+            vals = tree_sel.item(sel_id, "values")
+            if not vals: return
+            
+            try: id_val = int(vals[0])
+            except: id_val = None
+            
+            var_seleccion["id"] = id_val
+            var_seleccion["nombre"] = vals[1]
+
+        popup.destroy()
+        # Se necesita forzar la actualización del label principal en el panel de reportes
+        if hasattr(win, 'lbl_vend_sel'):
+             win.lbl_vend_sel.config(text=win.var_vendedor_sel['nombre'])
+
+
+    tree_sel.bind("<Double-1>", tomar)
+    tree_sel.bind("<Return>", tomar)
+
+    btn_frm = tk.Frame(popup, bg="#f4f4f8")
+    btn_frm.pack(pady=10)
+    
+    # 🔥 BOTONES ESTILO NUEVO
+    btn_sel = tk.Button(btn_frm, text="✓ Seleccionar", command=tomar, 
+                       bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                       relief="flat", padx=20, pady=8, cursor="hand2",
+                       activebackground="#059669")
+    btn_sel.pack(side="left", padx=5)
+    
+    btn_canc = tk.Button(btn_frm, text="Cancelar", command=popup.destroy,
+                        bg="#6b7280", fg="white", font=("Segoe UI", 10),
+                        relief="flat", padx=15, pady=8, cursor="hand2",
+                        activebackground="#4b5563")
+    btn_canc.pack(side="left", padx=5)
+    
+    popup.after(100, lambda: ent.focus_set())
+    popup.grab_set()
+    popup.transient(win)
+    win.wait_window(popup)
+
 # =================================================================
-# LÓGICA DE CONTROL DE CAJA
+# LÓGICA DE CONTROL DE CAJA (Para Cajeros)
 # =================================================================
 def _construir_panel_caja(win, backend, usuario):
     body = tk.Frame(win, bg="#f4f4f8", padx=20, pady=20)
@@ -113,8 +259,21 @@ def _construir_panel_caja(win, backend, usuario):
             except Exception as e: messagebox.showerror("Error", f"Error al abrir caja:\n{e}")
 
         ent_monto.bind("<Return>", lambda e: abrir_caja())
-        tk.Button(fr_ini, text="ABRIR MI TURNO", bg="#2e9e44", fg="white", 
-                  font=("bold", 12), command=abrir_caja, width=20).pack(pady=10)
+        # 🔥 BOTÓN ABRIR TURNO
+        tk.Button(
+            fr_ini, 
+            text="ABRIR MI TURNO", 
+            command=abrir_caja,
+            bg="#10b981", # VERDE_CONFIRMAR
+            fg="white", 
+            font=("Segoe UI", 12, "bold"),
+            relief="flat",
+            padx=25,
+            pady=12,
+            cursor="hand2",
+            activebackground="#059669",
+            width=20
+        ).pack(pady=10)
     else:
         tk.Label(pnl_cerrada, text="⚠️ No tienes permisos para abrir caja", font=("Segoe UI", 14), fg="#ef4444", bg="#f4f4f8").pack(pady=20)
 
@@ -209,23 +368,56 @@ def _construir_panel_caja(win, backend, usuario):
             tk.Button(top, text="Guardar", command=save, bg="#2e9e44", fg="white").pack(pady=20)
             configurar_navegacion_ventana(top)
 
-        tk.Button(fr_ops, text="➖ GASTO/RETIRO", bg="#ef4444", fg="white", font=("bold", 10), command=lambda: modal_movimiento('egreso')).pack(side="left", padx=20)
-        tk.Button(fr_ops, text="➕ AJUSTE (+)", bg="#22c55e", fg="white", font=("bold", 10), command=lambda: modal_movimiento('ingreso')).pack(side="left")
+        # 🔥 BOTÓN GASTO/RETIRO
+        tk.Button(
+            fr_ops, 
+            text="➖ GASTO/RETIRO", 
+            command=lambda: modal_movimiento('egreso'),
+            bg="#ef4444", # ROJO_CANCELAR
+            fg="white", 
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padx=15,
+            pady=8,
+            cursor="hand2",
+            activebackground="#dc2626"
+        ).pack(side="left", padx=20)
+
+        # 🔥 BOTÓN AJUSTE (+)
+        tk.Button(
+            fr_ops, 
+            text="➕ AJUSTE (+)", 
+            command=lambda: modal_movimiento('ingreso'),
+            bg="#10b981", # VERDE_CONFIRMAR
+            fg="white", 
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padx=15,
+            pady=8,
+            cursor="hand2",
+            activebackground="#059669"
+        ).pack(side="left")
     
     if puede_gestionar:
-        tk.Button(fr_ops, text="🔒 CERRAR CAJA", bg="#1f2937", fg="white", font=("bold", 11), command=iniciar_cierre).pack(side="right", padx=20)
+        # 🔥 BOTÓN CERRAR CAJA
+        tk.Button(
+            fr_ops, 
+            text="🔒 CERRAR CAJA", 
+            command=iniciar_cierre,
+            bg="#1f2937", # NEGRO_CRITICO
+            fg="white", 
+            font=("Segoe UI", 11, "bold"),
+            relief="flat",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            activebackground="#111827"
+        ).pack(side="right", padx=20)
     
-    def imprimir_resumen():
-        if impresora:
-            impresora.imprimir_resumen_diario(backend.obtener_resumen_diario())
-            messagebox.showinfo("Éxito", "Impreso")
-        else: messagebox.showwarning("Error", "Sin impresora")
-    tk.Button(fr_ops, text="🖨️ Resumen Día", bg="#f59e0b", fg="white", font=("bold", 10), command=imprimir_resumen).pack(side="right", padx=5)
-
     verificar_estado()
 
 # =================================================================
-# LÓGICA DE REPORTES (PANEL AISLADO)
+# LÓGICA DE REPORTES (PANEL AISLADO - ADMIN/SUPERVISOR)
 # =================================================================
 def _construir_panel_reportes(win, backend, usuario):
     body = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
@@ -250,8 +442,114 @@ def _construir_panel_reportes(win, backend, usuario):
             # Borrar antes de insertar para evitar duplicados
             entry_desde.delete(0, tk.END); entry_desde.insert(0, f_ini.strftime("%d/%m/%Y"))
             entry_hasta.delete(0, tk.END); entry_hasta.insert(0, f_fin.strftime("%d/%m/%Y"))
+    
+    # --- SELECTOR DE ENTIDAD MODAL (Reportes) ---
+    def _crear_selector_entidad_reportes(tipo: str, var_seleccion: dict, lista_datos: list):
+        """Abre un modal para buscar y seleccionar Usuario/Vendedor."""
+        popup = Toplevel(win)
+        popup.title(f"Seleccionar {tipo}")
+        popup.geometry("500x450")
+        popup.config(bg="#f4f4f8")
+        
+        configurar_navegacion_ventana(popup)
 
-    # Ventas por Vendedor
+        tk.Label(popup, text=f"Buscar {tipo} (ID/Nombre):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
+        var_pat = tk.StringVar()
+        ent = tk.Entry(popup, textvariable=var_pat, width=40, font=("Segoe UI", 10))
+        ent.pack(pady=5, padx=15, fill=tk.X)
+        
+        frame_list = tk.Frame(popup)
+        frame_list.pack(expand=True, fill="both", padx=15, pady=5)
+        sc = tk.Scrollbar(frame_list)
+        sc.pack(side="right", fill="y")
+        
+        cols = ("ID", "Nombre")
+        tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
+        tree_sel.pack(side="left", fill="both", expand=True)
+        sc.config(command=tree_sel.yview)
+        tree_sel.configure(yscrollcommand=sc.set)
+        
+        tree_sel.column("ID", width=60, anchor="center")
+        tree_sel.column("Nombre", width=350, anchor="w")
+        tree_sel.heading("ID", text="ID")
+        tree_sel.heading("Nombre", text="Nombre")
+        
+        # Opcion 'Todos'
+        tree_sel.insert("", "end", iid="opt_all", values=["-", "(Todos)"])
+
+        def render(filas):
+            for i in tree_sel.get_children(): 
+                if i != "opt_all": tree_sel.delete(i)
+
+            for c in filas:
+                id_val = c.get('id_usuario')
+                nombre_val = c.get('nombre')
+                tree_sel.insert("", "end", values=[id_val, nombre_val])
+
+        render(lista_datos)
+        
+        def filtrar(*_):
+            q = var_pat.get().strip().lower()
+            
+            if not q:
+                render(lista_datos)
+                return
+
+            filas_filtradas = [d for d in lista_datos 
+                               if str(d.get('id_usuario', '')).startswith(q) or q in d.get('nombre', '').lower()]
+                    
+            render(filas_filtradas)
+
+        var_pat.trace_add("write", filtrar)
+
+        def tomar(event=None): 
+            sel_id = tree_sel.focus()
+            if not sel_id: return 
+            
+            if sel_id == "opt_all":
+                var_seleccion["id"] = None
+                var_seleccion["nombre"] = "(Todos)"
+            else:
+                vals = tree_sel.item(sel_id, "values")
+                if not vals: return
+                
+                try: id_val = int(vals[0])
+                except: id_val = None
+                
+                var_seleccion["id"] = id_val
+                var_seleccion["nombre"] = vals[1]
+
+            popup.destroy()
+            # Actualizar el label en el panel de reportes
+            if hasattr(win, 'lbl_vend_sel'):
+                win.lbl_vend_sel.config(text=win.var_vendedor_sel['nombre'])
+
+
+        tree_sel.bind("<Double-1>", tomar)
+        tree_sel.bind("<Return>", tomar)
+
+        btn_frm = tk.Frame(popup, bg="#f4f4f8")
+        btn_frm.pack(pady=10)
+        
+        # 🔥 BOTONES ESTILO NUEVO
+        btn_sel = tk.Button(btn_frm, text="✓ Seleccionar", command=tomar, 
+                           bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
+                           relief="flat", padx=20, pady=8, cursor="hand2",
+                           activebackground="#059669")
+        btn_sel.pack(side="left", padx=5)
+        
+        btn_canc = tk.Button(btn_frm, text="Cancelar", command=popup.destroy,
+                            bg="#6b7280", fg="white", font=("Segoe UI", 10),
+                            relief="flat", padx=15, pady=8, cursor="hand2",
+                            activebackground="#4b5563")
+        btn_canc.pack(side="left", padx=5)
+        
+        popup.after(100, lambda: ent.focus_set())
+        popup.grab_set()
+        popup.transient(win)
+        win.wait_window(popup)
+
+    # 1. Ventas por Vendedor
     frm_vend = ttk.LabelFrame(body, text="📈 Ventas por Vendedor", padding=10)
     frm_vend.pack(fill="both", expand=True, pady=(0, 10))
     frm_f1 = tk.Frame(frm_vend); frm_f1.pack(fill="x", pady=5)
@@ -267,23 +565,52 @@ def _construir_panel_reportes(win, backend, usuario):
     
     cb_rango_v.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango_v, fd_v.widget_entrada, fh_v.widget_entrada))
     
-    vendedores = backend.obtener_vendedores()
-    v_ids = [None] + [v['id_usuario'] for v in vendedores]
-    v_names = ["(Todos)"] + [v['nombre'] for v in vendedores]
-    cb_vend = ttk.Combobox(frm_f1, values=v_names, state="readonly"); cb_vend.current(0); cb_vend.pack(side="left", padx=5)
+    # Reemplazamos el Combobox de Vendedor por Label + Botón
+    tk.Label(frm_f1, text="Vendedor:", bg="#f4f4f8").pack(side="left", padx=(10, 5))
+    win.lbl_vend_sel = tk.Label(frm_f1, text=win.var_vendedor_sel['nombre'], bg="#f4f4f8")
+    win.lbl_vend_sel.pack(side="left", padx=5)
     
-    tree_v = ttk.Treeview(frm_vend, columns=("Vend", "Ventas", "Monto"), show="headings", height=5)
+    tk.Button(
+        frm_f1, 
+        text="Buscar Vendedor", 
+        command=lambda: _crear_selector_entidad_reportes("Vendedor", win.var_vendedor_sel, win.vendedores_full_list), 
+        bg="#3b82f6", 
+        fg="white", 
+        font=("Segoe UI", 10, "bold"),
+        relief="flat",
+        padx=15,
+        pady=8,
+        cursor="hand2",
+        activebackground="#2563eb"
+    ).pack(side="left", padx=10)
+    
+    tree_v = ttk.Treeview(frm_vend, columns=("Vend", "Ventas", "Monto"), show="headings", height=5, style="Modern.Treeview")
     tree_v.pack(fill="both", expand=True)
     tree_v.heading("Vend", text="Vendedor"); tree_v.heading("Ventas", text="Cant."); tree_v.heading("Monto", text="Total")
     
     def buscar_vend():
         for i in tree_v.get_children(): tree_v.delete(i)
-        data = backend.reporte_ventas_por_vendedor(fd_v.get_date_sql(), fh_v.get_date_sql(), v_ids[cb_vend.current()])
+        
+        id_vend = win.var_vendedor_sel['id']
+        data = backend.reporte_ventas_por_vendedor(fd_v.get_date_sql(), fh_v.get_date_sql(), id_vend)
         for r in data: tree_v.insert("", "end", values=(r['vendedor'], r['total_ventas'], _fmt(r['monto_total'])))
     
-    tk.Button(frm_f1, text="Generar", command=buscar_vend, bg="#2563eb", fg="white").pack(side="left", padx=10)
+    # 🔥 BOTÓN GENERAR VENTAS POR VENDEDOR
+    tk.Button(
+        frm_f1, 
+        text="Generar", 
+        command=buscar_vend, 
+        bg="#3b82f6", 
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        relief="flat",
+        padx=15,
+        pady=8,
+        cursor="hand2",
+        activebackground="#2563eb"
+    ).pack(side="left", padx=10)
 
-    # Ventas Diarias
+    # 2. Ventas Diarias (AQUÍ PONEMOS EL BOTÓN IMPRIMIR)
     frm_dia = ttk.LabelFrame(body, text="📅 Ventas Diarias", padding=10)
     frm_dia.pack(fill="both", expand=True)
     frm_f2 = tk.Frame(frm_dia); frm_f2.pack(fill="x", pady=5)
@@ -292,14 +619,14 @@ def _construir_panel_reportes(win, backend, usuario):
     cb_rango_d.current(0); cb_rango_d.pack(side="left", padx=5)
     
     fd_d = SelectorFecha(frm_f2); fd_d.pack(side="left", padx=5)
-    fd_d.widget_entrada.delete(0, tk.END); fd_d.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
+    fd_d.widget_entrada.delete(0, tk.END); fd_d.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y")) # Default HOY para imprimir rápido
     
     fh_d = SelectorFecha(frm_f2); fh_d.pack(side="left", padx=5)
     fh_d.widget_entrada.delete(0, tk.END); fh_d.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
     
     cb_rango_d.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango_d, fd_d.widget_entrada, fh_d.widget_entrada))
     
-    tree_d = ttk.Treeview(frm_dia, columns=("Fecha", "Ventas", "Monto"), show="headings", height=5)
+    tree_d = ttk.Treeview(frm_dia, columns=("Fecha", "Ventas", "Monto"), show="headings", height=5, style="Modern.Treeview")
     tree_d.pack(fill="both", expand=True)
     tree_d.heading("Fecha", text="Fecha"); tree_d.heading("Ventas", text="Cant."); tree_d.heading("Monto", text="Total")
     
@@ -307,11 +634,64 @@ def _construir_panel_reportes(win, backend, usuario):
         for i in tree_d.get_children(): tree_d.delete(i)
         data = backend.obtener_ventas_diarias(fd_d.get_date_sql(), fh_d.get_date_sql())
         for r in data: 
-            # --- CORRECCIÓN AQUÍ: Usamos 'r' en lugar de 'row' ---
             f_str = datetime.strptime(str(r['fecha']), "%Y-%m-%d").strftime("%d/%m/%Y")
             tree_d.insert("", "end", values=(f_str, r['total_ventas'], _fmt(r['monto_total'])))
     
-    tk.Button(frm_f2, text="Generar", command=buscar_dia, bg="#2563eb", fg="white").pack(side="left", padx=10)
+    # 🔥 BOTÓN GENERAR VENTAS DIARIAS
+    tk.Button(
+        frm_f2, 
+        text="Generar", 
+        command=buscar_dia, 
+        bg="#3b82f6", 
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        relief="flat",
+        padx=15,
+        pady=8,
+        cursor="hand2",
+        activebackground="#2563eb"
+    ).pack(side="left", padx=10)
+
+    # --- BOTÓN IMPRIMIR RESUMEN (SIN ABRIR CAJA) ---
+    def imprimir_resumen_dia():
+        fecha = fd_d.get_date_sql()
+        if not fecha:
+            messagebox.showwarning("Atención", "Seleccione una fecha válida en 'Desde'.", parent=win)
+            return
+        
+        if not impresora:
+            messagebox.showwarning("Error", "No se detectó el módulo de impresora.", parent=win)
+            return
+
+        try:
+            # Obtiene los datos completos (Ventas + Medios Pago + Vendedores)
+            datos = backend.obtener_resumen_diario(fecha)
+            
+            if not datos or (datos.get('total_ventas') == 0 and datos.get('monto_total') == 0):
+                if not messagebox.askyesno("Reporte Vacío", f"No se encontraron ventas para el {fecha}.\n¿Desea imprimir el reporte vacío?", parent=win):
+                    return
+            
+            impresora.imprimir_resumen_diario(datos)
+            messagebox.showinfo("Éxito", f"Se envió a imprimir el reporte del día {fecha}.", parent=win)
+            
+        except Exception as e:
+            logger.exception("Error al imprimir reporte diario")
+            messagebox.showerror("Error", f"No se pudo imprimir:\n{e}", parent=win)
+
+    # 🔥 BOTÓN IMPRIMIR RESUMEN
+    tk.Button(
+        frm_f2, 
+        text="🖨️ Imprimir Resumen", 
+        command=imprimir_resumen_dia, 
+        bg="#f59e0b", 
+        fg="white",
+        font=("Segoe UI", 10, "bold"),
+        relief="flat",
+        padx=15,
+        pady=8,
+        cursor="hand2",
+        activebackground="#d97706"
+    ).pack(side="left", padx=5)
 
     # Integración con Historiales (Doble Click)
     def ir_historial(e, tree, es_vendedor=True):
@@ -320,13 +700,16 @@ def _construir_panel_reportes(win, backend, usuario):
         val = tree.item(sel[0])['values'][0]
         try:
             if es_vendedor:
-                uid = next(v['id_usuario'] for v in vendedores if v['nombre'] == val)
-                Historiales(win, backend, usuario, filtro_vendedor_id=uid,
-                            filtro_fecha_desde_default=fd_v.widget_entrada.get(),
-                            filtro_fecha_hasta_default=fh_v.widget_entrada.get())
+                # Se busca el ID correspondiente al nombre seleccionado
+                uid = next((v['id_usuario'] for v in win.vendedores_full_list if v['nombre'] == val), None)
+                if uid is not None:
+                    Historiales(win, backend, usuario, filtro_vendedor_id=uid,
+                                filtro_fecha_desde_default=fd_v.widget_entrada.get(),
+                                filtro_fecha_hasta_default=fh_v.widget_entrada.get())
             else:
                 Historiales(win, backend, usuario, filtro_fecha=val) 
-        except: pass
+        except Exception as ex:
+             logger.error(f"Error abriendo historial desde reporte: {ex}")
 
     tree_v.bind("<Double-1>", lambda e: ir_historial(e, tree_v, True))
     tree_d.bind("<Double-1>", lambda e: ir_historial(e, tree_d, False))

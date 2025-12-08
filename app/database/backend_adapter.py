@@ -65,27 +65,27 @@ class BackendAdapter:
     def verificar_contraseña(self, usuario: str, contraseña: str) -> dict | None:
         return DB.verificar_contraseña(usuario, contraseña)
 
-    # ---------- Clientes ----------
-    def insertar_cliente(self, nombre: str, dni: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
+    # ---------- Clientes (Firmas Actualizadas con CUIT) ----------
+    def insertar_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
         try:
             limite_valido = float(limite_credito)
         except (ValueError, TypeError):
             limite_valido = 50000.00
-        return DB.insertar_cliente(nombre, dni, direccion, telefono, email, limite_valido)
+        # Incluye CUIT
+        return DB.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_valido)
     
-    def crear_cliente(self, nombre: str, dni: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
-        """
-        Alias usado por la interfaz de registro de clientes.
-        """
-        return self.insertar_cliente(nombre, dni, direccion, telefono, email, limite_credito)
+    def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
+        """Alias usado por la interfaz de registro de clientes."""
+        return self.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_credito)
 
-    def actualizar_cliente(self, id_cliente: int, nombre: str, dni: str, direccion: str, telefono: str, email: str, limite_credito: float) -> bool:
+    def actualizar_cliente(self, id_cliente: int, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float) -> bool:
         try:
             limite_valido = float(limite_credito)
         except (ValueError, TypeError):
-            limite_valido = 0.00 
-        return DB.actualizar_cliente_completo(id_cliente, nombre, dni, direccion, telefono, email, limite_valido)
-
+            limite_valido = 0.00
+        # Incluye CUIT
+        return DB.actualizar_cliente_completo(id_cliente, nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        
     def listar_clientes(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_clientes", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
@@ -108,6 +108,9 @@ class BackendAdapter:
 
     def eliminar_cliente_logico(self, id_cliente: int) -> bool:
         fn = getattr(DB, "eliminar_cliente_logico", None)
+        return bool(fn(id_cliente)) if callable(fn) else False
+    def activar_cliente_logico(self, id_cliente: int) -> bool:
+        fn = getattr(DB, "activar_cliente_logico", None)
         return bool(fn(id_cliente)) if callable(fn) else False
 
     # ---------- Ventas ----------
@@ -167,6 +170,34 @@ class BackendAdapter:
             except Exception:
                 pass
         return None
+        # app/database/backend_adapter.py (Nueva función)
+
+    def buscar_producto_inteligente(self, token: str) -> dict | None:
+        """
+        Búsqueda unificada por ID, Código o Nombre. 
+        Usada por Venta, Inventario y Productos.
+        """
+        token = token.strip()
+        if not token:
+            return None
+
+
+        if token.isdigit():
+            try:
+                if len(token) < 16: 
+                    prod = self.buscar_producto_por_id(int(token))
+                    if prod:
+                        return prod
+            except Exception:
+                pass
+        
+        prod = self.buscar_producto_por_codigo_barras(token)
+        if prod:
+            return prod
+            
+        res = self.buscar_producto_por_nombre(token) or []
+        return res[0] if res else None
+
         
     def crear_producto_completo(
         self,
@@ -321,17 +352,31 @@ class BackendAdapter:
     def obtener_proveedores(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_proveedores", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
-    def insertar_proveedor(self, nombre: str, empresa: str, telefono: str, email: str) -> int | None:
+    def insertar_proveedor(self, nombre: str, empresa: str, cuit: str, dni: str, telefono: str, email: str, direccion: str) -> int | None:
         fn = getattr(DB, "insertar_proveedor", None)
-        return fn(nombre, empresa, telefono, email) if callable(fn) else None
-    def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, telefono: str, email: str) -> bool:
+        # Mapeamos los nombres del adapter a la DB
+        return fn(nombre, empresa, cuit, dni, telefono, email, direccion) if callable(fn) else None
+        
+    def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, cuit: str, dni: str, telefono: str, email: str, direccion: str) -> bool:
         fn = getattr(DB, "actualizar_proveedor", None)
-        return bool(fn(id_proveedor, nombre, empresa, telefono, email)) if callable(fn) else False
+        return bool(fn(id_proveedor, nombre, empresa, cuit, dni, telefono, email, direccion)) if callable(fn) else False
+    
+    def obtener_proveedores(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
+        fn = getattr(DB, "obtener_proveedores", None)
+        return list(fn(incluir_inactivos) or []) if callable(fn) else []
+    
+    def obtener_proveedor_completo(self, id_proveedor: int) -> dict | None:
+        fn = getattr(DB, "obtener_proveedor_completo", None)
+        return fn(id_proveedor) if callable(fn) else None
+        
     def obtener_proveedor_para_editar(self, id_proveedor: int) -> dict | None:
         fn = getattr(DB, "obtener_proveedor_completo", None)
         return fn(id_proveedor) if callable(fn) else None
     def eliminar_proveedor_logico(self, id_proveedor: int) -> bool:
         fn = getattr(DB, "eliminar_proveedor_logico", None)
+        return bool(fn(id_proveedor)) if callable(fn) else False
+    def activar_proveedor_logico(self, id_proveedor: int) -> bool:
+        fn = getattr(DB, "activar_proveedor_logico", None)
         return bool(fn(id_proveedor)) if callable(fn) else False
     def obtener_productos_por_proveedor(self, id_proveedor: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_productos_por_proveedor", None)
@@ -430,15 +475,82 @@ class BackendAdapter:
     def crear_usuario(self, nombre: str, password_plana: str, id_rol: int) -> int | None:
         fn = getattr(DB, "crear_usuario", None)
         return fn(nombre, password_plana, id_rol) if callable(fn) else None
-    def actualizar_rol_usuario(self, id_usuario: int, id_rol_nuevo: int) -> bool:
-        fn = getattr(DB, "actualizar_rol_usuario", None)
-        return bool(fn(id_usuario, id_rol_nuevo)) if callable(fn) else False
+# EN app/database/backend_adapter.py (Línea ~432)
+
+    def actualizar_rol_usuario(self, id_usuario: int, id_rol_nuevo: int, nuevo_nombre: Optional[str] = None) -> bool:
+        
+        # 1. Obtener datos anteriores para comparar y auditar si es necesario
+        usuarios = DB.obtener_usuarios_con_rol()
+        usuario_anterior = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+
+        if not usuario_anterior:
+            logger.error(f"Intento de actualizar usuario {id_usuario} que no existe.")
+            return False
+
+        rol_anterior = usuario_anterior.get('id_rol')
+        nombre_anterior = usuario_anterior.get('nombre')
+        
+        # Bandera de éxito combinada
+        exito_rol = True
+        exito_nombre = True
+
+        # 2. Actualizar Rol si es diferente
+        if id_rol_nuevo != rol_anterior:
+            fn_rol = getattr(DB, "actualizar_rol_usuario", None)
+            if callable(fn_rol):
+                exito_rol = fn_rol(id_usuario, id_rol_nuevo)
+            else:
+                exito_rol = False # Fallo si la función no existe
+
+        # 3. Actualizar Nombre si se provee y es diferente
+        if nuevo_nombre is not None and nuevo_nombre != nombre_anterior:
+            fn_nombre = getattr(DB, "actualizar_nombre_usuario", None)
+            if callable(fn_nombre):
+                try:
+                    exito_nombre = fn_nombre(id_usuario, nuevo_nombre)
+                except ValueError as ve: # Captura el NOMBRE_DUPLICADO propagado desde DB.py
+                    logger.warning(f"Fallo de integridad al actualizar nombre: {ve}")
+                    raise # Re-lanzar para que el frontend lo capture
+            else:
+                exito_nombre = False
+        
+        # 4. Auditoría (Opcional, si ambos fueron exitosos)
+        if exito_rol and exito_nombre:
+            # Recargar datos nuevos para auditoría
+            usuario_nuevo = next((u for u in DB.obtener_usuarios_con_rol() if u.get('id_usuario') == id_usuario), {})
+            
+            datos_anteriores = {'nombre': nombre_anterior, 'id_rol': rol_anterior}
+            datos_nuevos = {}
+            if nuevo_nombre is not None and nuevo_nombre != nombre_anterior:
+                datos_nuevos['nombre'] = nuevo_nombre
+            if id_rol_nuevo != rol_anterior:
+                datos_nuevos['id_rol'] = id_rol_nuevo
+
+            if datos_nuevos: # Solo auditar si hubo cambios reales
+                self._registrar_auditoria(
+                    id_usuario=id_usuario,
+                    accion="MODIFICAR_USUARIO",
+                    tabla_afectada="Usuario",
+                    id_registro=id_usuario,
+                    datos_anteriores=datos_anteriores,
+                    datos_nuevos=datos_nuevos
+                )
+        
+        return exito_rol and exito_nombre
+        return rol_ok and nombre_ok
     def resetear_password_usuario(self, id_usuario: int, password_plana_nueva: str) -> bool:
         fn = getattr(DB, "resetear_password_usuario", None)
         return bool(fn(id_usuario, password_plana_nueva)) if callable(fn) else False
     def desactivar_usuario(self, id_usuario: int) -> bool:
         fn = getattr(DB, "desactivar_usuario", None)
         return bool(fn(id_usuario)) if callable(fn) else False
+    def activar_usuario(self, id_usuario: int) -> bool:
+        fn = getattr(DB, "activar_usuario", None)
+        return bool(fn(id_usuario)) if callable(fn) else False
+        
+    def actualizar_nombre_usuario(self, id_usuario: int, nuevo_nombre: str) -> bool:
+        fn = getattr(DB, "actualizar_nombre_usuario", None)
+        return bool(fn(id_usuario, nuevo_nombre)) if callable(fn) else False
     
     # ---------- Reportes ----------
     def obtener_vendedores(self) -> list[dict[str, Any]]:

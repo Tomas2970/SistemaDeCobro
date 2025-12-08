@@ -1,4 +1,6 @@
-# app/frontend/interfaz_gestion_usuarios.py
+
+# ARCHIVO 1: interfaz_gestion_usuarios.py
+# ============================================
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox, Toplevel
@@ -33,71 +35,121 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     tree.column("Rol", width=150)
     tree.column("Activo", width=80, anchor="center")
 
+    var_mostrar_inactivos = tk.BooleanVar(value=False)
+
     def cargar_datos():
         for i in tree.get_children(): tree.delete(i)
         try:
             users = backend.obtener_usuarios_con_rol()
+            mostrar_todos = var_mostrar_inactivos.get()
+
             for u in users:
-                activo = "SI" if u.get('activo') else "NO"
+                es_activo = u.get('activo')
+                if not mostrar_todos and not es_activo:
+                    continue
+
+                activo_txt = "SI" if es_activo else "NO"
                 tree.insert("", tk.END, values=[
                     u.get('id_usuario'),
                     u.get('nombre'),
                     u.get('rol_nombre'),
-                    activo
+                    activo_txt
                 ])
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar: {e}", parent=win)
 
-    # --- Acciones ---
+    def recargar_lista_callback():
+        win.after(100, cargar_datos)
+        
     def accion_nuevo():
-        ui_crear_usuario(win, backend)
-        win.after(1500, cargar_datos) 
+        ui_crear_usuario(win, backend, callback_on_save=recargar_lista_callback)
 
-    # 🔥 FUNCIÓN DE EDITAR RECUPERADA
     def abrir_editar():
         sel = tree.selection()
         if not sel: 
-            messagebox.showwarning("Atención", "Seleccione un usuario para editar.", parent=win)
+            messagebox.showwarning("Atención", "Seleccione un usuario.", parent=win)
             return
         item = tree.item(sel[0], "values")
-        
-        # Abrimos la ventana de crear usuario en modo edición (pasando ID)
-        ui_crear_usuario(win, backend, id_usuario_a_editar=int(item[0]))
-        # Recargamos lista luego
-        win.after(1000, cargar_datos)
+        ui_crear_usuario(win, backend, id_usuario_a_editar=int(item[0]), callback_on_save=recargar_lista_callback)
 
-    # 🔥 DOBLE CLICK RECUPERADO
-    def on_doble_click(event):
-        abrir_editar()
-
+    def on_doble_click(event): abrir_editar()
     tree.bind("<Double-1>", on_doble_click)
 
     def desactivar():
         sel = tree.selection()
         if not sel: return
         item = tree.item(sel[0], "values")
-        # Evitar auto-desactivación
+        
         if usuario_actual and str(usuario_actual.get('id_usuario')) == str(item[0]):
             messagebox.showerror("Error", "No puedes desactivar tu propio usuario.", parent=win)
             return
+            
+        if item[3] == 'NO': return
 
-        if messagebox.askyesno("Confirmar", f"¿Desactivar usuario '{item[1]}'?", parent=win):
+        if messagebox.askyesno("Confirmar", f"¿Desactivar usuario '{item[1]}'?"):
             if backend.desactivar_usuario(int(item[0])):
                 messagebox.showinfo("Éxito", "Usuario desactivado.", parent=win)
                 cargar_datos()
-            else:
-                messagebox.showerror("Error", "No se pudo desactivar.", parent=win)
+            else: messagebox.showerror("Error", "No se pudo desactivar.", parent=win)
 
+    def activar_usuario():
+        sel = tree.selection()
+        if not sel: return
+        item = tree.item(sel[0], "values")
+        if item[3] == 'SI': return
+
+        if messagebox.askyesno("Confirmar", f"¿Activar usuario '{item[1]}'?"):
+            if backend.activar_usuario(int(item[0])):
+                messagebox.showinfo("Éxito", "Usuario activado.", parent=win)
+                cargar_datos()
+            else: messagebox.showerror("Error", "No se pudo activar.", parent=win)
+
+    # 🔥 FRAME DE BOTONES MODERNO
     frame_botones = tk.Frame(win, bg="#f4f4f8")
-    frame_botones.pack(pady=15, fill="x")
+    frame_botones.pack(pady=15, fill="x", padx=20)
 
-    tk.Button(frame_botones, text="+ Crear Usuario", command=accion_nuevo, bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=20)
+    frame_acciones = tk.Frame(frame_botones, bg="#f4f4f8")
+    frame_acciones.pack(side=tk.LEFT)
+
+    tk.Button(
+        frame_acciones, text="➕ Crear Usuario", command=accion_nuevo, 
+        bg="#16a34a", fg="white", font=("Segoe UI", 10, "bold"), 
+        relief="flat", padx=15, pady=8, cursor="hand2"
+    ).pack(side=tk.LEFT, padx=5)
     
-    # 🔥 BOTÓN EDITAR RECUPERADO
-    tk.Button(frame_botones, text="✎ Editar", command=abrir_editar, bg="#FFC107").pack(side=tk.LEFT, padx=5)
-    
-    tk.Button(frame_botones, text="Desactivar Seleccionado", command=desactivar, bg="#f44336", fg="white").pack(side=tk.LEFT, padx=5)
-    tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#607D8B", fg="white").pack(side=tk.RIGHT, padx=20)
+    tk.Button(
+        frame_acciones, text="🗑️ Desactivar", command=desactivar, 
+        bg="#dc2626", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=12, pady=7, cursor="hand2"
+    ).pack(side=tk.LEFT, padx=5)
+
+    # 🔥 Botón Activar CONDICIONAL
+    btn_activar = tk.Button(
+        frame_acciones, text="✅ Activar", command=activar_usuario, 
+        bg="#0ea5e9", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=12, pady=7, cursor="hand2"
+    )
+
+    def toggle_mostrar_inactivos():
+        cargar_datos()
+        if var_mostrar_inactivos.get():
+            btn_activar.pack(side=tk.LEFT, padx=5)
+        else:
+            btn_activar.pack_forget()
+
+    frame_filtros = tk.Frame(frame_botones, bg="#f4f4f8")
+    frame_filtros.pack(side=tk.LEFT, padx=30)
+
+    tk.Checkbutton(
+        frame_filtros, text="Ver Inactivos", variable=var_mostrar_inactivos, 
+        bg="#f4f4f8", font=("Segoe UI", 9), command=toggle_mostrar_inactivos
+    ).pack(side=tk.LEFT)
+
+    tk.Button(
+        frame_botones, text="Cerrar", command=win.destroy, 
+        bg="#64748b", fg="white", font=("Segoe UI", 9), 
+        relief="flat", padx=15, pady=7, cursor="hand2"
+    ).pack(side=tk.RIGHT)
 
     cargar_datos()
     configurar_navegacion_ventana(win)

@@ -103,7 +103,6 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     
     perm_cc = 'gestionar_cuenta_corriente' if tiene_permiso(usuario, 'gestionar_cuenta_corriente') else 'ver_cuenta_corriente'
 
-    # --- CAMBIO: Se quitó "Reportes Ventas" de aquí ---
     botones_ops = [
         ("📦 Control de Caja", ui_reportes, 'abrir_caja', {'modo_vista': 'caja'}),
         ("🛒 Registrar Compra", ui_compra, 'registrar_compras', {}),
@@ -129,16 +128,15 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     frame_grid_gest = tk.Frame(frm_gest, bg="#f4f4f8")
     frame_grid_gest.pack()
 
-    # --- CAMBIO: Se agregó "Reportes Ventas" aquí ---
+    # --- DEFINICIÓN DE BOTONES ---
+    # Nota: El botón "Inventario" (lectura) sí lo dejamos para todos.
     botones_gestion = [
         ("📦 Inventario", ui_inventario, 'ver_inventario', {}),
-        ("🧰 Productos (ABM)", ui_productos, 'ver_productos', {}),
         ("🧾 Historiales", ui_historiales, 'ver_ventas', {}),
         ("🚚 Proveedores", ui_gestion_proveedores, 'ver_proveedores', {}),
         ("👥 Clientes", ui_gestion_clientes, 'ver_clientes', {}),
         ("🏷️ Categorías", ui_categorias, 'gestionar_categorias', {}), 
         ("⚙️ Usuarios", ui_gestion_usuarios, 'ver_usuarios', {}),
-        # Nuevo lugar para Reportes:
         ("📊 Reportes Ventas", ui_reportes, 'ver_reportes', {'modo_vista': 'reportes'}) 
     ]
 
@@ -147,6 +145,14 @@ def crear_menu_principal(root: tk.Tk, backend, usuario: dict) -> None:
     
     for item in botones_gestion:
         texto, funcion, permiso, args = item
+        
+        # 🔥 FILTRO DE SEGURIDAD VISUAL 🔥
+        # Si es Vendedor (Rol 2), ocultamos explícitamente ABM e Historiales.
+        # Supervisor (Rol 3) y Admin (Rol 1) sí los ven (si tienen el permiso en base de datos).
+        if rol_id == 2: # 2 = Vendedor
+            if texto in ["🧰 Productos (ABM)", "🧾 Historiales"]:
+                continue
+
         if tiene_permiso(usuario, permiso):
             btn = ttk.Button(frame_grid_gest, text=texto, style="Menu.TButton", width=25,
                              command=lambda f=funcion, t=texto, kw=args: _abrir_seguro(root, backend, usuario, f, t, **kw))

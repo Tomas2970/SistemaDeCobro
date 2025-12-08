@@ -1,247 +1,172 @@
 from __future__ import annotations
 import sys
+import os
 import bcrypt
 import mysql.connector 
 from typing import Optional
-from datetime import datetime, timedelta
-
-try:
-    from app.database.DB import conectar
-except Exception as e:
-    print("ERROR: no se pudo importar app.database.DB.conectar:", e, file=sys.stderr)
-    sys.exit(1)
 
 # ==========================================
-# FUNCIONES AUXILIARES DE BÚSQUEDA
+# CONFIGURACIÓN DE CONEXIÓN
+# ==========================================
+def conectar():
+    """Conexión directa sin depender de app.database.DB"""
+    from dotenv import load_dotenv
+    
+    # Cargar .env desde el directorio actual (donde está el .exe)
+    load_dotenv()
+    
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = int(os.getenv("DB_PORT", "3307"))
+    DB_USER = os.getenv("DB_USER", "root")
+    DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+    DB_NAME = os.getenv("DB_NAME", "supermercado_don_atilio")
+    
+    print(f"📡 Conectando a MySQL...")
+    print(f"   Host: {DB_HOST}")
+    print(f"   Puerto: {DB_PORT}")
+    print(f"   Base de datos: {DB_NAME}")
+    
+    conn = mysql.connector.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        autocommit=False,
+        charset="utf8mb4",
+        collation="utf8mb4_unicode_ci"
+    )
+    
+    print("✓ Conexión establecida\n")
+    return conn
+
+# ==========================================
+# VERIFICACIÓN DE ESTRUCTURA
+# ==========================================
+def verificar_tablas(cur) -> bool:
+    """Verifica que las tablas necesarias existan"""
+    print("🔍 Verificando estructura de base de datos...")
+    
+    tablas_requeridas = ['Rol', 'Usuario', 'Categoria', 'Producto', 'Cliente']
+    
+    for tabla in tablas_requeridas:
+        cur.execute(f"SHOW TABLES LIKE '{tabla}'")
+        if not cur.fetchone():
+            print(f"   ❌ Tabla '{tabla}' NO EXISTE")
+            print("\n🚨 ERROR CRÍTICO:")
+            print("   La estructura de la base de datos no está creada.")
+            print("\n📋 SOLUCIÓN:")
+            print("   1. Ejecuta 'Reparar MySQL' desde el menú Inicio")
+            print("   2. O ejecuta manualmente:")
+            print("      mysql\\bin\\mysql.exe -u root --port=3307 < schema.sql")
+            return False
+        print(f"   ✓ {tabla}")
+    
+    print("   ✅ Todas las tablas necesarias existen\n")
+    return True
+
+# ==========================================
+# FUNCIONES AUXILIARES
 # ==========================================
 def get_rol_id(cur, nombre: str) -> Optional[int]:
     cur.execute("SELECT id_rol FROM Rol WHERE nombre=%s", (nombre,))
     row = cur.fetchone()
     return int(row[0]) if row else None
 
-def get_categoria_id(cur, nombre: str) -> Optional[int]:
-    cur.execute("SELECT id_categoria FROM Categoria WHERE nombre=%s", (nombre,))
-    row = cur.fetchone()
-    return int(row[0]) if row else None
+def user_exists(cur, nombre: str) -> bool:
+    cur.execute("SELECT 1 FROM Usuario WHERE nombre=%s", (nombre,))
+    return cur.fetchone() is not None
 
-def get_producto_info(cur, nombre: str) -> Optional[tuple[int, float, str]]:
-    cur.execute("SELECT id_producto, precio, nombre FROM Producto WHERE nombre=%s", (nombre,))
-    row = cur.fetchone()
-    return (int(row[0]), float(row[1]), str(row[2])) if row else (None, None, None)
-
-def get_cliente_id(cur, nombre: str) -> Optional[int]:
-    cur.execute("SELECT id_cliente FROM Cliente WHERE nombre=%s", (nombre,))
-    row = cur.fetchone()
-    return int(row[0]) if row else None
-
-def get_user_id(cur, nombre: str) -> Optional[int]:
-    cur.execute("SELECT id_usuario FROM Usuario WHERE nombre=%s", (nombre,))
-    row = cur.fetchone()
-    return int(row[0]) if row else None
-
-def get_proveedor_id(cur, nombre: str) -> Optional[int]:
-    cur.execute("SELECT id_proveedor FROM Proveedor WHERE nombre=%s", (nombre,))
-    row = cur.fetchone()
-    return int(row[0]) if row else None
+def categoria_exists(cur, nombre: str) -> bool:
+    cur.execute("SELECT 1 FROM Categoria WHERE nombre=%s", (nombre,))
+    return cur.fetchone() is not None
 
 # ==========================================
-# ROLES
+# 1. ROLES (Estructural)
 # ==========================================
 def ensure_roles(cur) -> None:
-    print("Asegurando roles...")
+    print("📋 Asegurando roles...")
     cur.execute("""
         INSERT IGNORE INTO Rol (id_rol, nombre, descripcion) VALUES
         (1, 'admin', 'Administrador del sistema con todos los permisos'),
         (2, 'vendedor', 'Usuario que puede realizar ventas'),
         (3, 'supervisor', 'Usuario que puede gestionar inventario y ver reportes')
     """)
+    print("   ✓ Roles: admin, vendedor, supervisor")
 
 # ==========================================
-# USUARIOS
+# 2. USUARIO ADMIN (Acceso inicial)
 # ==========================================
-def user_exists(cur, nombre: str) -> bool:
-    cur.execute("SELECT 1 FROM Usuario WHERE nombre=%s", (nombre,))
-    return cur.fetchone() is not None
-
-def ensure_user(cur, nombre: str, password: str, rol_nombre: str) -> None:
-    rid = get_rol_id(cur, rol_nombre)
-    if not rid:
-        raise RuntimeError(f"Rol '{rol_nombre}' no existe.")
+def ensure_admin_user(cur) -> None:
+    print("\n👤 Verificando usuario administrador...")
+    nombre = "admin"
+    password = "admin123" 
+    
     if user_exists(cur, nombre):
-        print(f"   - Usuario '{nombre}' ya existe. Omitiendo.")
+        print(f"   ℹ Usuario '{nombre}' ya existe (actualizando contraseña por seguridad)")
+        # Actualizar contraseña por si fue modificada
+        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+        rid = get_rol_id(cur, "admin")
+        cur.execute(
+            "UPDATE Usuario SET contraseña=%s, id_rol=%s, activo=TRUE WHERE nombre=%s",
+            (hashed, rid, nombre)
+        )
+        print(f"   ✓ Usuario actualizado: {nombre} / {password}")
         return
-    print(f"   + Creando usuario '{nombre}'...")
+
+    rid = get_rol_id(cur, "admin")
+    if not rid:
+        print("   ✗ Error: No se encontró el rol 'admin'")
+        return
+
+    print(f"   + Creando usuario inicial '{nombre}'...")
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+    
     cur.execute(
         "INSERT INTO Usuario (nombre, contraseña, id_rol, activo) VALUES (%s, %s, %s, TRUE)",
         (nombre, hashed, rid),
     )
+    print(f"   ✓ Usuario creado: {nombre} / {password}")
 
 # ==========================================
-# CATEGORÍAS
+# 3. CATEGORÍAS (Configuración Base)
 # ==========================================
 def ensure_categorias(cur) -> None:
-    print("Asegurando categorías iniciales...")
-    cur.execute("""
-        INSERT IGNORE INTO Categoria (id_categoria, nombre, descripcion, activa, margen_ganancia) VALUES
-        (1, 'Bebidas', 'Bebidas alcohólicas y no alcohólicas', TRUE, 30.00),
-        (2, 'Almacén', 'Productos de almacén y despensa', TRUE, 30.00),
-        (3, 'Lácteos', 'Productos lácteos y derivados', TRUE, 25.00),
-        (4, 'Carnes', 'Carnes y embutidos', TRUE, 35.00),
-        (5, 'Limpieza', 'Productos de limpieza e higiene', TRUE, 30.00),
-        (6, 'Panadería', 'Productos de panadería y pastelería', TRUE, 40.00),
-        (7, 'Congelados', 'Productos congelados y listos para cocinar', TRUE, 30.00),
-        (8, 'Golosinas', 'Golosinas, snacks y alfajores', TRUE, 40.00),
-        (99, 'General', 'Productos sin categoría específica', TRUE, 30.00)
-    """)
-
-# ==========================================
-# PROVEEDORES
-# ==========================================
-def ensure_proveedor(cur, nombre: str, empresa: str = "", telefono: str = "", email: str = "") -> None:
-    try:
-        cur.execute(
-            "INSERT IGNORE INTO Proveedor (nombre, empresa, telefono, email, activo) VALUES (%s, %s, %s, %s, TRUE)",
-            (nombre.strip(), empresa.strip() or None, telefono.strip() or None, email.strip() or None)
-        )
-        if cur.rowcount > 0: print(f"   + Proveedor '{nombre}' creado")
-    except mysql.connector.Error as e:
-        print(f"   ! Error al crear proveedor '{nombre}': {e}")
-
-# ==========================================
-# CLIENTES
-# ==========================================
-def ensure_cliente(cur, nombre: str, dni: str = "", limite: float = 50000.00) -> None:
-    try:
-        cur.execute("SELECT id_cliente FROM Cliente WHERE nombre=%s", (nombre,))
-        if cur.fetchone():
-            print(f"   - Cliente '{nombre}' ya existe. Omitiendo.")
-            return
-        cur.execute(
-            "INSERT INTO Cliente (nombre, dni, activo) VALUES (%s, %s, TRUE)",
-            (nombre, dni or None)
-        )
-        id_cliente = cur.lastrowid
-        cur.execute(
-            "INSERT INTO CuentaCorriente (id_cliente, saldo, limite_credito) VALUES (%s, 0.00, %s)",
-            (id_cliente, limite)
-        )
-        print(f"   + Cliente '{nombre}' creado")
-    except mysql.connector.Error as e:
-        print(f"   ! Error al crear cliente '{nombre}': {e}")
-
-def set_cliente_deuda(cur, nombre_cliente: str, monto_deuda: float) -> None:
-    try:
-        id_cliente = get_cliente_id(cur, nombre_cliente)
-        if not id_cliente: return
-        cur.execute("UPDATE CuentaCorriente SET saldo = %s WHERE id_cliente = %s", (monto_deuda, id_cliente))
-        if cur.rowcount > 0: print(f"   + Deuda de ${monto_deuda} asignada a '{nombre_cliente}'.")
-    except mysql.connector.Error as e:
-        print(f"   ! Error deuda: {e}")
-
-# ==========================================
-# PRODUCTOS
-# ==========================================
-def ensure_producto(cur, nombre: str, precio: float, categoria: str, stock_inicial: float, stock_min: int, es_pesable: bool, codigo: str = "") -> None:
-    try:
-        cur.execute("SELECT 1 FROM Producto WHERE nombre=%s", (nombre,))
-        if cur.fetchone():
-            print(f"   - Producto '{nombre}' ya existe. Omitiendo.")
-            return
-
-        id_cat = get_categoria_id(cur, categoria) or get_categoria_id(cur, "General")
-        
-        cur.execute(
-            "INSERT INTO Producto (nombre, precio, id_categoria, es_pesable, codigo_barras, activo) VALUES (%s, %s, %s, %s, %s, TRUE)",
-            (nombre, precio, id_cat, es_pesable, codigo or None)
-        )
-        id_prod = cur.lastrowid
-        cur.execute(
-            "INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s, %s, %s)",
-            (id_prod, stock_inicial, stock_min)
-        )
-        print(f"   + Producto '{nombre}' creado")
-    except mysql.connector.Error as e:
-        print(f"   ! Error producto '{nombre}': {e}")
-
-# ==========================================
-# HISTORIAL DE VENTAS
-# ==========================================
-def ensure_venta_historica(cur, cliente_nombre: str, vendedor_nombre: str, productos_nombres: list[tuple[str, float]], metodo_pago: str, dias_atras: int) -> None:
-    id_cliente = get_cliente_id(cur, cliente_nombre)
-    id_usuario = get_user_id(cur, vendedor_nombre)
+    print("\n🏷️ Cargando categorías iniciales...")
     
-    if not id_cliente or not id_usuario:
-        print(f"  ! Skip Venta: Cliente/Usuario no encontrado ({cliente_nombre}/{vendedor_nombre})")
-        return
+    categorias = [
+        (1, 'Bebidas', 30.00),
+        (2, 'Almacén', 30.00),
+        (3, 'Lácteos', 25.00),
+        (4, 'Carnes', 35.00),
+        (5, 'Limpieza', 30.00),
+        (6, 'Panadería', 40.00),
+        (7, 'Congelados', 30.00),
+        (8, 'Golosinas', 40.00),
+        (9, 'Verdulería', 35.00),
+        (99, 'General', 30.00)
+    ]
 
-    total_venta = 0.0
-    detalles = []
-
-    for prod_nom, cant in productos_nombres:
-        info = get_producto_info(cur, prod_nom)
-        if not info[0]:
-             print(f"  ! Skip prod {prod_nom}")
-             continue
-        id_prod, precio, nombre = info
-        total_venta += (precio * cant)
-        detalles.append((id_prod, cant, precio, nombre))
+    categorias_insertadas = 0
+    for cat_id, nombre, margen in categorias:
+        if not categoria_exists(cur, nombre):
+            cur.execute(
+                """
+                INSERT INTO Categoria 
+                (id_categoria, nombre, margen_ganancia, activa) 
+                VALUES (%s, %s, %s, 1)
+                """,
+                (cat_id, nombre, margen)
+            )
+            print(f"   ✓ {nombre} (margen: {margen}%)")
+            categorias_insertadas += 1
+        else:
+            print(f"   ℹ {nombre} ya existe")
     
-    if not detalles: return
-
-    fecha = datetime.now() - timedelta(days=dias_atras)
-    
-    # Insertar Venta
-    cur.execute(
-        "INSERT INTO Venta (id_cliente, id_usuario, tipo_pago, fecha, estado, total) VALUES (%s, %s, %s, %s, 'completada', %s)",
-        (id_cliente, id_usuario, metodo_pago, fecha, total_venta)
-    )
-    id_venta = cur.lastrowid
-
-    # Insertar Detalles
-    for d in detalles:
-        cur.execute(
-            "INSERT INTO DetalleVenta (id_venta, id_producto, nombre_producto, cantidad, precio_unitario) VALUES (%s, %s, %s, %s, %s)",
-            (id_venta, d[0], d[3], d[1], d[2])
-        )
-        # Stock
-        cur.execute("UPDATE Inventario SET cantidad = cantidad - %s WHERE id_producto = %s", (d[1], d[0]))
-
-    print(f"   + Venta Histórica ID {id_venta} creada.")
-
-# ==========================================
-# HISTORIAL DE COMPRAS
-# ==========================================
-def ensure_compra_historica(cur, proveedor_nombre: str, usuario_nombre: str, productos_comprados: list[tuple[str, float, float]], dias_atras: int) -> None:
-    id_prov = get_proveedor_id(cur, proveedor_nombre)
-    id_usu = get_user_id(cur, usuario_nombre)
-    
-    if not id_prov or not id_usu: return
-
-    detalles = []
-    for prod_nom, cant, costo in productos_comprados:
-        info = get_producto_info(cur, prod_nom)
-        if info[0]:
-            detalles.append((info[0], info[2], cant, costo))
-
-    if not detalles: return
-    
-    fecha = datetime.now() - timedelta(days=dias_atras)
-    cur.execute(
-        "INSERT INTO Compra (id_usuario, id_proveedor, fecha, estado) VALUES (%s, %s, %s, 'recibida')",
-        (id_usu, id_prov, fecha)
-    )
-    id_compra = cur.lastrowid
-
-    for d in detalles:
-        cur.execute(
-            "INSERT INTO DetalleCompra (id_compra, id_producto, nombre_producto, cantidad, precio_unitario) VALUES (%s, %s, %s, %s, %s)",
-            (id_compra, d[0], d[1], d[2], d[3])
-        )
-        # Stock
-        cur.execute("UPDATE Inventario SET cantidad = cantidad + %s WHERE id_producto = %s", (d[2], d[0]))
-    
-    print(f"   + Compra Histórica ID {id_compra} creada.")
+    if categorias_insertadas > 0:
+        print(f"\n   📦 {categorias_insertadas} categorías nuevas insertadas")
+    else:
+        print(f"\n   ℹ Todas las categorías ya estaban cargadas")
 
 # ==========================================
 # MAIN
@@ -249,44 +174,65 @@ def ensure_compra_historica(cur, proveedor_nombre: str, usuario_nombre: str, pro
 def main() -> None:
     conn = None
     try:
+        print("\n" + "="*60)
+        print("  CARGA DE DATOS INICIALES - Sistema Don Atilio")
+        print("="*60 + "\n")
+        
+        # Conectar
         conn = conectar()
-        # ¡IMPORTANTE! buffered=True evita el error "Unread result found"
         cur = conn.cursor(buffered=True)
         
-        print("=== CARGA DE DATOS (Con Cursor Bufferizado) ===")
+        # 🔥 VERIFICAR QUE EXISTAN LAS TABLAS
+        if not verificar_tablas(cur):
+            sys.exit(1)
         
+        # 1. Roles
         ensure_roles(cur)
-        ensure_user(cur, "admin", "admin123", "admin")
-        ensure_user(cur, "tomas", "tomas123", "vendedor")
-        ensure_user(cur, "supervisor", "super123", "supervisor")
         
+        # 2. Usuario Admin (para poder entrar)
+        ensure_admin_user(cur)
+        
+        # 3. Categorías (para agilizar carga de productos)
         ensure_categorias(cur)
-        
-        ensure_proveedor(cur, "Coca-Cola FEMSA")
-        ensure_proveedor(cur, "Arcor")
-        ensure_proveedor(cur, "La Serenísima")
-        
-        ensure_cliente(cur, "Juan Perez", "30123456", 75000.00)
-        ensure_cliente(cur, "Maria Gonzalez", "28999111", 100000.00)
-        
-        ensure_producto(cur, "Coca-Cola 1.5L", 1200.00, "Bebidas", 50, 10, False, "7790123456789")
-        ensure_producto(cur, "Leche Entera 1L", 800.00, "Lácteos", 30, 5, False, "7790987654321")
-        ensure_producto(cur, "Pan Suelto (Kg)", 1500.00, "Panadería", 10.000, 2, True)
-        ensure_producto(cur, "Alfajor Jorgito", 500.00, "Golosinas", 100, 20, False, "7793333444466")
 
-        ensure_venta_historica(cur, "Juan Perez", "tomas", [("Coca-Cola 1.5L", 2), ("Alfajor Jorgito", 3)], "efectivo", 5)
-        
-        ensure_compra_historica(cur, "Coca-Cola FEMSA", "admin", [("Coca-Cola 1.5L", 50, 700.00)], 10)
-
+        # Commit
         conn.commit()
-        print("\n✅ CARGA COMPLETADA EXITOSAMENTE (Commit realizado).")
+        
+        print("\n" + "="*60)
+        print("  ✅ CARGA COMPLETADA EXITOSAMENTE")
+        print("="*60)
+        print("\n📌 Datos cargados:")
+        print("   • Roles: admin, vendedor, supervisor")
+        print("   • Usuario: admin / admin123")
+        print("   • Categorías: 10 categorías predefinidas")
+        print("\n💡 El sistema está listo para usarse")
+        print("\n🔐 Credenciales de acceso:")
+        print("   Usuario: admin")
+        print("   Contraseña: admin123")
 
+    except mysql.connector.Error as e:
+        if conn: conn.rollback()
+        print(f"\n❌ ERROR DE BASE DE DATOS: {e}")
+        print(f"\n🔍 Verifica que:")
+        print("   1. MySQL esté corriendo (servicio MySQL_DonAtilio)")
+        print("   2. El puerto 3307 esté disponible")
+        print("   3. La base de datos 'supermercado_don_atilio' exista")
+        print("\n💡 Para verificar:")
+        print("   sc query MySQL_DonAtilio")
+        print("   mysql\\bin\\mysql.exe -u root --port=3307 -e \"SHOW DATABASES;\"")
+        sys.exit(1)
+        
     except Exception as e:
         if conn: conn.rollback()
         print(f"\n❌ ERROR CRÍTICO: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
+        
     finally:
-        if conn: conn.close()
+        if conn: 
+            conn.close()
+            print("\n🔌 Conexión cerrada")
 
 if __name__ == "__main__":
     main()

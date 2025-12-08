@@ -1,16 +1,15 @@
 ; =====================================================
 ; Sistema Cobros Don Atilio - Instalador FINAL
-; Toma .env desde installer_scripts\.env.production
-; Garantiza usuario admin/admin123
+; Seed integrado en main.py (no necesita archivo separado)
 ; =====================================================
 
 #define MyAppName "Sistema Cobros Don Atilio"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "Don Atilio Supermercado"
 #define MyAppExeName "SistemaCobrosDonAtilio.exe"
 
 [Setup]
-AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890} }
+AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -20,6 +19,7 @@ DisableProgramGroupPage=yes
 OutputDir=Instalador_Output
 OutputBaseFilename=InstaladorDonAtilio_v{#MyAppVersion}_FINAL
 SetupIconFile=logo.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -33,33 +33,44 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-; --- App ---
+; --- App (CON ICONO EMBEBIDO + SEED INTEGRADO) ---
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
-; --- SQL de estructura (lo usa el setup_mysql.bat) ---
+; --- LOGO PARA ACCESOS DIRECTOS ---
+Source: "logo.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- SQL de estructura ---
 Source: "app\database\schema.sql"; DestDir: "{app}"; Flags: ignoreversion
 
-; --- Variables de entorno: ahora DESDE installer_scripts ---
+; --- Variables de entorno ---
 #ifexist "installer_scripts\.env.production"
-  Source: "installer_scripts\.env.production"; DestDir: "{app}"; DestName: ".env"; Flags: ignoreversion
+Source: "installer_scripts\.env.production"; DestDir: "{app}"; DestName: ".env"; Flags: ignoreversion
 #else
-  #error Falta el archivo installer_scripts\.env.production
+#error Falta el archivo installer_scripts\.env.production
 #endif
 
 ; --- Script que instala/levanta MariaDB/MySQL embebido ---
 Source: "installer_scripts\setup_mysql.bat"; DestDir: "{app}"; Flags: ignoreversion
 
-; --- MySQL/MariaDB portable (tu carpeta mysql\...) ---
+; --- MySQL/MariaDB portable (tu carpeta mysql...) ---
 Source: "mysql\*"; DestDir: "{app}\mysql"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; --- Script de reparación opcional ---
 Source: "reparar_mysql.bat"; DestDir: "{app}"; Flags: ignoreversion
 
+
+[Dirs]
+; 🔥 NUEVO: Aseguramos la creación de las carpetas de trabajo con permisos de administrador
+Name: "{app}\backup"
+Name: "{app}\logs"
+
+
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; ICONOS CON RUTA EXPLÍCITA AL .ICO
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\logo.ico"
 Name: "{group}\Reparar MySQL"; Filename: "{app}\reparar_mysql.bat"
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
 [Run]
 ; Nada aquí: control total desde [Code]
@@ -71,7 +82,7 @@ Filename: "{sys}\sc.exe"; Parameters: "delete MySQL_DonAtilio"; Flags: runhidden
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\mysql\data"
 Type: filesandordirs; Name: "{app}\logs"
-
+Type: filesandordirs; Name: "{app}\backup" ;
 [Code]
 var
   ProgressPage: TOutputProgressWizardPage;
@@ -99,14 +110,14 @@ begin
 
   Log('Ejecutando setup_mysql.bat');
   if Exec('cmd.exe', '/c "' + ExpandConstant('{app}\setup_mysql.bat') + '"',
-          ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+           ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) then
   begin
     Log(Format('setup_mysql.bat terminó con código %d',[Code]));
     SleepMs(3000);
 
     if ExecOk('sc.exe', 'query MySQL_DonAtilio', '', SW_HIDE) then
     begin
-      Log('✓ Servicio MySQL_DonAtilio creado/registrado');
+      Log('✔ Servicio MySQL_DonAtilio creado/registrado');
       Result := True;
     end
     else
@@ -119,23 +130,45 @@ begin
 end;
 
 function CargarDatosIniciales(): Boolean;
-var Code: Integer;
+var 
+  Code: Integer;
+  AppPath: String;
+  ExePath: String;
 begin
   Result := False;
-  ProgressPage.SetText('Cargando datos iniciales...', 'Usuarios, productos, categorías...');
+  ProgressPage.SetText('Cargando datos iniciales...', 'Usuarios, categorías...');
   ProgressPage.SetProgress(0, 100);
 
-  Log('Ejecutando app con --seed-data');
-  if Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--seed-data',
-          ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+  AppPath := ExpandConstant('{app}');
+  ExePath := AppPath + '\{#MyAppExeName}';
+
+  Log('=== INICIO SEED DATA ===');
+  Log('Ejecutable: ' + ExePath);
+  Log('Directorio: ' + AppPath);
+  Log('Comando: ' + ExePath + ' --seed-data');
+  
+  if Exec(ExePath, '--seed-data', AppPath, SW_HIDE, ewWaitUntilTerminated, Code) then
   begin
-    Log(Format('Seed data terminó con código %d',[Code]));
-    Result := (Code = 0);
-    if Result then Log('✓ Datos iniciales OK') else Log('✗ Datos iniciales fallaron');
+    Log(Format('--seed-data terminó con código %d', [Code]));
+    
+    if Code = 0 then
+    begin
+      Log('✔ Datos iniciales cargados correctamente');
+      Result := True;
+    end
+    else
+    begin
+      Log(Format('✗ Seed data falló con código %d', [Code]));
+      Result := False;
+    end;
   end
   else
-    Log('✗ No se pudo ejecutar --seed-data');
+  begin
+    Log('✗ No se pudo ejecutar --seed-data (Exec falló)');
+    Result := False;
+  end;
 
+  Log('=== FIN SEED DATA ===');
   ProgressPage.SetProgress(100, 100);
 end;
 
@@ -148,7 +181,7 @@ begin
   ProgressPage.SetText('Asegurando usuario administrador...', '');
   ProgressPage.SetProgress(0, 100);
 
-  { Hash bcrypt para "admin123" (cost 12) – mismo formato que ya venías usando }
+  { Hash bcrypt para "admin123" (cost 12) }
   Hash := '$2b$12$tEa6owvg3LQbn5ZmLewhAe0anU6hj9ygpkKajh1p9H2YbU9QBvKnS';
 
   { UPSERT: crea admin si no existe y, si existe, fuerza contraseña/activo/rol }
@@ -160,11 +193,13 @@ begin
 
   if ExecOk(ExpandConstant('{app}\mysql\bin\mysql.exe'), Params, ExpandConstant('{app}'), SW_HIDE) then
   begin
-    Log('✓ Usuario admin garantizado (admin/admin123)');
+    Log('✔ Usuario admin garantizado (admin/admin123)');
     Result := True;
   end
   else
     Log('✗ No se pudo garantizar el admin');
+
+  ProgressPage.SetProgress(100, 100);
 end;
 
 function VerificarInstalacion(): Boolean;
@@ -175,25 +210,27 @@ begin
 
   if ExecOk('sc.exe', 'query MySQL_DonAtilio', '', SW_HIDE) then
   begin
-    Log('✓ Servicio MySQL_DonAtilio OK');
+    Log('✔ Servicio MySQL_DonAtilio OK');
     SleepMs(1000);
 
     if ExecOk(ExpandConstant('{app}\mysql\bin\mysql.exe'),
               '-u root --port=3307 --protocol=TCP -e "SELECT 1;"',
               ExpandConstant('{app}'), SW_HIDE) then
     begin
-      Log('✓ MySQL responde');
+      Log('✔ MySQL responde');
       if ExecOk(ExpandConstant('{app}\mysql\bin\mysql.exe'),
                 '-u root --port=3307 --protocol=TCP -e "USE supermercado_don_atilio; SELECT COUNT(*) FROM usuario;"',
                 ExpandConstant('{app}'), SW_HIDE) then
       begin
-        Log('✓ Base con tablas/datos');
+        Log('✔ Base con tablas/datos');
         Result := True;
       end;
     end;
   end
   else
     Log('✗ Servicio MySQL_DonAtilio NO OK');
+
+  ProgressPage.SetProgress(100, 100);
 end;
 
 procedure InitializeWizard();
@@ -234,23 +271,25 @@ begin
           'No se pudo instalar MySQL correctamente.'#13#10#13#10 +
           'Para completar manualmente:'#13#10 +
           '1) Abrí "Reparar MySQL" desde el menú Inicio.'#13#10 +
-          '2) Volvé a ejecutar el instalador.';
+          '2) Luego ejecutá manualmente:'#13#10 +
+          '   cd "C:\Program Files\Sistema Cobros Don Atilio"'#13#10 +
+          '   SistemaCobrosDonAtilio.exe --seed-data';
         MsgBox(Msg, mbError, MB_OK);
         Exit;
       end;
 
-      { Paso 2: Seed }
+      { Paso 2: Seed (INTEGRADO EN EL .EXE) }
       ProgressPage.SetText('Paso 2/4: Cargando datos iniciales...', '');
       SeedDataSuccess := CargarDatosIniciales();
 
-      { Paso 3: Garantizar admin }
+      { Paso 3: Garantizar admin (por si el seed falló) }
       ProgressPage.SetText('Paso 3/4: Asegurando admin/admin123...', '');
       AdminFixSuccess := GarantizarAdmin();
 
       { Paso 4: Verificación }
       ProgressPage.SetText('Paso 4/4: Verificando instalación...', '');
       if VerificarInstalacion() then
-        Log('✓✓✓ Instalación verificada')
+        Log('✔✔✔ Instalación verificada')
       else
         Log('⚠ Verificación con advertencias');
     finally
@@ -265,11 +304,13 @@ var
 begin
   if CurPageID = wpFinished then
   begin
+    // CORRECCIÓN: Concatenación correcta de strings para evitar error de compilación
     okTxt :=
       '¡Instalación completada!'#13#10#13#10 +
-      'Podés abrir "' + '{#MyAppName}' + '" desde el acceso directo.'#13#10#13#10 +
+      'Podés abrir "Sistema Cobros Don Atilio" desde el acceso directo.'#13#10#13#10 +
       'Credenciales:'#13#10 +
-      '• Usuario: admin | Contraseña: admin123'#13#10 +
+      '• Usuario: admin | ' +
+      'Contraseña: admin123'#13#10 +
       '• Puerto MySQL: 3307';
 
     if MySQLInstallSuccess and (SeedDataSuccess or AdminFixSuccess) then
@@ -279,7 +320,7 @@ begin
         'MySQL se instaló, pero falta cargar datos.'#13#10#13#10 +
         'Abrí CMD como Administrador y ejecutá:'#13#10 +
         'cd "' + ExpandConstant('{app}') + '"'#13#10 +
-        '{#MyAppExeName} --seed-data'
+        ExpandConstant('{#MyAppExeName}') + ' --seed-data'
     else
       WizardForm.FinishedLabel.Caption :=
         'La instalación necesita reparación.'#13#10#13#10 +

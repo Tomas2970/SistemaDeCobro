@@ -9,9 +9,11 @@ set "BIN=%BASE%\mysql\bin"
 set "MYSQLD=%BIN%\mariadbd.exe"
 set "MYSQL_INSTALL_DB_A=%BIN%\mariadb-install-db.exe"
 set "MYSQL_INSTALL_DB_B=%BIN%\mysql_install_db.exe"
+set "MYSQL_CLIENT=%BIN%\mysql.exe"
 set "SERVICE=MySQL_DonAtilio"
 set "DATADIR=%BASE%\mysql\data"
 set "MYINI=%BASE%\my.ini"
+set "SCHEMA=%BASE%\schema.sql"
 
 echo [SETUP] Iniciando configuracion MariaDB...
 
@@ -56,26 +58,26 @@ if errorlevel 1 (
 )
 
 REM --- Rellenar placeholders de my.ini si los tiene ---
-set "BASE=%~dp0"
 set "MYSQL_DIR=%BASE%mysql"
 set "DATA_DIR=%BASE%mysql\data"
 if exist "%BASE%my.ini" (
   powershell -NoProfile -Command ^
     "(Get-Content '%BASE%my.ini') ^
       -replace '__MYSQL_DIR__',  '%MYSQL_DIR%' ^
-      -replace '__DATA_DIR__',   '%DATA_DIR%' |
+      -replace '__DATA_DIR__',   '%DATA_DIR%' | ^
      Set-Content -Encoding ASCII '%BASE%my.ini'"
   echo [SETUP] my.ini actualizado con rutas reales.
-) else (
-  echo [SETUP] ATENCION: no existe my.ini; se generara de cero.
 )
-
 
 REM --- (Re)instalar servicio ---
 sc query "%SERVICE%" >nul 2>&1
 if errorlevel 1 (
   echo [SETUP] Instalando servicio %SERVICE%...
   "%MYSQLD%" --install "%SERVICE%" --defaults-file="%MYINI%"
+) else (
+  echo [SETUP] Servicio ya existe, reiniciando...
+  net stop "%SERVICE%" >nul 2>&1
+  timeout /t 2 /nobreak >nul
 )
 
 REM --- Iniciar servicio ---
@@ -85,6 +87,35 @@ if errorlevel 1 (
   echo [WARN] No se pudo iniciar mediante 'net start'. Mostrando error en consola:
   "%MYSQLD%" --defaults-file="%MYINI%" --console
   exit /b 1
+)
+
+REM --- 🔥 ESPERAR A QUE MYSQL RESPONDA ---
+echo [SETUP] Esperando a que MySQL este listo...
+set INTENTOS=0
+:WAIT_MYSQL
+timeout /t 1 /nobreak >nul
+"%MYSQL_CLIENT%" -u root --port=3307 --protocol=TCP -e "SELECT 1;" >nul 2>&1
+if errorlevel 1 (
+  set /a INTENTOS+=1
+  if %INTENTOS% geq 30 (
+    echo [ERROR] MySQL no respondio en 30 segundos
+    exit /b 1
+  )
+  goto WAIT_MYSQL
+)
+echo [SETUP] MySQL responde correctamente!
+
+REM --- 🔥 EJECUTAR SCHEMA.SQL ---
+if exist "%SCHEMA%" (
+  echo [SETUP] Creando estructura de base de datos...
+  "%MYSQL_CLIENT%" -u root --port=3307 --protocol=TCP < "%SCHEMA%"
+  if errorlevel 1 (
+    echo [ERROR] Fallo al ejecutar schema.sql
+    exit /b 1
+  )
+  echo [SETUP] Schema creado exitosamente!
+) else (
+  echo [WARN] No se encuentra schema.sql, omitiendo creacion de estructura
 )
 
 echo [SETUP] MariaDB OK (servicio RUNNING en puerto 3307).

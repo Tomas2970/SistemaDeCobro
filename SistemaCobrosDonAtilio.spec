@@ -1,57 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules
-
-block_cipher = None
-
-hidden = []
-hidden += collect_submodules('bcrypt')   # asegura todo bcrypt
-hidden += [
-    '_cffi_backend',
-    'PIL._tkinter_finder',
-    # FRONTEND pantallas (importadas directa o indirectamente)
-    'app.frontend.interfaz_menu_principal',
-    'app.frontend.interfaz_venta',
-    'app.frontend.interfaz_inventario',
-    'app.frontend.interfaz_compra',
-    # BACKEND
-    'app.database.DB',
-    'app.database.backend_adapter',
-    'app.database.permisos',
-    # TOOLS utilitarias
-    'app.tools.seed_initial_data',
-    'app.tools.logger_config',
-    # Otros usados
-    'mysql.connector',
-    'dotenv',
-    'tkinter',     # (hook de _tkinter incluye tcl/tk)
-    'PIL',
-]
 
 a = Analysis(
-    ['app/main.py'],
-    pathex=['.'],
+    ['app\\main.py'],
+    pathex=[],
     binaries=[],
-    datas=[
-        # Solo archivos de datos/recursos, NO .py
-        ('app/frontend/Don atilio.png', 'app/frontend'),
-        ('app/database/schema.sql', 'app/database'),
-    ],
-    hiddenimports=hidden,
+    datas=[('app', 'app')],
+    hiddenimports=['app.frontend.interfaz_gestion_proveedores', 'app.frontend.interfaz_crear_proveedor', 'app.frontend.interfaz_asignar_productos', 'app.frontend.interfaz_categorias', 'app.frontend.interfaz_gestion_usuarios', 'app.frontend.interfaz_crear_usuario', 'app.frontend.interfaz_gestion_clientes', 'app.frontend.interfaz_crear_cliente', 'app.frontend.interfaz_inventario', 'app.frontend.interfaz_productos', 'app.frontend.interfaz_venta', 'app.frontend.interfaz_reportes', 'app.frontend.interfaz_cuenta_corriente', 'app.frontend.interfaz_compra', 'app.frontend.interfaz_historiales', 'mysql.connector.plugins.caching_sha2_password', 'bcrypt', 'mysql.connector', 'dotenv'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
+    optimize=0,
 )
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
     name='SistemaCobrosDonAtilio',
@@ -61,11 +29,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,   # GUI (sin consola)
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='logo.ico',
+    icon=['logo.ico'],
 )

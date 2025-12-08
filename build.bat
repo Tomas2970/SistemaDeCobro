@@ -7,15 +7,15 @@ echo ========================================
 
 echo [1/4] Verificando dependencias...
 
-REM 1) Verificar que Python esté disponible
+REM 1) Verificar que Python este disponible
 where python >NUL 2>&1
 if errorlevel 1 (
   echo ERROR: Python no se encuentra en el PATH.
-  echo Instala Python 3.x y/o marcá "Add Python to PATH" al instalar.
+  echo Instala Python 3.x y/o marca "Add Python to PATH" al instalar.
   goto :fail
 )
 
-REM 2) Asegurar pip y actualizarlo (sin depender de pip.exe en PATH)
+REM 2) Asegurar pip y actualizarlo
 python -m ensurepip --upgrade >NUL 2>&1
 python -m pip install -U pip
 if errorlevel 1 (
@@ -35,7 +35,7 @@ if exist "requirements.txt" (
   echo AVISO: No se encontro requirements.txt, se omite instalacion de deps del proyecto.
 )
 
-REM 4) Instalar/Actualizar PyInstaller de forma robusta
+REM 4) Instalar/Actualizar PyInstaller
 python -m pip install -U pyinstaller
 if errorlevel 1 (
   echo ERROR: Fallo al instalar/actualizar PyInstaller.
@@ -46,22 +46,47 @@ echo.
 echo [2/4] Limpiando compilaciones anteriores...
 rmdir /s /q build  2>NUL
 rmdir /s /q dist   2>NUL
-REM Si TU flujo usa .spec existente, NO borres el .spec.
-REM del /q SistemaCobrosDonAtilio.spec 2>NUL
+REM Borramos el spec viejo para forzar que tome la nueva configuracion
+del /q SistemaCobrosDonAtilio.spec 2>NUL
 
 echo.
 echo [3/4] Compilando aplicacion...
 
-REM Si existe el .spec, compilar desde .spec; si no, fallback a onefile con entrypoint por defecto
-set "SPEC=SistemaCobrosDonAtilio.spec"
-if exist "%SPEC%" (
-  echo Usando archivo de especificacion: %SPEC%
-  python -m PyInstaller "%SPEC%"
+REM === VERIFICAR QUE EXISTE logo.ico ===
+if not exist "logo.ico" (
+  echo ADVERTENCIA: No se encuentra logo.ico en el directorio actual
+  echo Se usara el icono por defecto de Python
+  set "ICON_PARAM="
 ) else (
-  echo No se encontro %SPEC%. Compilando con --onefile.
-  REM >>> Ajusta la ruta del entrypoint si tu main es otro archivo <<<
-  python -m PyInstaller --onefile --name SistemaCobrosDonAtilio app\main.py
+  echo Icono detectado: logo.ico
+  set "ICON_PARAM=--icon=logo.ico"
 )
+
+REM === COMPILACION CON ICONO Y CARPETA APP COMPLETA ===
+echo Generando compilacion con imports ocultos e icono...
+
+python -m PyInstaller --noconsole --onefile %ICON_PARAM% --name SistemaCobrosDonAtilio ^
+  --hidden-import=app.frontend.interfaz_gestion_proveedores ^
+  --hidden-import=app.frontend.interfaz_crear_proveedor ^
+  --hidden-import=app.frontend.interfaz_asignar_productos ^
+  --hidden-import=app.frontend.interfaz_categorias ^
+  --hidden-import=app.frontend.interfaz_gestion_usuarios ^
+  --hidden-import=app.frontend.interfaz_crear_usuario ^
+  --hidden-import=app.frontend.interfaz_gestion_clientes ^
+  --hidden-import=app.frontend.interfaz_crear_cliente ^
+  --hidden-import=app.frontend.interfaz_inventario ^
+  --hidden-import=app.frontend.interfaz_productos ^
+  --hidden-import=app.frontend.interfaz_venta ^
+  --hidden-import=app.frontend.interfaz_reportes ^
+  --hidden-import=app.frontend.interfaz_cuenta_corriente ^
+  --hidden-import=app.frontend.interfaz_compra ^
+  --hidden-import=app.frontend.interfaz_historiales ^
+  --hidden-import=mysql.connector.plugins.caching_sha2_password ^
+  --hidden-import=bcrypt ^
+  --hidden-import=mysql.connector ^
+  --hidden-import=dotenv ^
+  --add-data "app;app" ^
+  app\main.py
 
 if errorlevel 1 (
   echo ERROR: PyInstaller reporto un error durante la compilacion.
@@ -71,19 +96,22 @@ if errorlevel 1 (
 echo.
 echo [4/4] Verificando resultado...
 
-REM Nombre esperado de salida (ajusta si en el .spec se define otro nombre)
 set "EXE=dist\SistemaCobrosDonAtilio.exe"
 if exist "%EXE%" (
   echo ========================================
   echo COMPILACION EXITOSA
   echo Ejecutable generado: %EXE%
   echo ========================================
+  echo.
+  echo NOTAS:
+  echo - El seed esta integrado en main.py
+  echo - Usa: SistemaCobrosDonAtilio.exe --seed-data
+  echo.
   goto :end
 ) else (
   echo ========================================
   echo ERROR EN LA COMPILACION
   echo No se encontro "%EXE%".
-  echo Si tu .spec genera otro nombre, ajusta la variable EXE arriba.
   echo ========================================
   goto :fail
 )

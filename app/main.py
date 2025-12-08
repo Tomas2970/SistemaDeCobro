@@ -2,117 +2,149 @@
 # -*- coding: utf-8 -*-
 """
 Sistema de Cobros Don Atilio - Punto de entrada principal
-Modificado para soportar carga de datos iniciales desde instalador
+Modificado para soportar carga de datos iniciales desde instalador y Auto-Reparación.
 """
 
 import sys
 import os
-import tkinter as tk
 import logging
 
 # =========================================================
-# --- BLOQUE DE "ENGANCHE" PARA PYINSTALLER ---
-# Este bloque no hace nada funcional en el código, 
-# pero le "dice" a PyInstaller que debe incluir estos 
-# archivos sí o sí en el .exe final.
-# =http,
+# 🔥 CRÍTICO: DETECTAR --seed-data ANTES DE CARGAR TKINTER
 # =========================================================
-try:
-    from app.frontend import interfaz_inventario
-    from app.frontend import interfaz_productos
-    from app.frontend import interfaz_venta
-    from app.frontend import interfaz_reportes
-    from app.frontend import interfaz_gestion_clientes
-    from app.frontend import interfaz_cuenta_corriente
-    from app.frontend import interfaz_compra
-    from app.frontend import interfaz_historiales
-    from app.frontend import interfaz_gestion_usuarios
-    
-    # También incluimos los que son importados por otras interfaces
-    from app.frontend import interfaz_forma_pago
-    from app.frontend import stock_alerts 
-except ImportError:
-    # No importa si falla, es solo para el análisis estático
-    pass 
-# =========================================================
+MODO_SEED = len(sys.argv) > 1 and sys.argv[1] == '--seed-data'
 
-# --- Configuración de Paths ---
-# (Esto es crucial para que PyInstaller encuentre los archivos)
+if not MODO_SEED:
+    # Solo importar tkinter si NO es modo seed
+    import tkinter as tk
+    import tkinter.messagebox
+
+# =========================================================
+# --- BLOQUE DE "ENGANCHE" PARA PYINSTALLER ---
+# =========================================================
+if not MODO_SEED:  
+    try:
+        from app.frontend import interfaz_inventario
+        from app.frontend import interfaz_productos
+        from app.frontend import interfaz_venta
+        from app.frontend import interfaz_reportes
+        from app.frontend import interfaz_gestion_clientes
+        from app.frontend import interfaz_cuenta_corriente
+        from app.frontend import interfaz_compra
+        from app.frontend import interfaz_historiales
+        from app.frontend import interfaz_gestion_usuarios
+        from app.frontend import interfaz_forma_pago
+        from app.frontend import stock_alerts 
+    except ImportError:
+        pass 
+
+# =========================================================
+# --- CONFIGURACIÓN DE PATHS ---
+# =========================================================
 if getattr(sys, 'frozen', False):
-    # Si está empaquetado (ejecutando el .exe)
     application_path = os.path.dirname(sys.executable)
-    # En PyInstaller, sys._MEIPASS es donde están los assets empaquetados
     base_path = sys._MEIPASS
     sys.path.insert(0, base_path)
 else:
-    # Si se ejecuta como script (python main.py desde la raíz)
-    # Obtener la ruta absoluta del directorio donde está main.py
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Si main.py está en app/main.py, subir un nivel
     if os.path.basename(script_dir) == 'app':
         application_path = os.path.dirname(script_dir)
     else:
-        # Si main.py está en la raíz
         application_path = script_dir
-    
     base_path = application_path
 
-# Agregar la ruta base al path para que Python encuentre el módulo 'app'
 sys.path.insert(0, application_path)
-os.chdir(application_path)  # Cambia el directorio de trabajo a la raíz
+os.chdir(application_path)
 
-# Agregar también la carpeta 'app' específicamente
 app_path = os.path.join(application_path, 'app')
 if os.path.exists(app_path) and app_path not in sys.path:
     sys.path.insert(0, app_path)
 
-# --- Fin Configuración ---
-
-
 # --- Carga de Logs ---
-# Tiene que estar ANTES de importar tus otros módulos
 try:
     from app.tools.logger_config import setup_logging
     setup_logging()
 except ImportError as e:
     print(f"ADVERTENCIA: No se pudo cargar logger_config. {e}")
     logging.basicConfig(level=logging.INFO)
-# --- Fin Carga ---
-
 
 # --- Importar impresora (opcional) ---
-try:
-    from app import impresora
-    logging.info("✓ Módulo impresora.py cargado correctamente")
-    IMPRESORA_DISPONIBLE = True
-except ImportError as e:
-    logging.warning(f"⚠️ ADVERTENCIA: app/impresora.py no encontrado. La función de imprimir no estará disponible.")
-    impresora = None
-    IMPRESORA_DISPONIBLE = False
-# --- Fin importar impresora ---
-
-
-# --- Carga de Datos (Seed) ---
-def seed_database():
-    """Ejecuta el script de seed_initial_data.py para cargar datos de prueba"""
+if not MODO_SEED:
     try:
-        # Usamos los imports relativos de la app
-        from app.tools.seed_initial_data import main as seed_main
-        logging.info("Iniciando carga de datos iniciales...")
-        seed_main()
-        logging.info("¡Datos iniciales cargados exitosamente!")
-        return True
-    except Exception as e:
-        logging.error(f"Error fatal al cargar datos iniciales: {e}", exc_info=True)
-        return False
-# --- Fin Seed ---
+        from app import impresora
+        logging.info("✓ Módulo impresora.py cargado correctamente")
+    except ImportError:
+        logging.warning(f"⚠️ ADVERTENCIA: app/impresora.py no encontrado.")
 
-
-# --- Función Principal de la App ---
-def run_app():
-    """Modo normal: iniciar la interfaz gráfica"""
+# =========================================================
+# 🌱 FUNCIÓN DE SEED (Usada solo por el instalador)
+# =========================================================
+def seed_database():
+    """Ejecuta la carga de datos iniciales (roles, admin, categorías)"""
+    print("\n" + "="*70)
+    print("  🌱 CARGA DE DATOS INICIALES - Sistema Don Atilio")
+    print("="*70 + "\n")
     
+    try:
+        import bcrypt
+        import mysql.connector
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        DB_HOST = os.getenv("DB_HOST", "localhost")
+        DB_PORT = int(os.getenv("DB_PORT", "3307"))
+        DB_USER = os.getenv("DB_USER", "root")
+        DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+        DB_NAME = os.getenv("DB_NAME", "supermercado_don_atilio")
+        
+        print(f"📡 Conectando a {DB_HOST}:{DB_PORT}...")
+        
+        conn = mysql.connector.connect(
+            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, database=DB_NAME,
+            autocommit=False
+        )
+        cur = conn.cursor(buffered=True)
+        
+        # 1. Roles
+        print("📋 Cargando roles...")
+        cur.execute("INSERT IGNORE INTO Rol (id_rol, nombre, descripcion) VALUES (1, 'admin', 'Administrador'), (2, 'vendedor', 'Vendedor'), (3, 'supervisor', 'Supervisor')")
+        
+        # 2. Admin
+        print("👤 Verificando admin...")
+        cur.execute("SELECT 1 FROM Usuario WHERE nombre='admin'")
+        if not cur.fetchone():
+            hashed = bcrypt.hashpw("admin123".encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+            cur.execute("INSERT INTO Usuario (nombre, contraseña, id_rol, activo) VALUES (%s, %s, 1, 1)", ("admin", hashed))
+            print("   ✓ Usuario 'admin' creado.")
+        
+        # 3. Categorías Básicas
+        print("🏷️ Cargando categorías...")
+        categorias = [
+            (1, 'Bebidas', 30.00), (2, 'Almacén', 30.00), (3, 'Lácteos', 25.00),
+            (4, 'Carnes', 35.00), (5, 'Limpieza', 30.00), (6, 'Panadería', 40.00),
+            (7, 'Congelados', 30.00), (8, 'Golosinas', 40.00), (9, 'Verdulería', 35.00),
+            (99, 'Varios', 30.00)
+        ]
+        for cid, nom, mar in categorias:
+            cur.execute(
+                "INSERT IGNORE INTO Categoria (id_categoria, nombre, margen_ganancia, activa) VALUES (%s, %s, %s, 1)",
+                (cid, nom, mar)
+            )
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("\n✅ Carga inicial exitosa.")
+        return True
+        
+    except Exception as e:
+        print(f"\n❌ ERROR SEED: {e}")
+        return False
+
+# =========================================================
+# --- FUNCIÓN PRINCIPAL DE LA UI (RECUPERADA COMPLETA) ---
+# =========================================================
+def run_app():
     from app.frontend.interfaz_iniciosesion import ui_login
     from app.frontend.interfaz_menu_principal import ui_menu_principal
     from app.database.backend_adapter import BackendAdapter
@@ -120,45 +152,40 @@ def run_app():
     
     backend = BackendAdapter()
     
-    # Bucle de sesión: Login -> Menú Principal -> (al cerrar) -> Login
     while True:
         root_login = tk.Tk()
         root_login.withdraw()
         
-        # 1. Mostrar Login
+        # Login
         usuario = ui_login(parent=root_login, backend=backend)
-        
         root_login.destroy()
 
-        # 2. Si el usuario cerró el login, terminar
         if not usuario:
             logging.info("Login cancelado. Saliendo de la aplicación.")
             break
 
-        # 3. Mostrar Menú Principal
-        logging.info(f"Iniciando sesión como: {usuario.get('nombre')}")
+        logging.info(f"Sesión iniciada: {usuario.get('nombre')}")
         root_main = tk.Tk()
-        
         ui_menu_principal(parent=root_main, backend=backend, usuario=usuario)
-        
         root_main.mainloop()
         
-        # 4. AL CERRAR SESIÓN: Verificar si hay caja abierta
+        # -------------------------------------------------------------
+        # AL CERRAR SESIÓN: Lógica de Caja Abierta (RECUPERADA)
+        # -------------------------------------------------------------
         logging.info(f"Sesión cerrada para: {usuario.get('nombre')}")
         
         try:
-            # Verificar si hay caja abierta (sistema único compartido)
-            caja_abierta = backend.obtener_session_abierta(id_usuario=None)
+            # Verificar si el USUARIO tiene caja abierta
+            caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
             
-            # Solo preguntar si el usuario tiene permisos para cerrar
             if caja_abierta and tiene_permiso(usuario, 'cerrar_caja'):
                 root_temp = tk.Tk()
                 root_temp.withdraw()
                 
                 respuesta = tk.messagebox.askyesnocancel(
                     "⚠️ Caja Abierta",
-                    f"Hay una caja abierta en el sistema.\n\n"
-                    f"¿Deseas cerrar la caja antes de salir?\n\n"
+                    f"Tienes una caja abierta.\n\n"
+                    f"¿Deseas cerrar tu caja antes de salir?\n\n"
                     f"• SÍ: Cerrar caja ahora (arqueo)\n"
                     f"• NO: Salir sin cerrar (la caja queda abierta)\n"
                     f"• CANCELAR: Volver al sistema",
@@ -167,55 +194,56 @@ def run_app():
                 
                 root_temp.destroy()
                 
-                if respuesta is None:  # Cancelar -> Volver al sistema
+                if respuesta is None:  # Cancelar -> Volver al sistema (Login loop)
                     continue
                 elif respuesta:  # Sí -> Abrir ventana de cierre
-                    # Importar aquí para evitar ciclo
                     from app.frontend.interfaz_reportes import ui_reportes
-                    
                     root_cierre = tk.Tk()
                     root_cierre.withdraw()
-                    
-                    # Abrir directamente la pestaña de caja
                     ui_reportes(parent=root_cierre, backend=backend, usuario=usuario)
                     root_cierre.mainloop()
-                    
                     root_cierre.destroy()
-                    # Después de cerrar, volver al login
-                    continue
-                # else: No -> Salir sin cerrar
+                    continue # Volver al login
+                # else (NO) -> Salir del bucle y cerrar app
                 
         except Exception as e:
-            logging.error(f"Error al verificar caja: {e}")
-        
-        # Si llegó aquí, continuar con el bucle (volver al login)
+            logging.error(f"Error al verificar caja al salir: {e}")
 
-# --- Punto de Entrada ---
+# =========================================================
+# --- PUNTO DE ENTRADA ---
+# =========================================================
 def main():
-    """Punto de entrada principal de la aplicación"""
+    # 1. MODO SEED (Instalador)
+    if MODO_SEED:
+        if seed_database():
+            sys.exit(0)
+        else:
+            sys.exit(1)
     
-    # Modo instalación: solo cargar datos y salir
-    if len(sys.argv) > 1 and sys.argv[1] == '--seed-data':
-        success = seed_database()
-        sys.exit(0 if success else 1)
-    
-    # Modo normal: Iniciar la UI
+    # 2. AUTO-REPARACIÓN (Solución Definitiva)
+    # Se ejecuta SIEMPRE antes de abrir la ventana
+    try:
+        print("🔧 Verificando integridad de la base de datos...")
+        from app.database.auto_migrate import ejecutar_migraciones
+        ejecutar_migraciones()
+    except ImportError:
+        logging.warning("⚠️ No se encontró el módulo 'auto_migrate'. Saltando verificación.")
+    except Exception as e:
+        logging.error(f"Fallo en auto-migración: {e}")
+        # No detenemos el programa, intentamos seguir
+
+    # 3. MODO NORMAL
     try:
         run_app()
     except Exception as e:
-        # Si algo falla MUY feo (ej. no se puede cargar Tkinter)
-        logging.critical(f"Error fatal al iniciar la aplicación: {e}", exc_info=True)
-        # Intentar mostrar un messagebox de último recurso
+        logging.critical(f"Error fatal: {e}", exc_info=True)
         try:
             root_err = tk.Tk()
             root_err.withdraw()
-            tk.messagebox.showerror("Error Crítico", f"No se pudo iniciar la aplicación:\n\n{e}")
+            tk.messagebox.showerror("Error Crítico", f"Error fatal al iniciar:\n\n{e}")
             root_err.destroy()
-        except Exception:
-            pass  # Si ni Tkinter funciona, no hay nada que hacer
+        except: pass
         sys.exit(1)
-
-
 
 if __name__ == "__main__":
     main()

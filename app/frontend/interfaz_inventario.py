@@ -1,339 +1,328 @@
-# ============================================
 # app/frontend/interfaz_inventario.py
-# ============================================
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from typing import Any, Dict, List
-import csv
+from tkinter import ttk, messagebox, Toplevel, filedialog
+from typing import List, Dict, Any, Optional
 import logging
+import csv
 from datetime import datetime
 
-from app.frontend.interfaz_productos import ui_productos
-from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
-
+# Reconstruir imports basados en tu código
 try:
-    from app.frontend.stock_alerts import show_low_stock_alert
-except ImportError:
-    def show_low_stock_alert(*args, **kwargs):
-        print("Advertencia: Módulo 'stock_alerts' no encontrado.")
-
-# Sistema de notificación de cambios de stock (si existe)
-try:
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+    from app.database.permisos import tiene_permiso, puede_ajustar_inventario_manual
     from app.frontend.stock_event_manager import stock_events
 except ImportError:
-    print("ADVERTENCIA: No se pudo importar stock_event_manager")
+    def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
+    def tiene_permiso(u, a): return True
+    def puede_ajustar_inventario_manual(u): return True
     class DummyStockEvents:
-        def notificar_cambio_stock(self):
-            pass
+        def suscribir(self, cb): pass
+        def desuscribir(self, cb): pass
     stock_events = DummyStockEvents()
+
+try:
+    from app.frontend.interfaz_productos import ui_productos
+    from app.frontend.componentes_ui import EntryDecimal
+except ImportError:
+    ui_productos = None
+    EntryDecimal = ttk.Entry
+
 
 logger = logging.getLogger(__name__)
 
+# --- Funciones de Formato ---
+def _fmt_stock(val: Any, es_pesable: bool = False) -> str:
+    try:
+        val = float(val)
+        if es_pesable or val % 1 != 0:
+            return f"{val:,.3f} kg"
+        return f"{int(val):,} un"
+    except: return "0 un"
+def _fmt_mon(val: Any) -> str:
+    try: return f"$ {float(val):,.2f}"
+    except: return "$ 0.00"
+def _fmt_porc(val: Any) -> str:
+    try: return f"{float(val):.2f} %"
+    except: return "0.00 %"
 
-def ui_inventario(parent: tk.Misc, backend, usuario: dict) -> None:
-    """
-    Interfaz de Inventario.
-    - Filtrar por texto (nombre, código, ID).
-    - Filtrar por categoría.
-    - Ver stock bajo.
-    - Exportar vista actual a CSV.
-    - Doble clic → abre ABM Productos.
-    """
-    # Ventana principal
-    win = tk.Toplevel(parent)
-    win.title("Inventario de Productos")
-    win.geometry("1000x580")
-    win.config(bg="#f4f4f8")
-    win.resizable(False, False)
+# --- Lógica de la interfaz ---
+class UIInventario:
+    def __init__(self, parent: tk.Misc, backend, usuario: dict):
+        self.backend = backend
+        self.usuario = usuario
+        self.win = tk.Toplevel(parent)
+        self.win.title("📦 Gestión de Inventario")
+        self.win.geometry("1000x650") # 🔥 TAMAÑO REDUCIDO
+        self.win.config(bg="#f4f4f8")
+        self.can_ajustar_manual = puede_ajustar_inventario_manual(usuario)
+        
+        self.productos_cache = []
+        self.cat_map = {}
+        self.var_filtrar_stock_bajo = tk.BooleanVar(value=False)
 
-    # ============================
-    # Frame 1: Filtros y búsqueda
-    # ============================
-    frm_filtros = tk.Frame(win, bg="#f4f4f8")
-    frm_filtros.pack(fill=tk.X, padx=16, pady=(12, 4))
+        # 🔥 ESTILOS MODERNOS
+        style = ttk.Style()
+        style.theme_use('clam')
 
-    tk.Label(frm_filtros, text="Nombre / Código / ID:", bg="#f4f4f8").grid(
-        row=0, column=0, sticky="e", padx=6
-    )
-    var_query = tk.StringVar()
-    ent_q = tk.Entry(frm_filtros, textvariable=var_query, width=34)
-    ent_q.grid(row=0, column=1, sticky="w")
+        style.configure("Modern.Treeview",
+                        background="#ffffff",
+                        foreground="#1f2937",
+                        rowheight=32,
+                        fieldbackground="#ffffff",
+                        borderwidth=0,
+                        font=('Segoe UI', 10))
 
-    tk.Label(frm_filtros, text="Categoría:", bg="#f4f4f8").grid(
-        row=0, column=2, sticky="e", padx=(20, 6)
-    )
-    combo_cat = ttk.Combobox(frm_filtros, state="readonly", width=24)
-    combo_cat.grid(row=0, column=3, sticky="w")
+        style.configure("Modern.Treeview.Heading",
+                        background="#f3f4f6",
+                        foreground="#374151",
+                        relief="flat",
+                        borderwidth=1,
+                        font=('Segoe UI', 10, 'bold'))
 
-    btn_buscar = tk.Button(
-        frm_filtros,
-        text="🔎 Buscar",
-        width=12,
-        command=lambda: buscar()
-    )
-    btn_buscar.grid(row=0, column=4, padx=(20, 6))
+        style.map("Modern.Treeview.Heading",
+                  background=[('active', '#e5e7eb')])
 
-    btn_limpiar = tk.Button(
-        frm_filtros,
-        text="Limpiar",
-        width=10,
-        command=lambda: limpiar()
-    )
-    btn_limpiar.grid(row=0, column=5, padx=6)
+        self._crear_widgets()
+        self._cargar_categorias_para_filtro()
+        self.cargar_todo()
 
-    # ============================
-    # Frame 2: Botones de acción
-    # ============================
-    frm_botones = tk.Frame(win, bg="#f4f4f8")
-    frm_botones.pack(fill=tk.X, padx=16, pady=(0, 12))
+        stock_events.suscribir(self.cargar_todo)
+        
+        configurar_navegacion_ventana(self.win)
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.win.grab_set()
+        self.win.after(100, lambda: self.entry_busqueda.focus_set())
 
-    btn_stock_bajo = tk.Button(
-        frm_botones,
-        text="Ver Stock Bajo",
-        width=16,
-        command=lambda: mostrar_stock_bajo(),
-        bg="#f4a261",
-        fg="black"
-    )
-    btn_stock_bajo.pack(side=tk.LEFT, padx=0)
+    def _on_close(self):
+        stock_events.desuscribir(self.cargar_todo)
+        self.win.destroy()
 
-    btn_exportar = tk.Button(
-        frm_botones,
-        text="Exportar Vista...",
-        width=16,
-        command=lambda: exportar_vista_csv(),
-        bg="#16a34a",
-        fg="white"
-    )
-    btn_exportar.pack(side=tk.LEFT, padx=10)
+    def _crear_widgets(self):
+        # 1. Header (Búsqueda y Filtros)
+        frm_header = tk.Frame(self.win, bg="#e0f2fe", padx=15, pady=10)
+        frm_header.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        tk.Label(frm_header, text="🔍 Buscar (ID, Cód., Nombre):", bg="#e0f2fe", font=("Segoe UI", 10)).pack(side=tk.LEFT)
+        self.var_busqueda = tk.StringVar()
+        self.entry_busqueda = tk.Entry(frm_header, textvariable=self.var_busqueda, width=30)
+        self.entry_busqueda.pack(side=tk.LEFT, padx=5)
+        self.var_busqueda.trace_add("write", self._filtrar_lista) 
+        
+        tk.Label(frm_header, text="Categoría:", bg="#e0f2fe", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(20, 5))
+        self.cb_categoria = ttk.Combobox(frm_header, state="readonly", width=20)
+        self.cb_categoria.pack(side=tk.LEFT, padx=5)
+        self.cb_categoria.bind("<<ComboboxSelected>>", self._filtrar_lista)
+        
+        # Botón Stock Bajo como CHECKBOX DE FILTRO
+        tk.Checkbutton(frm_header, text="🚨 Stock Bajo", 
+                       variable=self.var_filtrar_stock_bajo, 
+                       command=self._filtrar_lista,
+                       bg="#e0f2fe", fg="#ef4444", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=20)
+        
+        # 🔥 BOTÓN EXPORTAR CSV
+        tk.Button(
+            frm_header, 
+            text="📊 Exportar CSV", 
+            command=self._exportar_csv,
+            bg="#f59e0b", # NARANJA_ESPECIAL
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padx=15,
+            pady=8,
+            cursor="hand2",
+            activebackground="#d97706"
+        ).pack(side=tk.RIGHT, padx=5)
+        
+        # 2. Tabla (Treeview)
+        frm_lista = tk.Frame(self.win, bg="#f4f4f8", padx=10)
+        frm_lista.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # 🔥 USAR ESTILO MODERN.TREEVIEW
+        cols = ("ID", "Nombre", "Categoría", "Stock", "Stock Min.", "Precio Venta")
+        self.tree = ttk.Treeview(frm_lista, columns=cols, show="headings", style="Modern.Treeview")
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        ys = ttk.Scrollbar(frm_lista, orient="vertical", command=self.tree.yview)
+        ys.pack(side="right", fill=tk.Y)
+        self.tree.configure(yscrollcommand=ys.set)
+        
+        for c in cols: self.tree.heading(c, text=c)
+        # 🔥 ANCHOS AJUSTADOS
+        self.tree.column("ID", width=70, anchor="center")
+        self.tree.column("Nombre", width=350)
+        self.tree.column("Categoría", width=200)
+        self.tree.column("Stock", width=120, anchor="e")
+        self.tree.column("Stock Min.", width=120, anchor="e")
+        self.tree.column("Precio Venta", width=120, anchor="e")
 
-    btn_cerrar = tk.Button(
-        frm_botones,
-        text="Cerrar",
-        width=10,
-        command=win.destroy,
-        bg="#ef4444",
-        fg="white"
-    )
-    btn_cerrar.pack(side=tk.RIGHT, padx=0)
+        self.tree.tag_configure('bajo', background='#fee2e2') # Fondo rojo claro
+        self.tree.bind("<Double-1>", self._on_doble_clic)
 
-    # ============================
-    # Frame 3: Tabla de inventario
-    # ============================
-    cols = ["ID", "Código", "Nombre", "Categoría", "Stock", "Precio"]
-    tree = ttk.Treeview(win, columns=cols, show="headings")
-    tree.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 12))
+        # 3. Footer (Botones y Ajuste Manual)
+        frm_footer = tk.Frame(self.win, bg="#f4f4f8", padx=10, pady=10)
+        frm_footer.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        # 🔥 BOTÓN NUEVO PRODUCTO
+        tk.Button(
+            frm_footer, 
+            text="➕ Nuevo Producto", 
+            command=lambda: self._abrir_abm_productos(None), 
+            bg="#10b981", # VERDE_CONFIRMAR
+            fg="white", 
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            activebackground="#059669"
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # 🔥 BOTÓN CERRAR
+        tk.Button(
+            frm_footer, 
+            text="Cancelar", 
+            command=self.win.destroy, 
+            bg="#6b7280", # GRIS_SECUNDARIO
+            fg="white", 
+            font=("Segoe UI", 10),
+            relief="flat",
+            padx=15,
+            pady=10,
+            cursor="hand2",
+            activebackground="#4b5563"
+        ).pack(side=tk.RIGHT, padx=10)
 
-    for c in cols:
-        tree.heading(c, text=c)
 
-    tree.column("ID", width=70, anchor="center")
-    tree.column("Código", width=160, anchor="center")
-    tree.column("Nombre", width=320, anchor="w")
-    tree.column("Categoría", width=220, anchor="w")
-    
-    # CORRECCIÓN: Usamos 'center' para evitar que se corten los números con el borde
-    tree.column("Stock", width=100, anchor="center")
-    tree.column("Precio", width=100, anchor="center")
-
-    yscroll = ttk.Scrollbar(tree, orient="vertical", command=tree.yview)
-    tree.configure(yscrollcommand=yscroll.set)
-    yscroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-    # ====================================
-    # Funciones de normalización de datos
-    # ====================================
-    def _get_id(p: Dict[str, Any]) -> int | None:
-        return p.get("id_producto") or p.get("id")
-
-    def _get_barcode(p: Dict[str, Any]) -> str:
-        return str(p.get("codigo_barras") or p.get("codigo") or "")
-
-    def _get_nombre(p: Dict[str, Any]) -> str:
-        return str(p.get("nombre") or "")
-
-    def _get_categoria(p: Dict[str, Any]) -> str:
-        return str(p.get("categoria") or p.get("nombre_categoria") or "")
-
-    def _get_stock(p: Dict[str, Any]) -> float:
+    def _cargar_categorias_para_filtro(self):
         try:
-            return float(p.get("stock") or p.get("cantidad") or 0.0)
-        except Exception:
-            return 0.0
-
-    def _get_precio(p: Dict[str, Any]) -> float:
-        try:
-            return float(p.get("precio") or 0.0)
-        except Exception:
-            return 0.0
-
-    def _norm(prod: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "ID": _get_id(prod) or "",
-            "Código": _get_barcode(prod),
-            "Nombre": _get_nombre(prod),
-            "Categoría": _get_categoria(prod),
-            "Stock": _get_stock(prod),
-            "Precio": _get_precio(prod),
-            "es_pesable": bool(prod.get("es_pesable") or False),
-        }
-
-    def _paint(filas: List[Dict[str, Any]]) -> None:
-        for i in tree.get_children():
-            tree.delete(i)
-        for p in filas:
-            n = _norm(p)
-            # CORRECCIÓN: Al usar 'center', ya no necesitamos el espacio extra
-            tree.insert(
-                "",
-                tk.END,
-                values=(
-                    n["ID"],
-                    n["Código"],
-                    n["Nombre"],
-                    n["Categoría"],
-                    f"{n['Stock']:.2f}",
-                    f"{n['Precio']:.2f}",
-                ),
-            )
-
-    # ============================
-    # Carga de datos desde backend
-    # ============================
-    def cargar_categorias() -> None:
-        try:
-            cats = backend.obtener_categorias() or []
-            nombres = ["(Todas)"] + [
-                str(c.get("nombre") or c.get("categoria") or "") for c in cats
-            ]
-            combo_cat["values"] = nombres
-            combo_cat.current(0)
+            cats = self.backend.obtener_categorias()
+            self.cat_map = {c['nombre']: c['id_categoria'] for c in cats}
+            self.cb_categoria['values'] = ["(Todas)"] + list(self.cat_map.keys())
+            self.cb_categoria.current(0)
         except Exception as e:
-            combo_cat["values"] = ["(Todas)"]
-            combo_cat.current(0)
-            messagebox.showwarning(
-                "Categorías",
-                f"No se pudieron cargar categorías:\n{e}",
-                parent=win,
-            )
+            logger.error(f"Error cargando categorías: {e}")
 
-    def cargar_todo() -> None:
+    def cargar_todo(self):
         try:
-            prods = backend.obtener_productos_full()
-            _paint(prods)
+            self.productos_cache = self.backend.obtener_productos_full()
+            self._filtrar_lista()
         except Exception as e:
-            messagebox.showerror(
-                "Inventario",
-                f"Error al cargar inventario:\n{e}",
-                parent=win,
-            )
+            logger.error(f"Error cargando inventario: {e}")
+            messagebox.showerror("Error", f"Error cargando inventario: {e}")
 
-    # ============================
-    # Búsqueda
-    # ============================
-    def _resolver_busqueda(q: str) -> List[Dict[str, Any]]:
+    def _resolver_busqueda(self, q: str) -> List[Dict[str, Any]]:
         q = q.strip()
         if not q:
-            return backend.obtener_productos_full() or []
+            return self.productos_cache or [] 
 
-        # Si es número → probamos ID
-        if q.isdigit():
-            try:
-                pid = int(q)
-                if hasattr(backend, "buscar_producto_por_id"):
-                    res = backend.buscar_producto_por_id(pid)
-                    if res:
-                        return [res]
-            except Exception:
-                pass
+        resultado_unico = self.backend.buscar_producto_inteligente(q)
+        
+        if resultado_unico:
+            return [resultado_unico]
+        
+        q_lower = q.lower()
+        return [p for p in self.productos_cache if q_lower in p.get('nombre', '').lower()]
 
-        # Si el backend soporta búsqueda por nombre
-        if hasattr(backend, "buscar_producto_por_nombre"):
-            return backend.buscar_producto_por_nombre(q) or []
+    def _filtrar_lista(self, *args):
+        for i in self.tree.get_children(): self.tree.delete(i)
+        
+        query = self.var_busqueda.get()
+        cat_sel_nombre = self.cb_categoria.get()
+        cat_id_filtro = self.cat_map.get(cat_sel_nombre)
+        
+        productos_filtrados = self._resolver_busqueda(query)
+        
+        if cat_id_filtro:
+            productos_filtrados = [p for p in productos_filtrados if p.get('id_categoria') == cat_id_filtro]
+        
+        # 3. Filtrar por Stock Bajo (NUEVA LÓGICA DE FILTRO)
+        if self.var_filtrar_stock_bajo.get():
+            productos_filtrados = [
+                p for p in productos_filtrados 
+                if float(p.get('stock', 0)) <= int(p.get('stock_minimo', 0))
+            ]
 
-        # Fallback
-        return backend.obtener_productos_full() or []
+        # 4. Llenar Treeview
+        for p in productos_filtrados:
+            stock = float(p.get('stock', 0.0))
+            minimo = int(p.get('stock_minimo', 0))
+            es_pesable = bool(p.get('es_pesable', False))
+            
+            tag = 'bajo' if stock <= minimo else ''
+            
+            self.tree.insert("", tk.END, values=[
+                p.get('id_producto'),
+                p.get('nombre'),
+                p.get('nombre_categoria') or "-",
+                _fmt_stock(stock, es_pesable),
+                f"{minimo} un",
+                _fmt_mon(p.get('precio')),
+                # Quitamos Margen y Pesable de los values
+            ], tags=(tag,))
 
-    def buscar() -> None:
-        try:
-            q = var_query.get()
-            categoria = combo_cat.get()
-            filas = _resolver_busqueda(q)
-
-            if categoria and categoria != "(Todas)":
-                filas = [p for p in filas if _get_categoria(p) == categoria]
-
-            _paint(filas)
-        except Exception as e:
-            messagebox.showerror(
-                "Búsqueda",
-                f"Error en la búsqueda:\n{e}",
-                parent=win,
+    def _abrir_abm_productos(self, id_prod: Optional[int]):
+        """Función helper para abrir el ABM de producto"""
+        if not ui_productos:
+            messagebox.showinfo("Error", "Módulo de gestión de productos no disponible.")
+            return
+            
+        if not tiene_permiso(self.usuario, 'crear_productos') and not tiene_permiso(self.usuario, 'editar_productos'):
+            messagebox.showwarning(
+                "Acceso Denegado", 
+                "⚠️ Su rol solo permite la consulta del inventario. No puede modificar o crear productos.", 
+                parent=self.win
             )
+            return
 
-    def limpiar() -> None:
-        var_query.set("")
-        if combo_cat["values"]:
-            combo_cat.current(0)
-        cargar_todo()
-
-    ent_q.bind("<Return>", lambda e: buscar())
-
-    # ============================
-    # Stock bajo
-    # ============================
-    def mostrar_stock_bajo():
         try:
-            if hasattr(backend, "obtener_stock_bajo"):
-                bajos = backend.obtener_stock_bajo()
-            else:
-                messagebox.showerror(
-                    "Error",
-                    "La función 'obtener_stock_bajo' no existe en el backend.",
-                    parent=win,
-                )
-                return
-
-            if not bajos:
-                messagebox.showinfo(
-                    "Stock OK",
-                    "No se encontraron productos con stock bajo.",
-                    parent=win,
-                )
-                return
-
-            _paint(bajos)
-        except Exception as e:
-            logger.error(f"[stock_alerts] show_low_stock_alert error: {e}")
-            messagebox.showerror(
-                "Error",
-                f"No se pudo obtener el stock bajo:\n{e}",
-                parent=win,
+            ui_productos(
+                parent=self.win,
+                backend=self.backend,
+                usuario=self.usuario,
+                id_producto_a_cargar=id_prod, 
+                callback_on_save=self.cargar_todo 
             )
+        except Exception as e:
+            logger.error(f"Error abriendo UI Productos: {e}")
+            messagebox.showerror("Error", f"Fallo al abrir ABM de Producto:\n{e}")
 
-    # ============================
-    # Exportar vista actual a CSV
-    # ============================
-    def exportar_vista_csv():
+    def _on_doble_clic(self, event):
+        sel = self.tree.selection()
+        if not sel: 
+            return # Solo abre si hay algo seleccionado
+        
+        item = sel[0]
+        id_prod_str = self.tree.item(item, "values")[0]
+        
         try:
-            if not tree.get_children():
+            id_prod = int(id_prod_str)
+            self._abrir_abm_productos(id_prod) # 🔥 Abre directamente en modo edición
+        except ValueError:
+             messagebox.showwarning("Error", "Selección inválida.", parent=self.win)
+             return
+
+
+    # 🔥 ELIMINAMOS _mostrar_stock_bajo (La funcionalidad es ahora _filtrar_lista con checkbox)
+    # 🔥 ELIMINAMOS _aplicar_ajuste (Funcionalidad eliminada)
+
+    def _exportar_csv(self):
+        try:
+            if not self.tree.get_children():
                 messagebox.showinfo(
                     "Nada que exportar",
                     "La tabla de inventario está vacía.",
-                    parent=win,
+                    parent=self.win,
                 )
                 return
 
             hoy = datetime.now().strftime("%d-%m-%Y")
-            default_filename = f"reporte_inventario_{hoy}.csv"
+            default_filename = f"reporte_inventario_vista_{hoy}.csv"
 
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".csv",
-                filetypes=[
-                    ("Archivo CSV (delimitado por punto y coma)", "*.csv"),
-                    ("Todos los archivos", "*.*"),
-                ],
+                filetypes=[("Archivo CSV (delimitado por coma/punto y coma)", "*.csv")],
                 initialfile=default_filename,
                 title="Guardar como CSV",
             )
@@ -341,78 +330,28 @@ def ui_inventario(parent: tk.Misc, backend, usuario: dict) -> None:
             if not filepath:
                 return
 
-            with open(filepath, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f, delimiter=";")
-                writer.writerow(cols)
-                for item_id in tree.get_children():
-                    row = tree.item(item_id, "values")
-                    # Limpieza estándar
-                    clean_row = [str(x).strip() for x in row]
+            cols_visibles = [self.tree.heading(c)['text'] for c in self.tree['columns']]
+
+            with open(filepath, "w", newline="", encoding="utf-8-sig") as f: # utf-8-sig para compatibilidad con Excel
+                writer = csv.writer(f, delimiter=";") # Usar ; como delimitador
+                writer.writerow(cols_visibles)
+                
+                for item_id in self.tree.get_children():
+                    row = self.tree.item(item_id, "values")
+                    clean_row = [str(x).replace('.', ',').strip() if isinstance(x, (float, str)) and '$' not in str(x) else str(x).strip() for x in row]
                     writer.writerow(clean_row)
 
             messagebox.showinfo(
                 "Exportado",
-                f"Archivo guardado en:\n{filepath}",
-                parent=win,
+                f"Archivo guardado exitosamente.",
+                parent=self.win,
             )
         except Exception as e:
             messagebox.showerror(
                 "Exportar",
                 f"No se pudo exportar el archivo:\n{e}",
-                parent=win,
+                parent=self.win,
             )
 
-    # ============================
-    # Doble clic → abrir ABM productos
-    # ============================
-    def on_doble_clic(event):
-        sel = tree.selection()
-        if not sel:
-            return
-        item = sel[0]
-        vals = tree.item(item, "values")
-        if not vals:
-            return
-        try:
-            id_prod = int(vals[0])
-        except Exception:
-            messagebox.showwarning(
-                "ABM Productos",
-                "No se pudo determinar el ID del producto.",
-                parent=win,
-            )
-            return
-        try:
-            ui_productos(
-                parent=win,
-                backend=backend,
-                usuario=usuario,
-                id_producto_a_cargar=id_prod,
-            )
-            win.after(100, cargar_todo)
-        except Exception as e:
-            messagebox.showerror(
-                "ABM Productos",
-                f"No se pudo abrir el ABM de productos:\n{e}",
-                parent=win,
-            )
-
-    tree.bind("<Double-1>", on_doble_clic)
-
-    # ============================
-    # Boot / inicio
-    # ============================
-    cargar_categorias()
-    cargar_todo()
-    configurar_navegacion_ventana(win)
-
-    # 🔴 Foco inicial para que TAB y flechas ya trabajen sobre Inventario
-    def _enfocar_inicial():
-        try:
-            win.focus_force()   # la ventana recibe el foco del teclado
-            ent_q.focus_set()   # el cursor queda en el cuadro de búsqueda
-        except Exception:
-            pass
-
-    win.after(50, _enfocar_inicial)
-    win.grab_set()
+def ui_inventario(parent: tk.Misc, backend, usuario: dict):
+    UIInventario(parent, backend, usuario)
