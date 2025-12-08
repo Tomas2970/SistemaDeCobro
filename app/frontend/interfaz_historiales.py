@@ -1,6 +1,6 @@
-
+from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, Toplevel, Listbox, SINGLE
+from tkinter import ttk, messagebox, filedialog
 from typing import Optional, Any
 from datetime import date, datetime, timedelta
 import logging
@@ -17,8 +17,8 @@ try:
     from app.frontend.componentes_ui import SelectorFecha
 except ImportError:
     class SelectorFecha(tk.Frame):
-        def __init__(self, master, **kwargs):
-            super().__init__(master, **kwargs)
+        def __init__(self, master, **kwargs): # Corregido init -> __init__
+            super().__init__(master, **kwargs) # Corregido super().init -> super().__init__
             self.widget_entrada = tk.Entry(self, width=12)
             self.widget_entrada.pack(fill=tk.BOTH, expand=True)
             self.entrada = self.widget_entrada
@@ -28,7 +28,7 @@ except ImportError:
                 return datetime.strptime(val, "%d/%m/%Y").strftime("%Y-%m-%d")
             except: return None
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # Usar __name__ en lugar de name, asumido.
 
 def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
     if not fecha_sql: return ""
@@ -76,7 +76,7 @@ def aplicar_filtro_rapido(event, combo, entry_desde, entry_hasta):
         entry_hasta.delete(0, tk.END); entry_hasta.insert(0, f_fin.strftime("%d/%m/%Y"))
 
 class Historiales:
-    def __init__(self, parent: tk.Misc, backend, usuario: dict,
+    def __init__(self, parent: tk.Misc, backend, usuario: dict, # Corregido init -> __init__
                  tab_inicial: int = 0,
                  filtro_fecha: str | None = None,
                  filtro_vendedor_id: int | None = None,
@@ -127,25 +127,15 @@ class Historiales:
         tk.Label(frm_header, text="HISTORIALES DEL SISTEMA", 
                  font=("Segoe UI", 16, "bold"), fg="white", bg="#3b82f6").pack()
 
-        # Datos para combos/selectores
+        # Datos para combos
         self.vendedor_ids = [None]
         self.vendedor_nombres = ["(Todos)"]
-        self.cliente_ids = [None, 0]
+        self.cliente_ids = [None]
         self.cliente_nombres = ["(Todos)", "(Consumidor Final)"]
         self.proveedor_ids = [None]
         self.proveedor_nombres = ["(Todos)"]
         
         self.cargar_datos_combos()
-
-        # Variables de selección para los nuevos selectores
-        self.var_vendedor_v_sel = {"id": None, "nombre": "(Todos)"}
-        self.var_cliente_v_sel = {"id": None, "nombre": "(Todos)"}
-        self.var_proveedor_c_sel = {"id": None, "nombre": "(Todos)"}
-        self.var_usuario_c_sel = {"id": None, "nombre": "(Todos)"}
-        self.var_cliente_p_sel = {"id": None, "nombre": "(Todos)"}
-        self.var_usuario_p_sel = {"id": None, "nombre": "(Todos)"}
-        self.var_usuario_caja_sel = {"id": None, "nombre": "(Todos)"}
-
 
         self.notebook = ttk.Notebook(self.win)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -207,8 +197,7 @@ class Historiales:
             "#16a34a": "#059669",
             "#03A9F4": "#0288d1",
             "#ef4444": "#dc2626",
-            "#f59e0b": "#d97706",
-            "#6b7280": "#4b5563"
+            "#f59e0b": "#d97706"
         }
         return colors.get(hex_color, hex_color)
 
@@ -227,12 +216,10 @@ class Historiales:
             self.proveedor_ids = [None] + [p.get("id_proveedor") for p in provs]
             self.proveedores_map_id = {p['id_proveedor']: p for p in provs} 
             self.proveedores_map_nombre = {p['nombre']: p for p in provs} 
-            self.proveedores_list = provs # Lista completa para el selector
         except Exception as e:
             logger.error(f"Error carga combos: {e}")
 
     def _aplicar_filtros_iniciales(self, f_fecha, f_desde, f_hasta, f_vend, f_vta, f_comp, f_cli):
-        # ... (Lógica de fechas y IDs de venta/compra, que no cambian) ...
         if f_fecha:
             self.fecha_desde_v.widget_entrada.delete(0, tk.END); self.fecha_desde_v.widget_entrada.insert(0, f_fecha)
             self.fecha_hasta_v.widget_entrada.delete(0, tk.END); self.fecha_hasta_v.widget_entrada.insert(0, f_fecha)
@@ -242,9 +229,8 @@ class Historiales:
         
         if f_vend:
             try:
-                # Inicializar el var_vendedor_v_sel si se pasa un filtro inicial
                 idx = self.vendedor_ids.index(f_vend)
-                self.var_vendedor_v_sel = {"id": f_vend, "nombre": self.vendedor_nombres[idx]}
+                self.cb_vendedor_v.current(idx)
             except: pass
             
         self.filtro_venta_id = f_vta
@@ -262,167 +248,6 @@ class Historiales:
         elif "Compras" in tab_text: self.buscar_compras()
         elif "Pagos" in tab_text: self.buscar_pagos()
         elif "Caja" in tab_text: self.buscar_caja()
-        
-    # --- SELECTOR DE ENTIDAD MODAL ---
-    def _crear_selector_entidad(self, tipo: str, var_seleccion: dict, lista_datos: list):
-        """Abre un modal para buscar y seleccionar Cliente, Proveedor o Usuario."""
-        popup = Toplevel(self.win)
-        popup.title(f"Seleccionar {tipo}")
-        popup.geometry("600x450")
-        popup.config(bg="#f4f4f8")
-        
-        configurar_navegacion_ventana(popup)
-
-        tk.Label(popup, text=f"Buscar {tipo} (ID/Nombre/DNI/CUIT):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
-        var_pat = tk.StringVar()
-        ent = tk.Entry(popup, textvariable=var_pat, width=60, font=("Segoe UI", 10))
-        ent.pack(pady=5, padx=15, fill=tk.X)
-        
-        frame_list = tk.Frame(popup)
-        frame_list.pack(expand=True, fill="both", padx=15, pady=5)
-        sc = tk.Scrollbar(frame_list)
-        sc.pack(side="right", fill="y")
-        
-        cols = ("ID", "Nombre", "Extra")
-        tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
-        tree_sel.pack(side="left", fill="both", expand=True)
-        sc.config(command=tree_sel.yview)
-        tree_sel.configure(yscrollcommand=sc.set)
-        
-        tree_sel.column("ID", width=60, anchor="center")
-        tree_sel.column("Nombre", width=250, anchor="w")
-        tree_sel.column("Extra", width=200, anchor="w")
-        tree_sel.heading("ID", text="ID")
-        tree_sel.heading("Nombre", text="Nombre")
-        tree_sel.heading("Extra", text="DNI/CUIT/Empresa")
-        
-        # Opcion 'Todos'
-        if tipo != "Vendedor/Usuario":
-             tree_sel.insert("", "end", iid="opt_all", values=["-", "(Todos)", ""])
-
-        if tipo == "Cliente":
-            tree_sel.insert("", "end", iid="opt_cf", values=[0, "(Consumidor Final)", ""])
-
-        def render(filas):
-            for i in tree_sel.get_children(): 
-                if i not in ["opt_all", "opt_cf"]: tree_sel.delete(i)
-
-            for c in filas:
-                if c.get("id_cliente") == 0: continue
-                # Formato Cliente
-                if 'id_cliente' in c:
-                    id_val = c.get('id_cliente')
-                    nombre_val = c.get('nombre')
-                    extra_val = f"DNI: {c.get('dni') or '-'}"
-                # Formato Proveedor
-                elif 'id_proveedor' in c:
-                    id_val = c.get('id_proveedor')
-                    nombre_val = c.get('nombre')
-                    extra_val = f"CUIT: {c.get('dni_cuit') or '-'} | Emp: {c.get('empresa') or '-'}"
-                # Formato Usuario/Vendedor
-                elif 'id_usuario' in c:
-                    id_val = c.get('id_usuario')
-                    nombre_val = c.get('nombre')
-                    extra_val = f"Rol: {c.get('rol_nombre') or '-'}"
-                else: continue
-                
-                tree_sel.insert("", "end", values=[id_val, nombre_val, extra_val])
-
-        render(lista_datos)
-        
-        def filtrar(*_):
-            q = var_pat.get().strip().lower()
-            
-            if not q:
-                render(lista_datos)
-                return
-
-            filas_filtradas = []
-            for d in lista_datos:
-                
-                # Campos de búsqueda comunes
-                id_match = str(d.get('id_cliente') or d.get('id_proveedor') or d.get('id_usuario', '')).startswith(q)
-                nombre_match = q in d.get('nombre', '').lower()
-                dni_cuit_match = q in d.get('dni', '').lower() or q in d.get('dni_cuit', '').lower()
-                
-                if id_match or nombre_match or dni_cuit_match:
-                    filas_filtradas.append(d)
-                    
-            render(filas_filtradas)
-
-        var_pat.trace_add("write", filtrar)
-
-        def tomar(event=None): 
-            sel_id = tree_sel.focus()
-            if not sel_id: return 
-            
-            # Caso "Todos"
-            if sel_id in ["opt_all", "opt_cf"]:
-                if sel_id == "opt_all":
-                    var_seleccion["id"] = None
-                    var_seleccion["nombre"] = "(Todos)"
-                else: # Consumidor Final
-                    var_seleccion["id"] = 0
-                    var_seleccion["nombre"] = "(Consumidor Final)"
-            else:
-                vals = tree_sel.item(sel_id, "values")
-                if not vals: return
-                
-                try: id_val = int(vals[0])
-                except: id_val = None
-                
-                var_seleccion["id"] = id_val
-                var_seleccion["nombre"] = vals[1]
-
-            # Actualizar la interfaz principal (si es necesario) y cerrar
-            popup.destroy()
-            if hasattr(self, '_update_ui_sel'): self._update_ui_sel()
-
-        tree_sel.bind("<Double-1>", tomar)
-        tree_sel.bind("<Return>", tomar)
-
-        btn_frm = tk.Frame(popup, bg="#f4f4f8")
-        btn_frm.pack(pady=10)
-        
-        # 🔥 BOTONES ESTILO NUEVO
-        btn_sel = tk.Button(btn_frm, text="✓ Seleccionar", command=tomar, 
-                           bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
-                           relief="flat", padx=20, pady=8, cursor="hand2",
-                           activebackground="#059669")
-        btn_sel.pack(side="left", padx=5)
-        
-        btn_canc = tk.Button(btn_frm, text="Cancelar", command=popup.destroy,
-                            bg="#6b7280", fg="white", font=("Segoe UI", 10),
-                            relief="flat", padx=15, pady=8, cursor="hand2",
-                            activebackground="#4b5563")
-        btn_canc.pack(side="left", padx=5)
-        
-        popup.after(100, lambda: ent.focus_set())
-        popup.grab_set()
-        popup.transient(self.win)
-        self.win.wait_window(popup)
-        
-        # Se necesita forzar la actualización de la UI tras el modal
-        self._update_ui_sel()
-
-    def _update_ui_sel(self):
-        """Actualiza la representación visual de las selecciones de entidad."""
-        # Pestaña Ventas
-        if hasattr(self, 'lbl_vendedor_v'):
-            self.lbl_vendedor_v.config(text=self.var_vendedor_v_sel['nombre'])
-            self.lbl_cliente_v.config(text=self.var_cliente_v_sel['nombre'])
-        # Pestaña Compras
-        if hasattr(self, 'lbl_proveedor_c'):
-            self.lbl_proveedor_c.config(text=self.var_proveedor_c_sel['nombre'])
-            self.lbl_usuario_c.config(text=self.var_usuario_c_sel['nombre'])
-        # Pestaña Pagos
-        if hasattr(self, 'lbl_cliente_p'):
-            self.lbl_cliente_p.config(text=self.var_cliente_p_sel['nombre'])
-            self.lbl_usuario_p.config(text=self.var_usuario_p_sel['nombre'])
-        # Pestaña Caja
-        if hasattr(self, 'lbl_usuario_caja'):
-            self.lbl_usuario_caja.config(text=self.var_usuario_caja_sel['nombre'])
-
 
     # ----------------------------------------------------------------
     # PESTAÑA VENTAS
@@ -431,7 +256,6 @@ class Historiales:
         frm = tk.Frame(self.tab_ventas, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
 
-        # Rango
         tk.Label(frm, text="Rango:", bg="#f4f4f8", font=("bold", 9)).grid(row=0, column=0, sticky="e")
         cb_rango = ttk.Combobox(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], state="readonly", width=12)
         cb_rango.current(0)
@@ -451,21 +275,15 @@ class Historiales:
         
         cb_rango.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango, self.fecha_desde_v.widget_entrada, self.fecha_hasta_v.widget_entrada))
 
-        # Vendedor (Selector Modal)
         tk.Label(frm, text="Vendedor:", bg="#f4f4f8").grid(row=1, column=0, sticky="e", pady=5)
-        self.lbl_vendedor_v = tk.Label(frm, text=self.var_vendedor_v_sel['nombre'], bg="#f4f4f8", width=15, anchor="w")
-        self.lbl_vendedor_v.grid(row=1, column=1, padx=5, sticky="w")
-        self.crear_boton_accion(frm, "Buscar Vendedor", 
-                                lambda: self._crear_selector_entidad("Vendedor/Usuario", self.var_vendedor_v_sel, self.backend.obtener_vendedores()), 
-                                "#3b82f6", width=15).grid(row=1, column=1, padx=(100,0), sticky="e")
-        
-        # Cliente (Selector Modal)
+        self.cb_vendedor_v = ttk.Combobox(frm, state="readonly", values=self.vendedor_nombres, width=15)
+        self.cb_vendedor_v.current(0)
+        self.cb_vendedor_v.grid(row=1, column=1, padx=5)
+
         tk.Label(frm, text="Cliente:", bg="#f4f4f8").grid(row=1, column=2, sticky="e")
-        self.lbl_cliente_v = tk.Label(frm, text=self.var_cliente_v_sel['nombre'], bg="#f4f4f8", width=15, anchor="w")
-        self.lbl_cliente_v.grid(row=1, column=3, padx=5, sticky="w")
-        self.crear_boton_accion(frm, "Buscar Cliente", 
-                                lambda: self._crear_selector_entidad("Cliente", self.var_cliente_v_sel, self.backend.listar_clientes()), 
-                                "#3b82f6", width=15).grid(row=1, column=3, padx=(100,0), sticky="e")
+        self.cb_cliente_v = ttk.Combobox(frm, state="readonly", values=self.cliente_nombres, width=15)
+        self.cb_cliente_v.current(0)
+        self.cb_cliente_v.grid(row=1, column=3, padx=5)
 
         # 🔥 BOTONES UNIFICADOS (colores modernizados)
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_ventas, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
@@ -493,10 +311,8 @@ class Historiales:
         try:
             d_sql = self.fecha_desde_v.get_date_sql()
             h_sql = self.fecha_hasta_v.get_date_sql()
-            
-            # Usar la ID de la variable de selección
-            id_vend = self.var_vendedor_v_sel['id']
-            id_cli = self.var_cliente_v_sel['id']
+            id_vend = self.vendedor_ids[self.cb_vendedor_v.current()]
+            id_cli = self.cliente_ids[self.cb_cliente_v.current()]
             
             if hasattr(self, 'filtro_venta_id') and self.filtro_venta_id:
                 ventas = [v for v in self.backend.obtener_ventas_maestro(None, None, None, None) 
@@ -535,7 +351,6 @@ class Historiales:
         frm = tk.Frame(self.tab_compras, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
 
-        # Rango y Fechas (No cambian)
         tk.Label(frm, text="Rango:", bg="#f4f4f8", font=("bold", 9)).grid(row=0, column=0, sticky="e")
         cb_rango = ttk.Combobox(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], state="readonly", width=12)
         cb_rango.current(0)
@@ -555,22 +370,15 @@ class Historiales:
         
         cb_rango.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango, self.fecha_desde_c.widget_entrada, self.fecha_hasta_c.widget_entrada))
 
-        # Proveedor (Selector Modal)
         tk.Label(frm, text="Proveedor:", bg="#f4f4f8").grid(row=1, column=0, sticky="e", pady=5)
-        self.lbl_proveedor_c = tk.Label(frm, text=self.var_proveedor_c_sel['nombre'], bg="#f4f4f8", width=20, anchor="w")
-        self.lbl_proveedor_c.grid(row=1, column=1, columnspan=2, sticky="w", padx=5)
-        self.crear_boton_accion(frm, "Buscar Proveedor", 
-                                lambda: self._crear_selector_entidad("Proveedor", self.var_proveedor_c_sel, self.proveedores_list), 
-                                "#3b82f6", width=15).grid(row=1, column=2, sticky="e")
+        self.cb_proveedor_c = ttk.Combobox(frm, state="readonly", values=self.proveedor_nombres, width=20)
+        self.cb_proveedor_c.current(0)
+        self.cb_proveedor_c.grid(row=1, column=1, columnspan=2, sticky="w", padx=5)
 
-        # Usuario/Registró (Selector Modal)
         tk.Label(frm, text="Usuario:", bg="#f4f4f8").grid(row=1, column=3, sticky="e")
-        self.lbl_usuario_c = tk.Label(frm, text=self.var_usuario_c_sel['nombre'], bg="#f4f4f8", width=15, anchor="w")
-        self.lbl_usuario_c.grid(row=1, column=4, padx=5, sticky="w")
-        self.crear_boton_accion(frm, "Buscar Usuario", 
-                                lambda: self._crear_selector_entidad("Vendedor/Usuario", self.var_usuario_c_sel, self.backend.obtener_vendedores()), 
-                                "#3b82f6", width=15).grid(row=1, column=4, padx=(100,0), sticky="e")
-
+        self.cb_usuario_c = ttk.Combobox(frm, state="readonly", values=self.vendedor_nombres, width=15)
+        self.cb_usuario_c.current(0)
+        self.cb_usuario_c.grid(row=1, column=4, padx=5)
 
         # 🔥 BOTONES UNIFICADOS
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_compras, "#3b82f6", width=10).grid(row=1, column=5)
@@ -605,10 +413,7 @@ class Historiales:
         try:
             d_sql = self.fecha_desde_c.get_date_sql()
             h_sql = self.fecha_hasta_c.get_date_sql()
-            
-            # Usar la ID de la variable de selección
-            id_prov_filtro = self.var_proveedor_c_sel['id']
-            id_usuario_filtro = self.var_usuario_c_sel['id']
+            id_prov_filtro = self.proveedor_ids[self.cb_proveedor_c.current()]
             
             if hasattr(self, 'filtro_compra_id') and self.filtro_compra_id:
                 compras = [c for c in self.backend.obtener_compras_maestro(None, None, None) 
@@ -619,13 +424,9 @@ class Historiales:
             
             prov_map = self.proveedores_map_nombre
 
-            # Filtrar por usuario (si hay un ID seleccionado)
-            if id_usuario_filtro:
-                try:
-                    nombre_usuario_sel = self.var_usuario_c_sel['nombre']
-                    compras = [c for c in compras if c.get('usuario') == nombre_usuario_sel]
-                except: pass
-
+            nombre_usuario_sel = self.vendedor_nombres[self.cb_usuario_c.current()]
+            if nombre_usuario_sel != "(Todos)":
+                compras = [c for c in compras if c.get('usuario') == nombre_usuario_sel]
 
             for c in compras:
                 medio = c.get('medio_pago') or '-'
@@ -685,7 +486,6 @@ class Historiales:
         frm = tk.Frame(self.tab_pagos, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
 
-        # Rango y Fechas (No cambian)
         tk.Label(frm, text="Rango:", bg="#f4f4f8", font=("bold", 9)).grid(row=0, column=0, sticky="e")
         cb_rango = ttk.Combobox(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], state="readonly", width=12)
         cb_rango.current(0)
@@ -705,21 +505,15 @@ class Historiales:
         
         cb_rango.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango, self.fecha_desde_p.widget_entrada, self.fecha_hasta_p.widget_entrada))
 
-        # Cliente (Selector Modal)
         tk.Label(frm, text="Cliente:", bg="#f4f4f8").grid(row=1, column=0, sticky="e", pady=5)
-        self.lbl_cliente_p = tk.Label(frm, text=self.var_cliente_p_sel['nombre'], bg="#f4f4f8", width=20, anchor="w")
-        self.lbl_cliente_p.grid(row=1, column=1, padx=5, sticky="w")
-        self.crear_boton_accion(frm, "Buscar Cliente", 
-                                lambda: self._crear_selector_entidad("Cliente", self.var_cliente_p_sel, self.backend.listar_clientes()), 
-                                "#3b82f6", width=15).grid(row=1, column=1, padx=(100,0), sticky="e")
+        self.cb_cliente_p = ttk.Combobox(frm, state="readonly", values=self.cliente_nombres, width=20)
+        self.cb_cliente_p.current(0)
+        self.cb_cliente_p.grid(row=1, column=1, padx=5)
 
-        # Usuario/Registró (Selector Modal)
         tk.Label(frm, text="Registró:", bg="#f4f4f8").grid(row=1, column=2, sticky="e")
-        self.lbl_usuario_p = tk.Label(frm, text=self.var_usuario_p_sel['nombre'], bg="#f4f4f8", width=15, anchor="w")
-        self.lbl_usuario_p.grid(row=1, column=3, padx=5, sticky="w")
-        self.crear_boton_accion(frm, "Buscar Usuario", 
-                                lambda: self._crear_selector_entidad("Vendedor/Usuario", self.var_usuario_p_sel, self.backend.obtener_vendedores()), 
-                                "#3b82f6", width=15).grid(row=1, column=3, padx=(100,0), sticky="e")
+        self.cb_usuario_p = ttk.Combobox(frm, state="readonly", values=self.vendedor_nombres, width=15)
+        self.cb_usuario_p.current(0)
+        self.cb_usuario_p.grid(row=1, column=3, padx=5)
 
         # 🔥 BOTONES UNIFICADOS
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_pagos, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
@@ -737,24 +531,13 @@ class Historiales:
         try:
             d_sql = self.fecha_desde_p.get_date_sql()
             h_sql = self.fecha_hasta_p.get_date_sql()
-            
-            # Usar la ID de la variable de selección
-            id_cli = self.var_cliente_p_sel['id']
-            id_usuario = self.var_usuario_p_sel['id']
+            id_cli = self.cliente_ids[self.cb_cliente_p.current()]
+            id_usuario = self.vendedor_ids[self.cb_usuario_p.current()]
             
             if hasattr(self, 'filtro_cliente_id') and self.filtro_cliente_id:
                 id_cli = self.filtro_cliente_id
                 self.filtro_cliente_id = None
-                try: 
-                    # Buscar el nombre correspondiente a la ID para actualizar el label
-                    cli_data = next((c for c in self.backend.listar_clientes() if c['id_cliente'] == id_cli), None)
-                    if cli_data:
-                        self.var_cliente_p_sel = {"id": id_cli, "nombre": cli_data['nombre']}
-                        self._update_ui_sel()
-                    elif id_cli == 0:
-                         self.var_cliente_p_sel = {"id": 0, "nombre": "(Consumidor Final)"}
-                         self._update_ui_sel()
-
+                try: self.cb_cliente_p.current(self.cliente_ids.index(id_cli))
                 except: pass
 
             pagos = self.backend.obtener_pagos_maestro(d_sql, h_sql, id_cli, id_usuario)
@@ -811,13 +594,10 @@ class Historiales:
         self.cb_filtro_rapido_cj.current(0)
         self.cb_filtro_rapido_cj.grid(row=1, column=1, padx=5, sticky="w")
 
-        # Usuario (Selector Modal)
         tk.Label(frm, text="Usuario:", bg="#f4f4f8").grid(row=1, column=2, sticky="e")
-        self.lbl_usuario_caja = tk.Label(frm, text=self.var_usuario_caja_sel['nombre'], bg="#f4f4f8", width=15, anchor="w")
-        self.lbl_usuario_caja.grid(row=1, column=3, padx=5, sticky="w")
-        self.crear_boton_accion(frm, "Buscar Usuario", 
-                                lambda: self._crear_selector_entidad("Vendedor/Usuario", self.var_usuario_caja_sel, self.backend.obtener_vendedores()), 
-                                "#3b82f6", width=15).grid(row=1, column=3, padx=(100,0), sticky="e")
+        self.cb_usuario_caja = ttk.Combobox(frm, state="readonly", values=self.vendedor_nombres, width=15)
+        self.cb_usuario_caja.current(0)
+        self.cb_usuario_caja.grid(row=1, column=3, padx=5)
         
         # 🔥 BOTONES UNIFICADOS
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_caja, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
@@ -855,7 +635,11 @@ class Historiales:
                 db_tipo = "egreso"
                 db_motivo = None
 
-            id_usuario = self.var_usuario_caja_sel['id']
+            id_usuario = None
+            try:
+                if self.cb_usuario_caja.current() > 0:
+                    id_usuario = self.vendedor_ids[self.cb_usuario_caja.current()] 
+            except: pass
 
             movimientos = self.backend.obtener_historial_movimientos_caja(
                 fecha_desde=d_sql,
@@ -911,10 +695,10 @@ class Historiales:
         except Exception as e:
             logger.error(f"Error cargando caja: {e}")
             messagebox.showerror("Error", str(e))
-    
-# ----------------------------------------------------------------
-# FUNCIONES DE EXPORTACIÓN (COMPLETAS)
-# ----------------------------------------------------------------
+        
+    # ----------------------------------------------------------------
+    # FUNCIONES DE EXPORTACIÓN (COMPLETAS)
+    # ----------------------------------------------------------------
 
     def _preguntar_tipo_exportacion(self) -> str | None:
         dialog = tk.Toplevel(self.win)
