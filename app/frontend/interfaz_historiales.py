@@ -17,8 +17,8 @@ try:
     from app.frontend.componentes_ui import SelectorFecha
 except ImportError:
     class SelectorFecha(tk.Frame):
-        def __init__(self, master, **kwargs): # Corregido init -> __init__
-            super().__init__(master, **kwargs) # Corregido super().init -> super().__init__
+        def __init__(self, master, **kwargs):
+            super().__init__(master, **kwargs)
             self.widget_entrada = tk.Entry(self, width=12)
             self.widget_entrada.pack(fill=tk.BOTH, expand=True)
             self.entrada = self.widget_entrada
@@ -28,7 +28,7 @@ except ImportError:
                 return datetime.strptime(val, "%d/%m/%Y").strftime("%Y-%m-%d")
             except: return None
 
-logger = logging.getLogger(__name__) # Usar __name__ en lugar de name, asumido.
+logger = logging.getLogger(__name__)
 
 def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
     if not fecha_sql: return ""
@@ -43,8 +43,6 @@ def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
 def _fmt_mon(val: Any) -> str:
     try: return f"$ {float(val):,.2f}"
     except: return "$ 0.00"
-
-# --- LÓGICA DE FILTROS RÁPIDOS ---
 
 def aplicar_filtro_rapido(event, combo, entry_desde, entry_hasta):
     seleccion = combo.get()
@@ -76,7 +74,7 @@ def aplicar_filtro_rapido(event, combo, entry_desde, entry_hasta):
         entry_hasta.delete(0, tk.END); entry_hasta.insert(0, f_fin.strftime("%d/%m/%Y"))
 
 class Historiales:
-    def __init__(self, parent: tk.Misc, backend, usuario: dict, # Corregido init -> __init__
+    def __init__(self, parent: tk.Misc, backend, usuario: dict,
                  tab_inicial: int = 0,
                  filtro_fecha: str | None = None,
                  filtro_vendedor_id: int | None = None,
@@ -92,12 +90,10 @@ class Historiales:
         self.win = tk.Toplevel(parent)
         self.win.title("📋 Historiales del Sistema")
         
-        # Tamaño fijo razonable
-        altura = 650 
-        self.win.geometry(f"1250x{altura}")
+        altura = 720 
+        self.win.geometry(f"1300x{altura}") 
         self.win.config(bg="#f4f4f8")
         
-        # 🔥 ESTILOS MODERNOS (Treeview + Headings)
         style = ttk.Style()
         try:
             style.theme_use('clam')
@@ -127,18 +123,29 @@ class Historiales:
         tk.Label(frm_header, text="HISTORIALES DEL SISTEMA", 
                  font=("Segoe UI", 16, "bold"), fg="white", bg="#3b82f6").pack()
 
-        # Datos para combos
         self.vendedor_ids = [None]
         self.vendedor_nombres = ["(Todos)"]
-        self.cliente_ids = [None]
+        self.cliente_ids = [None, 0]
         self.cliente_nombres = ["(Todos)", "(Consumidor Final)"]
+        self.cliente_ids_pagos = [None]
+        self.cliente_nombres_pagos = ["(Todos)"]
         self.proveedor_ids = [None]
         self.proveedor_nombres = ["(Todos)"]
+        self.proveedores_map_id = {}
+        self.proveedores_map_nombre = {}
         
-        self.cargar_datos_combos()
+        # cargar_datos_combos se difiere para que la ventana abra sin demora
+        self.win.after(50, self.cargar_datos_combos)
+
+        # Footer con boton cerrar - se packea ANTES del notebook para reservar espacio
+        frm_footer = tk.Frame(self.win, bg="#f4f4f8", pady=8)
+        frm_footer.pack(fill="x", padx=10, side=tk.BOTTOM)
+        tk.Button(frm_footer, text="Cerrar", command=self.win.destroy,
+                  bg="#64748b", fg="white", font=("Segoe UI", 10),
+                  relief="flat", padx=20, pady=6, cursor="hand2").pack(side=tk.RIGHT)
 
         self.notebook = ttk.Notebook(self.win)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=(10,0))
 
         self.tab_ventas = ttk.Frame(self.notebook)
         self.tab_compras = ttk.Frame(self.notebook)
@@ -148,7 +155,6 @@ class Historiales:
         self.notebook.add(self.tab_compras, text="📦 Compras")
         self.notebook.add(self.tab_pagos, text="💰 Pagos Cta. Cte.")
 
-        # Verificar permiso para ver caja
         if tiene_permiso(usuario, 'ver_historial_movimientos'):
             self.tab_caja = ttk.Frame(self.notebook)
             self.notebook.add(self.tab_caja, text="💵 Movimientos de Caja")
@@ -172,9 +178,7 @@ class Historiales:
         configurar_navegacion_ventana(self.win)
         self.win.grab_set()
         
-    # 🔥 HELPER PARA BOTONES UNIFICADOS
     def crear_boton_accion(self, parent, text, command, color, width=12):
-        """Helper para crear un botón estandarizado (estética moderna)."""
         btn = tk.Button(parent,
                         text=text,
                         command=command,
@@ -190,7 +194,6 @@ class Historiales:
         return btn
 
     def _darken_color(self, hex_color):
-        """Oscurece un color hexadecimal para el activebackground (hover visual)."""
         colors = {
             "#3b82f6": "#2563eb",
             "#10b981": "#059669",
@@ -211,6 +214,9 @@ class Historiales:
             self.cliente_nombres = ["(Todos)", "(Consumidor Final)"] + [c.get("nombre", "") for c in clis]
             self.cliente_ids = [None, 0] + [c.get("id_cliente") for c in clis]
             
+            self.cliente_nombres_pagos = ["(Todos)"] + [c.get("nombre", "") for c in clis]
+            self.cliente_ids_pagos = [None] + [c.get("id_cliente") for c in clis]
+            
             provs = self.backend.obtener_proveedores(incluir_inactivos=True) or []
             self.proveedor_nombres = ["(Todos)"] + [p.get("nombre", "") for p in provs]
             self.proveedor_ids = [None] + [p.get("id_proveedor") for p in provs]
@@ -218,6 +224,23 @@ class Historiales:
             self.proveedores_map_nombre = {p['nombre']: p for p in provs} 
         except Exception as e:
             logger.error(f"Error carga combos: {e}")
+        finally:
+            # Actualizar los combos ya renderizados con los datos recién cargados
+            try:
+                if hasattr(self, 'cb_vendedor_v'):
+                    self.cb_vendedor_v['values'] = self.vendedor_nombres
+                    self.cb_vendedor_v.current(0)
+                if hasattr(self, 'cb_cliente_v'):
+                    self.cb_cliente_v['values'] = self.cliente_nombres
+                    self.cb_cliente_v.current(0)
+                if hasattr(self, 'cb_proveedor_c'):
+                    self.cb_proveedor_c['values'] = self.proveedor_nombres
+                    self.cb_proveedor_c.current(0)
+                if hasattr(self, 'cb_cliente_p'):
+                    self.cb_cliente_p['values'] = self.cliente_nombres_pagos
+                    self.cb_cliente_p.current(0)
+            except Exception:
+                pass
 
     def _aplicar_filtros_iniciales(self, f_fecha, f_desde, f_hasta, f_vend, f_vta, f_comp, f_cli):
         if f_fecha:
@@ -249,9 +272,6 @@ class Historiales:
         elif "Pagos" in tab_text: self.buscar_pagos()
         elif "Caja" in tab_text: self.buscar_caja()
 
-    # ----------------------------------------------------------------
-    # PESTAÑA VENTAS
-    # ----------------------------------------------------------------
     def _crear_tab_ventas(self):
         frm = tk.Frame(self.tab_ventas, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
@@ -285,21 +305,19 @@ class Historiales:
         self.cb_cliente_v.current(0)
         self.cb_cliente_v.grid(row=1, column=3, padx=5)
 
-        # 🔥 BOTONES UNIFICADOS (colores modernizados)
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_ventas, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
         self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(0), "#10b981", width=10).grid(row=1, column=5, padx=5)
         
         cols = ("ID", "Fecha", "Cliente", "Vendedor", "Total", "Estado", "Pago")
-        self.tree_maestro_v = ttk.Treeview(self.tab_ventas, columns=cols, show="headings", height=10, style="Modern.Treeview")
+        self.tree_maestro_v = ttk.Treeview(self.tab_ventas, columns=cols, show="headings", height=8, style="Modern.Treeview") 
         self.tree_maestro_v.pack(fill="both", expand=True, padx=10, pady=5)
         for c in cols: self.tree_maestro_v.heading(c, text=c)
-        self.tree_maestro_v.column("ID", width=50, anchor="center")
+        self.tree_maestro_v.column("ID", width=0, minwidth=0, stretch=False)  # oculta, usada internamente
         self.tree_maestro_v.column("Total", anchor="e") 
         self.tree_maestro_v.bind("<<TreeviewSelect>>", self.mostrar_detalle_venta)
 
-
         cols_d = ("Prod", "Código", "Cant", "P. Unit", "Subtotal")
-        self.tree_detalle_v = ttk.Treeview(self.tab_ventas, columns=cols_d, show="headings", height=6, style="Modern.Treeview")
+        self.tree_detalle_v = ttk.Treeview(self.tab_ventas, columns=cols_d, show="headings", height=8, style="Modern.Treeview") 
         self.tree_detalle_v.pack(fill="both", expand=True, padx=10, pady=(0,10))
         for c in cols_d: self.tree_detalle_v.heading(c, text=c)
         self.tree_detalle_v.column("P. Unit", anchor="e")
@@ -344,9 +362,6 @@ class Historiales:
                 ])
         except Exception: pass
 
-    # ----------------------------------------------------------------
-    # PESTAÑA COMPRAS (COMPLETA CON PRECIO VENTA HISTÓRICO)
-    # ----------------------------------------------------------------
     def _crear_tab_compras(self):
         frm = tk.Frame(self.tab_compras, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
@@ -380,25 +395,21 @@ class Historiales:
         self.cb_usuario_c.current(0)
         self.cb_usuario_c.grid(row=1, column=4, padx=5)
 
-        # 🔥 BOTONES UNIFICADOS
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_compras, "#3b82f6", width=10).grid(row=1, column=5)
         self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(1), "#10b981", width=10).grid(row=1, column=6, padx=5)
 
-        # Maestro (CON COLUMNAS MODIFICADAS)
-        cols = ("ID", "Fecha", "Proveedor", "DNI", "Empresa", "CUIT", "Total", "Estado", "Pago", "Usuario")
+        cols = ("ID", "Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Usuario")
         self.tree_maestro_c = ttk.Treeview(self.tab_compras, columns=cols, show="headings", height=8, style="Modern.Treeview")
         self.tree_maestro_c.pack(fill="both", expand=True, padx=10, pady=5)
         for c in cols: self.tree_maestro_c.heading(c, text=c)
-        self.tree_maestro_c.column("ID", width=50, anchor="center")
+        self.tree_maestro_c.column("ID", width=0, minwidth=0, stretch=False)  # oculta, usada internamente
         self.tree_maestro_c.column("Total", anchor="e")
-        self.tree_maestro_c.column("Estado", width=80, anchor="center")
+        self.tree_maestro_c.column("Estado", width=100, anchor="center")
         self.tree_maestro_c.column("Pago", width=100, anchor="center")
-        self.tree_maestro_c.column("Empresa", width=120)
-        self.tree_maestro_c.column("DNI", width=80) 
-        self.tree_maestro_c.column("CUIT", width=100)
+        self.tree_maestro_c.column("Empresa", width=160)
+        self.tree_maestro_c.column("CUIT", width=110, anchor="center")
         self.tree_maestro_c.bind("<<TreeviewSelect>>", self.mostrar_detalle_compra)
 
-        # 🔥 DETALLE CON PRECIO VENTA HISTÓRICO
         cols_d = ("Prod", "Código", "Cant", "Costo", "Precio Venta Asignado", "Subtotal")
         self.tree_detalle_c = ttk.Treeview(self.tab_compras, columns=cols_d, show="headings", height=6, style="Modern.Treeview")
         self.tree_detalle_c.pack(fill="both", expand=True, padx=10, pady=(0,10))
@@ -432,17 +443,14 @@ class Historiales:
                 medio = c.get('medio_pago') or '-'
                 prov_data = prov_map.get(c.get('proveedor'), {})
                 
-                dni_val = prov_data.get('dni', '-')
                 cuit_val = prov_data.get('cuit', '-')
-                empresa_val = prov_data.get('empresa', '-')
+                empresa_val = prov_data.get('empresa') or c.get('proveedor') or '-'
 
                 self.tree_maestro_c.insert("", tk.END, values=[
                     c.get('id_compra'), 
                     _formatear_fecha_para_ui(c.get('fecha')),
-                    c.get('proveedor'),
-                    dni_val, # DNI Vendedor
-                    empresa_val, # Nombre Empresa
-                    cuit_val, # CUIT Empresa
+                    empresa_val, 
+                    cuit_val, 
                     _fmt_mon(c.get('total')),
                     c.get('estado'), 
                     medio, 
@@ -458,13 +466,12 @@ class Historiales:
         id_c = self.tree_maestro_c.item(sel[0], "values")[0]
         
 
-        if self.tree_maestro_c.item(sel[0], "values")[7] == "PAGO DEUDA":
+        if self.tree_maestro_c.item(sel[0], "values")[5] == "PAGO DEUDA":
             return
             
         try:
             dets = self.backend.obtener_compra_detalle(int(id_c))
             for d in dets:
-                # 🔥 Precio Venta Histórico
                 precio_venta = d.get('precio_venta_historico')
                 precio_venta_txt = _fmt_mon(precio_venta) if precio_venta else "-"
                 
@@ -479,9 +486,7 @@ class Historiales:
         except Exception as e:
             logger.error(f"Error al mostrar detalle compra: {e}")
             pass
-    # ----------------------------------------------------------------
-    # PESTAÑA PAGOS
-    # ----------------------------------------------------------------
+
     def _crear_tab_pagos(self):
         frm = tk.Frame(self.tab_pagos, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
@@ -506,7 +511,7 @@ class Historiales:
         cb_rango.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango, self.fecha_desde_p.widget_entrada, self.fecha_hasta_p.widget_entrada))
 
         tk.Label(frm, text="Cliente:", bg="#f4f4f8").grid(row=1, column=0, sticky="e", pady=5)
-        self.cb_cliente_p = ttk.Combobox(frm, state="readonly", values=self.cliente_nombres, width=20)
+        self.cb_cliente_p = ttk.Combobox(frm, state="readonly", values=self.cliente_nombres_pagos, width=20)
         self.cb_cliente_p.current(0)
         self.cb_cliente_p.grid(row=1, column=1, padx=5)
 
@@ -515,15 +520,13 @@ class Historiales:
         self.cb_usuario_p.current(0)
         self.cb_usuario_p.grid(row=1, column=3, padx=5)
 
-        # 🔥 BOTONES UNIFICADOS
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_pagos, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
         self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(2), "#10b981", width=10).grid(row=1, column=5, padx=5)
 
-        cols = ("ID", "Fecha", "Cliente", "Monto", "Método", "Registró")
+        cols = ("Fecha", "Cliente", "Monto", "Método", "Registró")
         self.tree_pagos = ttk.Treeview(self.tab_pagos, columns=cols, show="headings", height=12, style="Modern.Treeview")
         self.tree_pagos.pack(fill="both", expand=True, padx=10, pady=10)
         for c in cols: self.tree_pagos.heading(c, text=c)
-        self.tree_pagos.column("ID", width=50, anchor="center")
         self.tree_pagos.column("Monto", anchor="e")
 
     def buscar_pagos(self):
@@ -531,32 +534,31 @@ class Historiales:
         try:
             d_sql = self.fecha_desde_p.get_date_sql()
             h_sql = self.fecha_hasta_p.get_date_sql()
-            id_cli = self.cliente_ids[self.cb_cliente_p.current()]
+            
+            id_cli_idx = self.cb_cliente_p.current()
+            id_cli = self.cliente_ids_pagos[id_cli_idx] 
+            
             id_usuario = self.vendedor_ids[self.cb_usuario_p.current()]
             
             if hasattr(self, 'filtro_cliente_id') and self.filtro_cliente_id:
                 id_cli = self.filtro_cliente_id
                 self.filtro_cliente_id = None
-                try: self.cb_cliente_p.current(self.cliente_ids.index(id_cli))
+                try: self.cb_cliente_p.current(self.cliente_ids_pagos.index(id_cli))
                 except: pass
 
             pagos = self.backend.obtener_pagos_maestro(d_sql, h_sql, id_cli, id_usuario)
             for p in pagos:
                 self.tree_pagos.insert("", tk.END, values=[
-                    p.get('id_pago'), _formatear_fecha_para_ui(p.get('fecha')),
+                    _formatear_fecha_para_ui(p.get('fecha')),
                     p.get('cliente_nombre'), _fmt_mon(p.get('monto')),
                     p.get('metodo'), p.get('usuario_nombre')
                 ])
         except Exception as e: logger.error(f"Error pagos: {e}")
 
-    # ----------------------------------------------------------------
-    # PESTAÑA CAJA 
-    # ----------------------------------------------------------------
     def _crear_tab_caja(self):
         frm = tk.Frame(self.tab_caja, bg="#f4f4f8", padx=10, pady=10)
         frm.pack(fill=tk.X)
         
-        # FILA 0: Fechas
         tk.Label(frm, text="Rango:", bg="#f4f4f8", font=("bold", 9)).grid(row=0, column=0, sticky="e")
         cb_rango = ttk.Combobox(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], state="readonly", width=12)
         cb_rango.current(0)
@@ -576,18 +578,16 @@ class Historiales:
         
         cb_rango.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango, self.fecha_desde_cj.widget_entrada, self.fecha_hasta_cj.widget_entrada))
         
-        # FILA 1: Filtro Inteligente y Usuario
         tk.Label(frm, text="Mostrar:", bg="#f4f4f8").grid(row=1, column=0, sticky="e", pady=5)
         
         self.opciones_filtro_caja = {
             "(Todo)": (None, None),
-            "🟢 Aperturas y Cierres": (None, "apertura_cierre"),
-            "🛒 Ventas": (None, "venta_efectivo"),
-            "💰 Ingresos (Ventas + Cobros)": ("ingreso", None),
-            "💸 Egresos (Pagos + Gastos)": ("egreso", None),
-            "📦 Pagos a Proveedores": (None, "pago_proveedor"),
-            "💵 Pagos de Clientes (Cta. Cte.)": (None, "pago_cuenta_corriente_efectivo"),
-            "⚠️ Gastos / Retiros": (None, "otros_egresos")
+            "🛒 Ventas (todas)": ('ingreso', "venta"),
+            "💰 Cobros Cta. Cte.": ('ingreso', "cobro_cta_cte"),
+            "📦 Pagos a Proveedores": ('egreso', "pago_proveedor"),
+            "🔻 Retiros/Ajustes (-)": ('egreso', "retiro_caja"), 
+            "💸 Gastos Varios": ('egreso', "gasto_vario"),
+            "↩️ Reembolsos/Devoluciones": ('egreso', "devolucion_efectivo") 
         }
         
         self.cb_filtro_rapido_cj = ttk.Combobox(frm, values=list(self.opciones_filtro_caja.keys()), state="readonly", width=30)
@@ -599,17 +599,20 @@ class Historiales:
         self.cb_usuario_caja.current(0)
         self.cb_usuario_caja.grid(row=1, column=3, padx=5)
         
-        # 🔥 BOTONES UNIFICADOS
         self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_caja, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
         self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(3), "#10b981", width=10).grid(row=1, column=5, padx=5)
         
-        cols = ("ID", "Fecha", "Usuario", "Tipo", "Motivo", "Monto", "Desc")
+        cols = ("Fecha", "Usuario", "Tipo", "Motivo", "Monto", "Descripción")
         self.tree_caja = ttk.Treeview(self.tab_caja, columns=cols, show="headings", height=15, style="Modern.Treeview")
         self.tree_caja.pack(fill="both", expand=True, padx=10, pady=10)
         
-        for c in cols: self.tree_caja.heading(c, text=c)
-        self.tree_caja.column("ID", width=50); self.tree_caja.column("Monto", width=100, anchor="e")
-        self.tree_caja.column("Desc", width=250)
+        for c in cols: self.tree_caja.heading(c, text=c, anchor="center")
+        self.tree_caja.column("Fecha",       width=130, anchor="center")
+        self.tree_caja.column("Usuario",     width=110, anchor="center")
+        self.tree_caja.column("Tipo",        width=90,  anchor="center")
+        self.tree_caja.column("Motivo",      width=160, anchor="center")
+        self.tree_caja.column("Monto",       width=130, anchor="e", minwidth=130)
+        self.tree_caja.column("Descripción", width=380, anchor="w", stretch=tk.YES) 
         
         self.tree_caja.tag_configure('ingreso', background='#d1fae5')
         self.tree_caja.tag_configure('egreso', background='#fee2e2')
@@ -627,12 +630,16 @@ class Historiales:
             db_tipo = tipo_filtro
             db_motivo = motivo_filtro
             
-            if seleccion == "🟢 Aperturas y Cierres":
-                db_tipo = None
-                db_motivo = None
+            # Para filtros agrupados ("venta" y "cobro_cta_cte") pedimos solo por tipo al backend
+            # y filtramos por motivo acá para capturar todas las variantes
+            MOTIVOS_VENTA = {'venta_efectivo', 'venta_transferencia', 'venta_tarjeta', 'venta_cuenta_corriente', 'venta_debito', 'venta_qr'}
+            MOTIVOS_COBRO_CTA = {'pago_cuenta_corriente_efectivo', 'pago_cuenta_corriente_transferencia', 
+                                  'pago_cuenta_corriente_tarjeta', 'cobro_cuenta_corriente', 'cobro_cta_cte'}
             
-            if seleccion == "⚠️ Gastos / Retiros":
-                db_tipo = "egreso"
+            if motivo_filtro in ("venta", "cobro_cta_cte"):
+                db_motivo = None  # No filtrar por motivo en el backend
+            elif seleccion == "(Todo)":
+                db_tipo = None
                 db_motivo = None
 
             id_usuario = None
@@ -649,57 +656,93 @@ class Historiales:
                 id_usuario=id_usuario
             )
             
-            # Filtrado fino en memoria para los casos complejos
-            if seleccion == "🟢 Aperturas y Cierres":
-                movimientos = [m for m in movimientos if m['motivo'] in ('apertura_caja', 'cierre_caja')]
-            
-            elif seleccion == "⚠️ Gastos / Retiros":
-                movimientos = [m for m in movimientos if m['motivo'] in ('gasto_vario', 'retiro_caja')]
 
-            total_ing = 0
-            total_egr = 0
-            
             def _formatear_fecha(f):
                 if not f: return ""
                 try: return f.strftime("%d/%m/%Y %H:%M")
                 except: return str(f)
 
             for mov in movimientos:
-                es_cierre = (mov.get('tipo') == 'cierre')
+                
+                motivo_raw = mov.get('motivo') or ''
+                
+                # Filtro local para opciones agrupadas
+                if motivo_filtro == "venta":
+                    # Incluir todo motivo que empiece con "venta" o sea una venta
+                    if not (motivo_raw.startswith('venta') or motivo_raw in MOTIVOS_VENTA):
+                        continue
+                elif motivo_filtro == "cobro_cta_cte":
+                    if not (motivo_raw in MOTIVOS_COBRO_CTA or 
+                            'cuenta_corriente' in motivo_raw or 
+                            'cta_cte' in motivo_raw):
+                        continue
+                elif seleccion != "(Todo)":
+                    if motivo_raw in ['apertura_caja', 'cierre_caja']:
+                        continue
+                
+                es_cierre = (motivo_raw == 'cierre_caja')
+                es_apertura = (motivo_raw == 'apertura_caja')
                 es_ingreso = (mov.get('tipo') == 'ingreso')
                 
                 tag = 'ingreso' if es_ingreso else 'egreso'
-                if es_cierre: tag = 'cierre'
+                if es_cierre or es_apertura: tag = 'cierre' 
                 
-                tipo_visual = "➕ INGRESO" if es_ingreso else ("➖ EGRESO" if not es_cierre else "🏁 CIERRE")
+                if es_apertura:
+                    tipo_visual = "🟢 APERTURA"
+                elif es_cierre:
+                    tipo_visual = "🔒 CIERRE"
+                else:
+                    tipo_visual = "➕ INGRESO" if es_ingreso else "➖ EGRESO"
                 
-                motivo_txt = mov['motivo'].replace('_', ' ').title()
-                if motivo_txt == "Venta Efectivo": motivo_txt = "🛒 Venta Efectivo"
-                if motivo_txt == "Apertura Caja": motivo_txt = "🟢 Apertura de Caja"
-                if motivo_txt == "Cierre Caja": motivo_txt = "🏁 Cierre de Caja"
+                mapeo_motivos = {
+                    'venta_efectivo': '🛒 Venta',
+                    'venta_transferencia': '🛒 Venta',
+                    'venta_tarjeta': '🛒 Venta',
+                    'venta_debito': '🛒 Venta',
+                    'venta_qr': '🛒 Venta',
+                    'venta_cuenta_corriente': '🛒 Venta',
+                    'apertura_caja': '🟢 Apertura de Caja',
+                    'cierre_caja': '🔒 Cierre de Caja',
+                    'pago_cuenta_corriente_efectivo': '💰 Cobro Cta. Cte.',
+                    'pago_cuenta_corriente_transferencia': '💰 Cobro Cta. Cte.',
+                    'pago_cuenta_corriente_tarjeta': '💰 Cobro Cta. Cte.',
+                    'cobro_cuenta_corriente': '💰 Cobro Cta. Cte.',
+                    'cobro_cta_cte': '💰 Cobro Cta. Cte.',
+                    'pago_proveedor': '📦 Pago a Proveedor',
+                    'gasto_vario': '💸 Gasto Vario',
+                    'retiro_caja': '🔻 Retiro/Ajuste',  
+                    'devolucion_efectivo': '↩️ Reembolso',
+                    'ajuste_positivo': '🔺 Ajuste (+)',
+                    'ajuste_negativo': '🔻 Ajuste (-)',
+                    'otro': '❓ Otro'
+                }
+                # Si el motivo empieza con "venta" pero no está en el mapa, mostrar "Venta" igual
+                if motivo_raw and motivo_raw not in mapeo_motivos and motivo_raw.startswith('venta'):
+                    motivo_txt = '🛒 Venta'
+                else:
+                    motivo_txt = mapeo_motivos.get(motivo_raw, motivo_raw.replace('_', ' ').title() if motivo_raw else '-')
                 
-                monto = float(mov['monto'])
-                if es_ingreso: total_ing += monto
-                elif not es_cierre: total_egr += monto
+                # 🔥 CORRECCIÓN DESCRIPCIÓN: Priorizar observaciones del usuario para Cierres
+                descripcion = mov.get('descripcion', '').strip() or '-'
+                if es_cierre:
+                    obs_manual = mov.get('observaciones_cierre', '').strip()
+                    if obs_manual:
+                        # Se concatena el resumen del sistema con la observación del usuario
+                        descripcion = f"{descripcion} | Obs: {obs_manual}"
                 
                 self.tree_caja.insert("", tk.END, values=(
-                    mov['id_movimiento'] if not es_cierre else "REF",
                     _formatear_fecha(mov['fecha_hora']),
                     mov['usuario_nombre'],
                     tipo_visual,
                     motivo_txt,
-                    _fmt_mon(monto),
-                    mov['descripcion']
+                    _fmt_mon(mov['monto']),
+                    descripcion
                 ), tags=(tag,))
                 
         except Exception as e:
             logger.error(f"Error cargando caja: {e}")
             messagebox.showerror("Error", str(e))
         
-    # ----------------------------------------------------------------
-    # FUNCIONES DE EXPORTACIÓN (COMPLETAS)
-    # ----------------------------------------------------------------
-
     def _preguntar_tipo_exportacion(self) -> str | None:
         dialog = tk.Toplevel(self.win)
         dialog.title("Exportar a Excel")
@@ -753,9 +796,8 @@ class Historiales:
                 w = csv.writer(f, delimiter=';')
                 cols_m = [tree_maestro.heading(c)['text'] for c in tree_maestro['columns']]
                 
-                # Definición de las columnas de detalle para el CSV
                 if tab_id == 0: cols_d = ["Producto", "Código", "Cantidad", "P. Unit", "Subtotal"]
-                else: cols_d = ["Producto", "Código", "Cantidad", "Costo", "Precio Venta", "Subtotal"] # Compras tiene una columna extra
+                else: cols_d = ["Producto", "Código", "Cantidad", "Costo", "Precio Venta", "Subtotal"] 
                 
                 w.writerow(cols_m + cols_d)
 
@@ -770,15 +812,13 @@ class Historiales:
                     filas_productos = []
                     
                     if usar_detalle_visual:
-                        # Si usamos el detalle visual, simplemente copiamos los datos visibles
                         filas_productos = items_detalle_visual
                     else:
                         detalles_bd = []
                         if tab_id == 0: 
                             detalles_bd = self.backend.obtener_venta_detalle(int(id_operacion))
                         else: 
-                            # Si es PAGO DEUDA, no tiene detalle de productos.
-                            if vals_m[7] == "PAGO DEUDA":
+                            if vals_m[5] == "PAGO DEUDA":
                                 continue
                             detalles_bd = self.backend.obtener_compra_detalle(int(id_operacion))
 
@@ -790,7 +830,6 @@ class Historiales:
                                 _fmt_mon(d.get('precio_unitario' if tab_id==0 else 'precio_unitario', 0)),
                             ]
                             if tab_id == 1:
-                                # Columna extra para Precio Venta Histórico en Compras
                                 precio_venta = d.get('precio_venta_historico')
                                 row_prod.append(_fmt_mon(precio_venta) if precio_venta else "-")
                                 
@@ -801,7 +840,6 @@ class Historiales:
                     if filas_productos:
                         for row_prod in filas_productos:
                             clean_prod = [str(x).strip() for x in row_prod]
-                            # Rellenar con espacios en blanco si el detalle es más corto (ej. para Ventas)
                             len_prod = len(cols_d)
                             if len(clean_prod) < len_prod:
                                 clean_prod.extend([""] * (len_prod - len(clean_prod)))
@@ -819,21 +857,17 @@ class Historiales:
         nombres = {0: "ventas", 1: "compras", 2: "pagos", 3: "caja"}
         nombre_base = f"{nombres.get(tab_id, 'datos')}_{hoy}.csv"
 
-        # 1. Si son Pagos o Caja, exportamos directo (son tablas simples)
         if tab_id in [2, 3]:
             if tab_id == 2: tree = self.tree_pagos
             else: tree = self.tree_caja
             self._guardar_csv_simple(tree, nombre_base)
             return
 
-        # 2. Si son Ventas o Compras, preguntamos qué quiere el usuario
         opcion = self._preguntar_tipo_exportacion()
         if not opcion: return
 
-        # Definir árboles según pestaña
         tree_m = self.tree_maestro_v if tab_id == 0 else self.tree_maestro_c
 
-        # 3. Ejecutar lógica
         if opcion == "maestro":
             self._guardar_csv_simple(tree_m, f"listado_general_{nombre_base}")
 
@@ -843,7 +877,7 @@ class Historiales:
                 return
             sel = tree_m.selection()
             datos_cabecera = tree_m.item(sel[0], 'values')
-            self._guardar_csv_combinado([datos_cabecera], tree_m, tab_id, f"detalle_venta_{datos_cabecera[0]}_{nombre_base}", False) # Forzamos a ir a DB para exportar el detalle correcto
+            self._guardar_csv_combinado([datos_cabecera], tree_m, tab_id, f"detalle_venta_{datos_cabecera[0]}_{nombre_base}", False) 
 
         elif opcion == "ambos":
             items_maestro = [tree_m.item(i, 'values') for i in tree_m.get_children()]

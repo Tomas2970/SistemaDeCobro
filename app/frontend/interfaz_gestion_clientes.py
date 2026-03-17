@@ -1,6 +1,4 @@
-# ============================================
-# ARCHIVO 2: interfaz_gestion_clientes.py
-# ============================================
+# app/frontend/interfaz_gestion_clientes.py
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -18,9 +16,35 @@ def _fmt_mon(val):
 def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     win = tk.Toplevel(parent)
     win.title("Gestión de Clientes")
-    win.geometry("1100x550")
+    win.geometry("1150x600") # 🔥 Ancho ajustado al quitar la columna
     win.config(bg="#f4f4f8")
     win.resizable(False, False)
+
+    style = ttk.Style()
+    try:
+        style.theme_use("clam")
+    except:
+        pass
+
+    style.configure(
+        "Modern.Treeview",
+        background="#ffffff",
+        foreground="#1f2937",
+        rowheight=28,
+        fieldbackground="#ffffff",
+        borderwidth=0,
+        font=("Segoe UI", 10)
+    )
+
+    style.configure(
+        "Modern.Treeview.Heading",
+        background="#f3f4f6",
+        foreground="#374151",
+        font=("Segoe UI", 10, "bold"),
+        relief="flat"
+    )
+
+    style.map("Modern.Treeview.Heading", background=[("active", "#e5e7eb")])
 
     # --- BARRA DE BÚSQUEDA ---
     frame_busqueda = tk.Frame(win, bg="#f4f4f8")
@@ -35,8 +59,10 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     frame_lista = tk.Frame(win, bg="#f4f4f8")
     frame_lista.pack(pady=10, padx=20, fill="both", expand=True)
 
-    cols = ["ID", "Nombre", "DNI", "CUIT/CUIL", "Teléfono", "Email", "Saldo (Deuda)", "Límite Crédito", "Activo"]
-    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=15)
+    # 🔥 COLUMNAS ACTUALIZADAS: Se eliminó CUIT/CUIL
+    cols = ["ID", "Nombre", "DNI", "Teléfono", "Email", "Dirección", "Saldo (Deuda)", "Límite Crédito", "Activo"]
+
+    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=15, style="Modern.Treeview")
     tree.pack(side="left", fill="both", expand=True)
     
     ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
@@ -45,15 +71,15 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     
     for c in cols: tree.heading(c, text=c)
     
-    tree.column("ID", width=40, anchor="center")
+    tree.column("ID", width=0, minwidth=0, stretch=False)
     tree.column("Nombre", width=180)
-    tree.column("DNI", width=80)
-    tree.column("CUIT/CUIL", width=100)
-    tree.column("Teléfono", width=100)
-    tree.column("Email", width=150)
-    tree.column("Saldo (Deuda)", width=100, anchor="e")
-    tree.column("Límite Crédito", width=100, anchor="e")
-    tree.column("Activo", width=50, anchor="center")
+    tree.column("DNI", width=100, anchor="center")
+    tree.column("Teléfono", width=110)
+    tree.column("Email", width=170)
+    tree.column("Dirección", width=200) 
+    tree.column("Saldo (Deuda)", width=120, anchor="e")
+    tree.column("Límite Crédito", width=120, anchor="e")
+    tree.column("Activo", width=80, anchor="center")
 
     tree.tag_configure("deuda", foreground="#dc2626")
     tree.tag_configure("favor", foreground="#16a34a")
@@ -86,9 +112,8 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
         for c in todos_clientes:
             nom = str(c.get('nombre','')).lower()
             dni = str(c.get('dni','')).lower()
-            cuit = str(c.get('cuit','')).lower()
             
-            if query in nom or query in dni or query in cuit:
+            if query in nom or query in dni:
                 saldo = float(c.get('saldo', 0.0))
                 tag = "cero"
                 if saldo < -0.01: tag = "deuda"
@@ -99,13 +124,14 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
 
                 activo = "SI" if c.get('activo') else "NO"
                 
+                # 🔥 Se eliminó el mapeo de CUIT para coincidir con las columnas
                 tree.insert("", tk.END, values=[
                     c.get('id_cliente'),
                     c.get('nombre'),
                     c.get('dni') or "-",
-                    c.get('cuit') or "-",
                     c.get('telefono') or "-",
                     c.get('email') or "-",
+                    c.get('direccion') or "-", 
                     saldo_vis,
                     _fmt_mon(c.get('limite_credito')),
                     activo
@@ -122,7 +148,6 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
             win.after(1000, cargar_datos)
 
     def abrir_editar():
-        # SEGURIDAD: Verificar rol (Admin/Supervisor)
         rol_id = usuario_actual.get('id_rol')
         if rol_id not in [1, 3]: 
             messagebox.showwarning("Acceso Denegado", "⚠️ Solo Administradores y Supervisores pueden modificar clientes.", parent=win)
@@ -167,7 +192,8 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
         if not sel: return
         item = tree.item(sel[0], "values")
         
-        if item[8] == 'SI':
+        # Índice ajustado: Activo ahora es la columna 8 (índice 8)
+        if item[8] == 'SI': 
              messagebox.showwarning("Atención", "El cliente ya está activo.", parent=win)
              return
 
@@ -178,7 +204,6 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
             else:
                 messagebox.showerror("Error", "No se pudo activar.", parent=win)
 
-    # 🔥 FRAME DE BOTONES CON ESTILO PLANO Y VIBRANTE (CORREGIDO)
     frame_botones = tk.Frame(win, bg="#f4f4f8")
     frame_botones.pack(pady=15, fill="x", padx=20)
 
@@ -197,7 +222,6 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
         relief="flat", padx=12, pady=7, cursor="hand2", width=12
     ).pack(side=tk.LEFT, padx=5)
 
-    # Botón Activar CONDICIONAL
     btn_activar = tk.Button(
         frame_acciones, text="✅ Activar", command=activar_cliente, 
         bg="#0ea5e9", fg="white", font=("Segoe UI", 9, "bold"), 

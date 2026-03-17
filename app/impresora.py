@@ -205,7 +205,7 @@ def obtener_impresora():
     except: return None
 
 # =====================================
-# Reportes Gerenciales (MEJORADO)
+# Reportes Gerenciales
 # =====================================
 
 def imprimir_resumen_diario(datos: dict):
@@ -223,8 +223,7 @@ def imprimir_resumen_diario(datos: dict):
     ticket.append(f"Fecha: {fecha_str}")
     ticket.append(linea_separadora())
     
-    # 1. VENTAS POR VENDEDOR (¡NUEVO!)
-    # (El backend debe proveer esto en 'ventas_por_vendedor')
+    # 1. VENTAS POR VENDEDOR
     if 'ventas_por_vendedor' in datos and datos['ventas_por_vendedor']:
         ticket.append("\n>> VENTAS POR VENDEDOR:")
         for vend in datos['ventas_por_vendedor']:
@@ -282,13 +281,13 @@ def imprimir_resumen_diario(datos: dict):
 
 def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
     """
-    Imprime el ticket de cierre de caja (Arqueo Individual).
+    🔥 MEJORADO: Imprime el ticket de cierre de caja con medios de pago completos
     """
     ticket = []
     ticket.append("\n")
     ticket.append(centrar_texto("SUPERMERCADO DON ATILIO"))
     ticket.append(centrar_texto("==========================="))
-    ticket.append(centrar_texto("CIERRE DE CAJA (ARQUEO)"))
+    ticket.append(centrar_texto("CIERRE DE CAJA"))
     ticket.append(linea_separadora())
     
     # Fechas
@@ -297,7 +296,15 @@ def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
     
     if fecha_apertura_raw:
         if isinstance(fecha_apertura_raw, str):
-            f_ap = fecha_apertura_raw
+            # CORREGIDO: convertir "2026-03-04 13:42:37" a "04/03/2026 13:42"
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    f_ap = datetime.strptime(fecha_apertura_raw, fmt).strftime("%d/%m/%Y %H:%M")
+                    break
+                except ValueError:
+                    continue
+            else:
+                f_ap = fecha_apertura_raw
         else:
             f_ap = fecha_apertura_raw.strftime("%d/%m/%Y %H:%M")
         ticket.append(f"Apertura: {f_ap}")
@@ -306,7 +313,10 @@ def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
     ticket.append(f"Cajero  : {nombre_usuario}")
     ticket.append(linea_separadora())
     
-    # Detalles numéricos
+    # 🔥 SECCIÓN 1: ARQUEO DE EFECTIVO
+    ticket.append(centrar_texto("ARQUEO DE EFECTIVO"))
+    ticket.append(linea_separadora('.'))
+    
     monto_ini = datos_cierre.get('monto_inicial', 0)
     ingresos = datos_cierre.get('total_ingresos', 0)
     egresos = datos_cierre.get('total_egresos', 0)
@@ -319,8 +329,8 @@ def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
     ticket.append(justificar_texto("(-) Egresos:", formato_precio(egresos)))
     ticket.append(linea_separadora('-'))
     
-    ticket.append(justificar_texto("Efec. Esperado:", formato_precio(esperado)))
-    ticket.append(justificar_texto("Efec. Real:", formato_precio(contado)))
+    ticket.append(justificar_texto("Efectivo Esperado:", formato_precio(esperado)))
+    ticket.append(justificar_texto("Efectivo Contado:", formato_precio(contado)))
     
     ticket.append(linea_separadora('='))
     texto_dif = "DIFERENCIA:"
@@ -330,12 +340,74 @@ def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
         val_dif += " (!)"
         
     ticket.append(justificar_texto(texto_dif, val_dif))
+    ticket.append(linea_separadora('='))
     
+    # 🔥 SECCIÓN 2: OTROS MEDIOS DE PAGO (Solo Registro)
+    medios_pago = datos_cierre.get('medios_pago', {})
+    
+    if medios_pago and any(medios_pago.values()):
+        ticket.append("\n")
+        ticket.append(centrar_texto("OTROS MEDIOS DE PAGO"))
+        ticket.append(centrar_texto("(Solo Registro)"))
+        ticket.append(linea_separadora('.'))
+        
+        tarjetas = medios_pago.get('tarjetas', 0)
+        transferencias = medios_pago.get('transferencias', 0)
+        cuenta_corriente = medios_pago.get('cuenta_corriente', 0)
+        
+        ticket.append(">> INGRESOS:")
+        ticket.append(justificar_texto("  Tarjetas:", formato_precio(tarjetas)))
+        ticket.append(justificar_texto("  Transferencias:", formato_precio(transferencias)))
+        ticket.append(justificar_texto("  Cuenta Corriente:", formato_precio(cuenta_corriente)))
+
+        tra_egr = datos_cierre.get('total_egresos_transferencia', 0)
+        tar_egr = datos_cierre.get('total_egresos_tarjeta', 0)
+        if tra_egr > 0 or tar_egr > 0:
+            ticket.append(linea_separadora('-'))
+            ticket.append(">> EGRESOS:")
+            if tar_egr > 0:
+                ticket.append(justificar_texto("  Tarjetas (pagos):", formato_precio(tar_egr)))
+            if tra_egr > 0:
+                ticket.append(justificar_texto("  Transf. (pagos):", formato_precio(tra_egr)))
+
+        ticket.append(linea_separadora('='))
+    
+    # SECCIÓN 3: TOTAL RECAUDADO
+    # CORREGIDO: total = solo ingresos reales (efectivo vendido + otros medios)
+    # El saldo inicial NO se suma porque es plata que ya estaba en caja, no dinero nuevo
+    medios_pago = datos_cierre.get('medios_pago', {})
+    ingresos_efectivo = datos_cierre.get('total_ingresos', 0)
+    egresos = datos_cierre.get('total_egresos', 0)
+    tarjetas_t = medios_pago.get('tarjetas', 0)
+    transferencias_t = medios_pago.get('transferencias', 0)
+    cuenta_corriente_t = medios_pago.get('cuenta_corriente', 0)
+    # Total recaudado = lo que ENTRÓ en el turno, sin restar egresos no-efectivo
+    total_general = ingresos_efectivo + tarjetas_t + transferencias_t + cuenta_corriente_t
+
+    if total_general > 0:
+        ticket.append("\n")
+        ticket.append(centrar_texto("TOTAL RECAUDADO"))
+        ticket.append(centrar_texto(formato_precio(total_general)))
+        ticket.append(centrar_texto("(Efectivo + Tarjetas + Trans + CC)"))
+        ticket.append(linea_separadora('='))
+    
+    # Observaciones
     obs = datos_cierre.get('observaciones', '')
     if obs:
-        ticket.append(linea_separadora('.'))
+        ticket.append("\n")
         ticket.append("OBSERVACIONES:")
-        ticket.append(obs)
+        ticket.append(linea_separadora('.'))
+        # Dividir observaciones largas en líneas
+        palabras = obs.split()
+        linea_actual = ""
+        for palabra in palabras:
+            if len(linea_actual) + len(palabra) + 1 <= ANCHO_TICKET:
+                linea_actual += palabra + " "
+            else:
+                ticket.append(linea_actual.strip())
+                linea_actual = palabra + " "
+        if linea_actual:
+            ticket.append(linea_actual.strip())
     
     ticket.append("\n\n\n")
     enviar_a_impresora('\n'.join(ticket))

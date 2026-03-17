@@ -130,12 +130,13 @@ class BackendAdapter:
         id_usuario: int, 
         id_cliente: int | None, 
         items: list, 
-        tipo_pago: str
+        tipo_pago: str,
+        id_session: int | None = None  # 🔥 NUEVO PARÁMETRO
     ) -> int | None:
         try:
             # La lógica de auditoría de Venta ya está en el Trigger de Inventario,
             # pero podríamos agregar una auditoría de 'ACCIÓN' aquí si quisiéramos.
-            return DB.registrar_venta_completa(id_usuario, id_cliente, items, tipo_pago)
+            return DB.registrar_venta_completa(id_usuario, id_cliente, items, tipo_pago, id_session)
         except Exception as e:
             logger.error(f"Error en registrar_venta_completa: {e}")
             raise 
@@ -144,6 +145,10 @@ class BackendAdapter:
     def crear_categoria(self, nombre: str, margen: float, es_pesable: bool = False) -> bool:
             fn = getattr(DB, "crear_categoria", None)
             return bool(fn(nombre, margen, es_pesable)) if callable(fn) else False
+
+    def eliminar_categoria(self, id_categoria: int) -> bool:
+        fn = getattr(DB, "eliminar_categoria", None)
+        return fn(id_categoria) if fn else False
 
     def actualizar_categoria(self, id_categoria: int, nombre: str, margen: float, es_pesable: bool) -> bool:
         fn = getattr(DB, "actualizar_categoria", None)
@@ -341,52 +346,77 @@ class BackendAdapter:
             )
         return resultado
 
-    # ---------- Proveedores y Compras ----------
-
+# ---------- Proveedores y Compras ----------
 
     def registrar_pago_proveedor(self, id_proveedor: int, monto: float, medio: str, id_usuario: int, obs: str) -> bool:
         fn = getattr(DB, "registrar_pago_proveedor", None)
         if callable(fn):
             return fn(id_proveedor, monto, medio, id_usuario, obs)
         return False
+
     def obtener_proveedores(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_proveedores", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
-    def insertar_proveedor(self, nombre: str, empresa: str, cuit: str, dni: str, telefono: str, email: str, direccion: str) -> int | None:
+
+    # EN app/database/backend_adapter.py (Línea ~312)
+    def insertar_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str) -> int | None:
         fn = getattr(DB, "insertar_proveedor", None)
-        # Mapeamos los nombres del adapter a la DB
-        return fn(nombre, empresa, cuit, dni, telefono, email, direccion) if callable(fn) else None
-        
-    def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, cuit: str, dni: str, telefono: str, email: str, direccion: str) -> bool:
+        if not callable(fn):
+            return None
+        return fn(
+            nombre=nombre,
+            empresa=empresa,
+            cuit_empresa=cuit_empresa, # ¡Asegúrate de que este cuit sea el nuevo nombre!
+            dni_vendedor=dni_vendedor, # ¡Asegúrate de que este dni sea el nuevo nombre!
+            telefono=telefono,
+            email=email,
+            direccion=direccion
+        )
+
+    # EN app/database/backend_adapter.py (Línea ~324)
+    def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str) -> bool:
         fn = getattr(DB, "actualizar_proveedor", None)
-        return bool(fn(id_proveedor, nombre, empresa, cuit, dni, telefono, email, direccion)) if callable(fn) else False
-    
-    def obtener_proveedores(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
-        fn = getattr(DB, "obtener_proveedores", None)
-        return list(fn(incluir_inactivos) or []) if callable(fn) else []
-    
+        if not callable(fn):
+            return False
+        return bool(fn(
+            id_proveedor=id_proveedor,
+            nombre=nombre,
+            empresa=empresa,
+            cuit_empresa=cuit_empresa, # ¡Asegúrate de que este cuit sea el nuevo nombre!
+            dni_vendedor=dni_vendedor, # ¡Asegúrate de que este dni sea el nuevo nombre!
+            telefono=telefono,
+            email=email,
+            direccion=direccion
+        ))
+
     def obtener_proveedor_completo(self, id_proveedor: int) -> dict | None:
         fn = getattr(DB, "obtener_proveedor_completo", None)
         return fn(id_proveedor) if callable(fn) else None
-        
+
     def obtener_proveedor_para_editar(self, id_proveedor: int) -> dict | None:
         fn = getattr(DB, "obtener_proveedor_completo", None)
         return fn(id_proveedor) if callable(fn) else None
+
     def eliminar_proveedor_logico(self, id_proveedor: int) -> bool:
         fn = getattr(DB, "eliminar_proveedor_logico", None)
         return bool(fn(id_proveedor)) if callable(fn) else False
+
     def activar_proveedor_logico(self, id_proveedor: int) -> bool:
         fn = getattr(DB, "activar_proveedor_logico", None)
         return bool(fn(id_proveedor)) if callable(fn) else False
+
     def obtener_productos_por_proveedor(self, id_proveedor: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_productos_por_proveedor", None)
         return list(fn(id_proveedor) or []) if callable(fn) else []
+
     def obtener_productos_sin_asignar(self, id_proveedor: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_productos_sin_asignar", None)
         return list(fn(id_proveedor) or []) if callable(fn) else []
+
     def asignar_producto_a_proveedor(self, id_proveedor: int, id_producto: int) -> bool:
         fn = getattr(DB, "asignar_producto_a_proveedor", None)
         return bool(fn(id_proveedor, id_producto)) if callable(fn) else False
+
     def quitar_producto_a_proveedor(self, id_proveedor: int, id_producto: int) -> bool:
         fn = getattr(DB, "quitar_producto_a_proveedor", None)
         return bool(fn(id_proveedor, id_producto)) if callable(fn) else False
@@ -575,6 +605,20 @@ class BackendAdapter:
         
         # Pasar el id_usuario para obtener SU caja
         return fn(id_usuario)
+    
+    def obtener_session_activa(self) -> dict | None:
+        """
+        Obtiene cualquier sesión de caja activa (sin filtrar por usuario).
+        Usado por el frontend para obtener id_session al registrar ventas.
+        """
+        fn = getattr(DB, "obtener_session_activa", None)
+        if callable(fn):
+            return fn()
+        # Fallback: obtener la primera sesión abierta
+        fn_alt = getattr(DB, "obtener_session_abierta", None)
+        if callable(fn_alt):
+            return fn_alt(None)  # Sin filtro de usuario
+        return None
     
     def abrir_caja_session(self, id_usuario: int, monto_inicial: float) -> bool:
         fn = getattr(DB, "abrir_caja_session", None)

@@ -1,4 +1,3 @@
-
 from __future__ import annotations 
 
 import os
@@ -54,12 +53,28 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
             (usuario,),
         )
         row = cur.fetchone()
+        
         if not row or not row["activo"]:
             return None
+            
         hashed = row["contraseña"].encode("utf-8")
+        
         if bcrypt.checkpw(contraseña.encode("utf-8"), hashed):
+            # 🔥 CORRECCIÓN: Registramos el acceso en la base de datos
+            try:
+                cur.execute(
+                    "UPDATE Usuario SET ultimo_acceso = NOW() WHERE id_usuario = %s",
+                    (row["id_usuario"],)
+                )
+                conn.commit()
+            except Exception as e_upd:
+                logger.error(f"Error actualizando ultimo_acceso: {e_upd}")
+                # No retornamos None acá para que el usuario pueda entrar igual aunque falle la fecha
+
             return {"id_usuario": row["id_usuario"], "nombre": row["nombre"], "id_rol": row["id_rol"]}
+            
         return None
+        
     except Exception as e:
         logger.error(f"verificar_contraseña: {e}")
         return None
@@ -365,6 +380,45 @@ def actualizar_categoria(id_categoria: int, nombre: str, margen: float, es_pesab
     except Exception as e:
         logger.error(f"actualizar_categoria: {e}")
         return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
+
+def eliminar_categoria(id_categoria: int) -> bool:
+    """
+    Elimina (desactiva) una categoría.
+    Si tiene productos asociados, lanza excepción para que el frontend
+    muestre el mensaje correspondiente.
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+
+        # Verificar si tiene productos activos asociados
+        cur.execute(
+            "SELECT COUNT(*) as total FROM Producto WHERE id_categoria = %s AND activo = 1",
+            (id_categoria,)
+        )
+        row = cur.fetchone()
+        if row and row['total'] > 0:
+            raise ValueError(f"La categoría tiene {row['total']} producto(s) asociado(s).")
+
+        # Eliminado lógico: desactivar en vez de borrar físicamente
+        cur.execute(
+            "UPDATE Categoria SET activa = 0 WHERE id_categoria = %s",
+            (id_categoria,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    except ValueError:
+        raise  # dejar que el frontend lo maneje con su mensaje específico
+    except Exception as e:
+        logger.error(f"eliminar_categoria: {e}")
+        raise
     finally:
         try:
             if cur: cur.close()
@@ -757,6 +811,8 @@ def obtener_stock_bajo() -> list[dict]:
         except Exception:
             pass
 
+
+
 # ======================================================
 # VENTA COMPLETA (NUEVA IMPLEMENTACIÓN ATÓMICA)
 # ======================================================
@@ -764,35 +820,41 @@ def registrar_venta_completa(
     id_usuario: int,
     id_cliente: int | None,
     items: list[tuple[int | None, str, float, float, str]],
-    tipo_pago: str
+    tipo_pago: str,
+    id_session: int | None = None
 ) -> int | None:
     """
-    Registra una venta completa de forma atómica.
-    
-    Args:
-        id_usuario: ID del usuario/vendedor
-        id_cliente: ID del cliente (None para consumidor final)
-        items: Lista de tuplas (id_producto, nombre, cantidad, precio_unitario, codigo_barras)
-        tipo_pago: 'efectivo', 'tarjeta', 'cuenta_corriente', 'transferencia'
-    
-    Returns:
-        ID de la venta creada o None si falla
+    Registra una venta completa de forma atómica vinculándola a la sesión de caja.
     """
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         
-        # Iniciar transacción explícita
         conn.start_transaction()
+
+        # 0. VALIDAR QUE LA CAJA ESTÉ ABIERTA
+        cur.execute(
+            "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND id_usuario_apertura = %s LIMIT 1",
+            (id_usuario,)
+        )
+        session_row = cur.fetchone()
+        
+        if not session_row:
+            raise ValueError("CAJA_CERRADA")
+        
+        id_session_activa = session_row['id_session']
+        
+        if id_session is not None:
+            id_session_activa = id_session
         
         # 1. Crear venta maestra
         cur.execute(
             """
-            INSERT INTO Venta (id_usuario, id_cliente, estado, tipo_pago)
-            VALUES (%s, %s, 'completada', %s)
+            INSERT INTO Venta (id_usuario, id_cliente, estado, tipo_pago, id_session)
+            VALUES (%s, %s, 'completada', %s, %s)
             """,
-            (id_usuario, id_cliente, tipo_pago)
+            (id_usuario, id_cliente, tipo_pago, id_session_activa)
         )
         id_venta = cur.lastrowid
         
@@ -800,16 +862,12 @@ def registrar_venta_completa(
         
         # 2. Procesar cada ítem
         for id_producto, nombre, cantidad, precio_unitario, codigo_barras in items:
-            
-            # Validaciones
             if cantidad <= 0:
                 raise ValueError(f"Cantidad inválida para {nombre}: {cantidad}")
             if precio_unitario <= 0:
                 raise ValueError(f"Precio inválido para {nombre}: {precio_unitario}")
             
-            # Si es producto catalogado, validar stock
             if id_producto is not None:
-                # BLOQUEAR fila de inventario para evitar race conditions
                 cur.execute(
                     "SELECT cantidad FROM Inventario WHERE id_producto = %s FOR UPDATE",
                     (id_producto,)
@@ -828,21 +886,15 @@ def registrar_venta_completa(
                         f"Requerido: {cantidad:.3f}"
                     )
                 
-                # Obtener datos del producto para snapshot
                 cur.execute(
                     "SELECT nombre, codigo_barras FROM Producto WHERE id_producto = %s",
                     (id_producto,)
                 )
                 prod_row = cur.fetchone()
-                
-                if not prod_row:
-                    raise ValueError(f"Producto con ID {id_producto} no encontrado")
-                
                 nombre_snapshot = prod_row['nombre']
                 codigo_snapshot = prod_row['codigo_barras']
                 
             else:
-                # Producto libre (sin ID)
                 nombre_snapshot = nombre
                 codigo_snapshot = codigo_barras or None
             
@@ -856,97 +908,92 @@ def registrar_venta_completa(
                 (id_venta, id_producto, nombre_snapshot, codigo_snapshot, cantidad, precio_unitario)
             )
             
-            # 4. Descontar stock (solo si es producto catalogado)
+            # 4. Descontar stock
             if id_producto is not None:
                 cur.execute(
-                    """
-                    UPDATE Inventario 
-                    SET cantidad = GREATEST(cantidad - %s, 0)
-                    WHERE id_producto = %s
-                    """,
+                    "UPDATE Inventario SET cantidad = GREATEST(cantidad - %s, 0) WHERE id_producto = %s",
                     (cantidad, id_producto)
                 )
-                
-                if cur.rowcount == 0:
-                    raise ValueError(f"No se pudo actualizar inventario de {nombre}")
             
-            # Acumular total
             total_venta += cantidad * precio_unitario
         
         # 5. Actualizar total de venta
-        cur.execute(
-            "UPDATE Venta SET total = %s WHERE id_venta = %s",
-            (total_venta, id_venta)
-        )
+        cur.execute("UPDATE Venta SET total = %s WHERE id_venta = %s", (total_venta, id_venta))
         
-        # 6. Si es cuenta corriente, actualizar saldo
+        # 6. Si es cuenta corriente, solo verificar que el cliente tiene cuenta
+        # El trigger trg_venta_au_cuentacorriente actualiza el saldo automáticamente
+        # al hacer UPDATE Venta SET total=X en paso 5. No hacer UPDATE manual aquí.
         if tipo_pago == 'cuenta_corriente' and id_cliente:
-            cur.execute(
-                "UPDATE CuentaCorriente SET saldo = saldo - %s WHERE id_cliente = %s",
-                (total_venta, id_cliente)
-            )
-            
-            if cur.rowcount == 0:
+            cur.execute("SELECT id_cuenta FROM CuentaCorriente WHERE id_cliente = %s", (id_cliente,))
+            if not cur.fetchone():
                 raise ValueError(f"Cliente {id_cliente} no tiene cuenta corriente")
         
-        # 7. Registrar movimiento de caja (si hay sesión abierta)
-        if tipo_pago == 'efectivo':
-            cur.execute(
-                "SELECT id_session FROM caja_session WHERE estado = 'abierta' LIMIT 1"
-            )
-            session_row = cur.fetchone()
+        # 7. REGISTRAR MOVIMIENTO DE CAJA SEGÚN EL TIPO DE PAGO
+        # -------------------------------------------------------
+        # CORRECCIÓN: cada medio tiene su motivo específico para que el historial
+        # de caja pueda filtrar y mostrar correctamente todos los tipos de venta.
+        tipo_pago_lower = tipo_pago.lower()
+        
+        if tipo_pago_lower == 'efectivo':
+            medio = 'efectivo'
+            motivo = 'venta_efectivo'
+            descripcion = f"Venta #{id_venta} - Efectivo"
             
-            if session_row:
-                id_session = session_row['id_session']
-                cur.execute(
-                    """
-                    INSERT INTO caja_movimiento 
-                    (id_session, tipo, monto, medio, motivo, id_usuario, id_venta, descripcion)
-                    VALUES (%s, 'ingreso', %s, 'efectivo', 'venta_efectivo', %s, %s, %s)
-                    """,
-                    (
-                        id_session,
-                        total_venta,
-                        id_usuario,
-                        id_venta,
-                        f"Venta #{id_venta} - Efectivo"
-                    )
-                )
+        elif tipo_pago_lower == 'tarjeta':
+            medio = 'tarjeta'
+            motivo = 'venta_tarjeta'          # CORREGIDO: antes era 'venta'
+            descripcion = f"Venta #{id_venta} - Tarjeta"
+            
+        elif tipo_pago_lower == 'transferencia':
+            medio = 'transferencia'
+            motivo = 'venta_transferencia'    # CORREGIDO: antes era 'venta'
+            descripcion = f"Venta #{id_venta} - Transferencia"
+
+        elif tipo_pago_lower == 'debito':
+            medio = 'debito'
+            motivo = 'venta_debito'
+            descripcion = f"Venta #{id_venta} - Debito"
+
+        elif tipo_pago_lower == 'qr':
+            medio = 'qr'
+            motivo = 'venta_qr'
+            descripcion = f"Venta #{id_venta} - QR"
+            
+        elif tipo_pago_lower == 'cuenta_corriente':
+            # CORREGIDO: antes no registraba nada (medio=None), ahora sí registra
+            # para que aparezca en el historial. No afecta el efectivo de caja
+            # porque el cierre solo cuenta movimientos de efectivo.
+            medio = 'cuenta_corriente'
+            motivo = 'venta_cuenta_corriente'
+            descripcion = f"Venta #{id_venta} - Cuenta Corriente"
+
+        else:
+            # Tipo de pago desconocido, registrar con motivo genérico pero identificable
+            medio = tipo_pago_lower
+            motivo = f'venta_{tipo_pago_lower}'
+            descripcion = f"Venta #{id_venta} - {tipo_pago.title()}"
         
-        # 8. Commit transacción
+        cur.execute(
+            """
+            INSERT INTO caja_movimiento 
+            (id_session, tipo, monto, medio, motivo, id_usuario, id_venta, descripcion)
+            VALUES (%s, 'ingreso', %s, %s, %s, %s, %s, %s)
+            """,
+            (id_session_activa, total_venta, medio, motivo, id_usuario, id_venta, descripcion)
+        )
+        
+        # 8. Commit
         conn.commit()
-        
-        logger.info(f"✅ Venta #{id_venta} registrada: ${total_venta:.2f} ({tipo_pago})")
+        logger.info(f"Venta #{id_venta} registrada. Total: ${total_venta:.2f}, Tipo: {tipo_pago}, Sesion: {id_session_activa}")
         return id_venta
         
-    except ValueError as ve:
-        # Errores de validación (stock, etc.)
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        logger.warning(f"Validación fallida en venta: {ve}")
-        raise  # Re-lanzar para que la UI lo capture
-        
     except Exception as e:
-        # Errores inesperados
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        logger.error(f"registrar_venta_completa: {e}")
-        raise RuntimeError(f"Error al registrar venta: {e}") from e
-        
+        if conn: conn.rollback()
+        logger.error(f"Error en registrar_venta_completa: {e}", exc_info=True)
+        raise
     finally:
-        try:
-            if cur:
-                cur.close()
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+        if cur: cur.close()
+        if conn: conn.close()
 
 
 
@@ -1050,159 +1097,142 @@ def obtener_ventas_diarias(desde: Optional[str] = None, hasta: Optional[str] = N
 # En app/database/DB.py
 
 def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, id_usuario: int, observacion: str = "") -> bool:
-        """
-        Registra un pago a proveedor.
-        1. Guarda el registro en la tabla PagoProveedor (con observación).
-        2. Actualiza el saldo del proveedor.
-        3. Si es efectivo, VALIDA SALDO y descuenta de la caja.
-        """
-        conn = cur = None
-        try:
-            conn = conectar()
-            cur = conn.cursor(dictionary=True)
-            conn.start_transaction()
-
-            id_session = None
-            saldo_caja_actual = 0.0
-            
-            # 1. VALIDAR CAJA SI ES EFECTIVO
-            if medio_pago == 'efectivo':
-                cur.execute("SELECT id_session, monto_apertura FROM caja_session WHERE estado = 'abierta' LIMIT 1")
-                session_row = cur.fetchone()
-                if not session_row:
-                    raise ValueError("⚠️ No puedes pagar en EFECTIVO con la caja cerrada.")
-                
-                id_session = session_row['id_session']
-                monto_apertura = float(session_row['monto_apertura'])
-                
-                # 🔥 CALCULAR SALDO ACTUAL DE EFECTIVO EN CAJA
-                # Solo contamos movimientos QUE NO SEAN la apertura
-                cur.execute("""
-                    SELECT 
-                        motivo,
-                        tipo,
-                        medio,
-                        SUM(monto) as total
-                    FROM caja_movimiento
-                    WHERE id_session = %s
-                    GROUP BY motivo, tipo, medio
-                """, (id_session,))
-                
-                movimientos = cur.fetchall()
-                
-                ingresos = 0.0
-                egresos = 0.0
-                
-                for mov in movimientos:
-                    motivo = mov['motivo']
-                    tipo = mov['tipo']
-                    medio_mov = mov['medio']
-                    monto_mov = float(mov['total'])
-                    
-                    # 🔥 IGNORAR COMPLETAMENTE EL MOVIMIENTO DE APERTURA
-                    if motivo == 'apertura_caja':
-                        continue
-                    
-                    # Solo contar efectivo
-                    if medio_mov != 'efectivo':
-                        continue
-                    
-                    if tipo == 'ingreso':
-                        ingresos += monto_mov
-                    elif tipo == 'egreso':
-                        egresos += monto_mov
-                
-                # 🔥 FÓRMULA CORRECTA: Apertura + Ingresos reales - Egresos reales
-                saldo_caja_actual = monto_apertura + ingresos - egresos
-                
-                logger.info(f"💰 Validando pago efectivo: Apertura=${monto_apertura:.2f} + Ingresos=${ingresos:.2f} - Egresos=${egresos:.2f} = Disponible=${saldo_caja_actual:.2f}")
-                
-                # 🔥 VALIDAR SALDO SUFICIENTE
-                if saldo_caja_actual < monto:
-                    raise ValueError(
-                        f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
-                        f"Disponible: ${saldo_caja_actual:,.2f}\n"
-                        f"Intentas pagar: ${monto:,.2f}\n"
-                        f"Faltante: ${(monto - saldo_caja_actual):,.2f}\n\n"
-                        f"💡 Opciones:\n"
-                        f"• Paga con Transferencia o Cheque\n"
-                        f"• Realiza pagos parciales"
-                    )
-
-            # 2. Guardar el Registro del Pago (Historial)
-            cur.execute(
-                """
-                INSERT INTO PagoProveedor (monto, metodo, observacion, id_proveedor, id_usuario)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (monto, medio_pago, observacion, id_proveedor, id_usuario)
-            )
-
-            # 3. Actualizar Saldo Proveedor (SUMAMOS para achicar la deuda negativa)
-            cur.execute(
-                "UPDATE Proveedor SET saldo = saldo + %s WHERE id_proveedor = %s",
-                (monto, id_proveedor)
-            )
-
-            # 4. Registrar Movimiento en Caja (Solo si es efectivo)
-            if medio_pago == 'efectivo' and id_session:
-                cur.execute(
-                    """
-                    INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, descripcion)
-                    VALUES (%s, 'egreso', %s, 'efectivo', 'pago_proveedor', %s, %s)
-                    """,
-                    (id_session, monto, id_usuario, f"Pago a Prov. #{id_proveedor} - {observacion}")
-                )
-
-            conn.commit()
-            logger.info(f"✅ Pago a proveedor #{id_proveedor} registrado: ${monto:.2f}")
-            return True
-
-        except ValueError as ve:
-            if conn:
-                try: conn.rollback()
-                except: pass
-            logger.warning(f"Validación fallida en pago proveedor: {ve}")
-            raise
-            
-        except Exception as e:
-            if conn:
-                try: conn.rollback()
-                except: pass
-            logger.error(f"registrar_pago_proveedor: {e}")
-            raise
-        finally:
-            try:
-                if cur: cur.close()
-                if conn: conn.close()
-            except: pass
-    
-
-def obtener_proveedores(incluir_inactivos: bool = False) -> list[dict]:
+    """
+    Registra un pago a proveedor.
+    1. Guarda el registro en la tabla PagoProveedor (con observación).
+    2. Actualiza el saldo del proveedor.
+    3. Si es efectivo, VALIDA SALDO y descuenta de la caja.
+    """
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
+        conn.start_transaction()
+
+        # 🔥 VALIDAR QUE LA CAJA ESTÉ ABIERTA (OBLIGATORIO PARA TODOS LOS MÉTODOS)
+        cur.execute("SELECT id_session, monto_apertura FROM caja_session WHERE estado = 'abierta' LIMIT 1")
+        session_row = cur.fetchone()
+        if not session_row:
+            raise ValueError("CAJA_CERRADA")
         
-        # 🔥 CAMBIO: Incluir dni, cuit, y direccion (se asume que los nombres son 'dni' y 'cuit' en la DB)
-        sql = "SELECT id_proveedor, nombre, empresa, telefono, email, dni, cuit, direccion, saldo, activo FROM Proveedor"
+        id_session = session_row['id_session']
+        monto_apertura = float(session_row['monto_apertura'])
+        saldo_caja_actual = 0.0
         
-        if not incluir_inactivos:
-            sql += " WHERE activo=1"
-        sql += " ORDER BY nombre"
-        cur.execute(sql)
-        return list(cur.fetchall() or [])
+        # 🔥 VALIDACIÓN DE SALDO SOLO PARA EFECTIVO
+        if medio_pago == 'efectivo':
+            # 🔥 CALCULAR SALDO ACTUAL DE EFECTIVO EN CAJA
+            # Solo contamos movimientos QUE NO SEAN la apertura
+            cur.execute("""
+                SELECT 
+                    motivo,
+                    tipo,
+                    medio,
+                    SUM(monto) as total
+                FROM caja_movimiento
+                WHERE id_session = %s
+                GROUP BY motivo, tipo, medio
+            """, (id_session,))
+            
+            movimientos = cur.fetchall()
+            
+            ingresos = 0.0
+            egresos = 0.0
+            
+            for mov in movimientos:
+                motivo = mov['motivo']
+                tipo = mov['tipo']
+                medio_mov = mov['medio']
+                monto_mov = float(mov['total'])
+                
+                # 🔥 IGNORAR COMPLETAMENTE EL MOVIMIENTO DE APERTURA
+                if motivo == 'apertura_caja':
+                    continue
+                
+                # Solo contar efectivo
+                if medio_mov != 'efectivo':
+                    continue
+                
+                if tipo == 'ingreso':
+                    ingresos += monto_mov
+                elif tipo == 'egreso':
+                    egresos += monto_mov
+            
+            # 🔥 FÓRMULA CORRECTA: Apertura + Ingresos reales - Egresos reales
+            saldo_caja_actual = monto_apertura + ingresos - egresos
+            
+            logger.info(f"💰 Validando pago efectivo: Apertura=${monto_apertura:.2f} + Ingresos=${ingresos:.2f} - Egresos=${egresos:.2f} = Disponible=${saldo_caja_actual:.2f}")
+            
+            # 🔥 VALIDAR SALDO SUFICIENTE
+            if saldo_caja_actual < monto:
+                raise ValueError(
+                    f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
+                    f"Disponible: ${saldo_caja_actual:,.2f}\n"
+                    f"Intentas pagar: ${monto:,.2f}\n"
+                    f"Faltante: ${(monto - saldo_caja_actual):,.2f}\n\n"
+                    f"💡 Opciones:\n"
+                    f"• Paga con Transferencia o Cheque\n"
+                    f"• Realiza pagos parciales"
+                )
+
+        # 2. Guardar el Registro del Pago (Historial)
+        cur.execute(
+            """
+            INSERT INTO PagoProveedor (monto, metodo, observacion, id_proveedor, id_usuario)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (monto, medio_pago, observacion, id_proveedor, id_usuario)
+        )
+
+        # 3. Actualizar Saldo Proveedor (SUMAMOS para achicar la deuda negativa)
+        cur.execute(
+            "UPDATE Proveedor SET saldo = saldo + %s WHERE id_proveedor = %s",
+            (monto, id_proveedor)
+        )
+
+        # 🔥 4. REGISTRAR MOVIMIENTO EN CAJA PARA TODOS LOS MÉTODOS
+        # Mapeo del medio de pago al campo 'medio'
+        medio_map = {
+            'efectivo': 'efectivo',
+            'transferencia': 'transferencia',
+            'cheque': 'cheque',
+            'tarjeta_debito': 'tarjeta_debito',
+            'tarjeta_credito': 'tarjeta_credito'
+        }
+        medio = medio_map.get(medio_pago, medio_pago)
+        
+        cur.execute(
+            """
+            INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, descripcion)
+            VALUES (%s, 'egreso', %s, %s, 'pago_proveedor', %s, %s)
+            """,
+            (id_session, monto, medio, id_usuario, f"Pago a Prov. #{id_proveedor} - {medio_pago.title()} - {observacion}")
+        )
+
+        conn.commit()
+        logger.info(f"✅ Pago a proveedor #{id_proveedor} registrado: ${monto:.2f}")
+        return True
+
+    except ValueError as ve:
+        if conn:
+            try: conn.rollback()
+            except: pass
+        logger.warning(f"Validación fallida en pago proveedor: {ve}")
+        raise
+        
     except Exception as e:
-        logger.error(f"obtener_proveedores: {e}")
-        return []
+        if conn:
+            try: conn.rollback()
+            except: pass
+        logger.error(f"registrar_pago_proveedor: {e}")
+        raise
     finally:
         try:
             if cur: cur.close()
             if conn: conn.close()
-        except Exception:
-            pass
-
-def insertar_proveedor(nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str = "", email: str = "", direccion: str = "") -> Optional[int]:
+        except: pass
+        
+def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor, telefono="", email="", direccion=""):
     if not nombre.strip(): raise ValueError("Nombre proveedor obligatorio.")
     if not empresa.strip(): raise ValueError("Nombre empresa obligatorio.")
     if not dni_vendedor.strip(): raise ValueError("DNI del vendedor obligatorio.")
@@ -1212,8 +1242,6 @@ def insertar_proveedor(nombre: str, empresa: str, cuit_empresa: str, dni_vendedo
     try:
         conn = conectar()
         cur = conn.cursor()
-        
-        # Insertamos todos los campos nuevos y viejos
         cur.execute(
             "INSERT INTO Proveedor (nombre, empresa, cuit, dni, telefono, email, direccion, activo) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)",
             (nombre.strip(), empresa.strip(), cuit_empresa.strip(), dni_vendedor.strip(), telefono.strip() or None, email.strip() or None, direccion.strip() or None)
@@ -1235,7 +1263,7 @@ def insertar_proveedor(nombre: str, empresa: str, cuit_empresa: str, dni_vendedo
         if cur: cur.close()
         if conn: conn.close()
 
-def actualizar_proveedor(id_proveedor: int, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str) -> bool:
+def actualizar_proveedor(id_proveedor, nombre, empresa, cuit_empresa, dni_vendedor, telefono, email, direccion):
     if not nombre.strip() or not empresa.strip() or not dni_vendedor.strip() or not cuit_empresa.strip():
         raise ValueError("Campos obligatorios vacíos.")
     
@@ -1243,10 +1271,8 @@ def actualizar_proveedor(id_proveedor: int, nombre: str, empresa: str, cuit_empr
     try:
         conn = conectar()
         cur = conn.cursor()
-        
-        # Actualizamos todos los campos
         cur.execute(
-            """UPDATE Proveedor SET nombre=%s, empresa=%s, cuit=%s, dni=%s, telefono=%s, email=%s, direccion=%s WHERE id_proveedor=%s""",
+            "UPDATE Proveedor SET nombre=%s, empresa=%s, cuit=%s, dni=%s, telefono=%s, email=%s, direccion=%s WHERE id_proveedor=%s",
             (nombre.strip(), empresa.strip(), cuit_empresa.strip(), dni_vendedor.strip(), telefono.strip() or None, email.strip() or None, direccion.strip() or None, id_proveedor)
         )
         conn.commit()
@@ -1265,19 +1291,19 @@ def actualizar_proveedor(id_proveedor: int, nombre: str, empresa: str, cuit_empr
         if cur: cur.close()
         if conn: conn.close()
 
-def obtener_proveedores(incluir_inactivos: bool = False) -> list[dict]:
+def obtener_proveedores(incluir_inactivos=False):
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        # Traemos DNI, CUIT, y Dirección
         sql = "SELECT id_proveedor, nombre, empresa, cuit, dni, telefono, email, direccion, saldo, activo FROM Proveedor"
-        if not incluir_inactivos: sql += " WHERE activo=1"
+        if not incluir_inactivos:
+            sql += " WHERE activo=1"
         sql += " ORDER BY nombre"
         cur.execute(sql)
         return list(cur.fetchall() or [])
-    except Exception as e: 
-        logger.error(f"obtener_proveedores: Fallo al traer datos. Error: {e}") 
+    except Exception as e:
+        logger.error(f"obtener_proveedores: {e}")
         return []
     finally:
         if cur: cur.close()
@@ -1437,12 +1463,79 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
         cur = conn.cursor(dictionary=True)
         conn.start_transaction()
 
-        if medio_pago == 'efectivo':
-            cur.execute("SELECT id_session FROM caja_session WHERE estado = 'abierta' LIMIT 1")
+        # 🔥 VALIDAR QUE LA CAJA ESTÉ ABIERTA (OBLIGATORIO PARA TODOS LOS MÉTODOS EXCEPTO CUENTA CORRIENTE)
+        if medio_pago != 'cuenta_corriente':
+            cur.execute("SELECT id_session, monto_apertura FROM caja_session WHERE estado = 'abierta' LIMIT 1")
             session_row = cur.fetchone()
-            if not session_row: raise ValueError("Caja cerrada.")
+            if not session_row: 
+                raise ValueError("CAJA_CERRADA")
+            
             id_session = session_row['id_session']
+            monto_apertura = float(session_row['monto_apertura'])
+        else:
+            id_session = None
+            monto_apertura = 0.0
+        
+        # 🔥 VALIDACIÓN DE SALDO SOLO PARA EFECTIVO
+        if medio_pago == 'efectivo':
+            # 🔥 CALCULAR TOTAL DE LA COMPRA ANTES DE REGISTRARLA
+            total_compra_estimado = sum(float(item['cant']) * float(item['costo']) for item in items)
+            
+            # 🔥 CALCULAR SALDO ACTUAL DE EFECTIVO EN CAJA
+            cur.execute("""
+                SELECT 
+                    motivo,
+                    tipo,
+                    medio,
+                    SUM(monto) as total
+                FROM caja_movimiento
+                WHERE id_session = %s
+                GROUP BY motivo, tipo, medio
+            """, (id_session,))
+            
+            movimientos = cur.fetchall()
+            
+            ingresos = 0.0
+            egresos = 0.0
+            
+            for mov in movimientos:
+                motivo = mov['motivo']
+                tipo = mov['tipo']
+                medio_mov = mov['medio']
+                monto_mov = float(mov['total'])
+                
+                # 🔥 IGNORAR COMPLETAMENTE EL MOVIMIENTO DE APERTURA
+                if motivo == 'apertura_caja':
+                    continue
+                
+                # Solo contar efectivo
+                if medio_mov != 'efectivo':
+                    continue
+                
+                if tipo == 'ingreso':
+                    ingresos += monto_mov
+                elif tipo == 'egreso':
+                    egresos += monto_mov
+            
+            # 🔥 FÓRMULA CORRECTA: Apertura + Ingresos reales - Egresos reales
+            saldo_caja_actual = monto_apertura + ingresos - egresos
+            
+            logger.info(f"💰 Validando compra efectivo: Apertura=${monto_apertura:.2f} + Ingresos=${ingresos:.2f} - Egresos=${egresos:.2f} = Disponible=${saldo_caja_actual:.2f}")
+            
+            # 🔥 VALIDAR SALDO SUFICIENTE
+            if saldo_caja_actual < total_compra_estimado:
+                raise ValueError(
+                    f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
+                    f"Disponible: ${saldo_caja_actual:,.2f}\n"
+                    f"Total compra: ${total_compra_estimado:,.2f}\n"
+                    f"Faltante: ${(total_compra_estimado - saldo_caja_actual):,.2f}\n\n"
+                    f"💡 Opciones:\n"
+                    f"• Paga con Transferencia o Tarjeta\n"
+                    f"• Usa Cuenta Corriente\n"
+                    f"• Realiza un depósito en caja"
+                )
 
+        # Insertar la compra
         cur.execute("INSERT INTO Compra (id_usuario, id_proveedor, estado, medio_pago) VALUES (%s, %s, 'recibida', %s)", (id_usuario, id_proveedor, medio_pago))
         id_compra = cur.lastrowid
         total_compra = 0.0
@@ -1451,13 +1544,12 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
             id_prod = item['id']
             cantidad = float(item['cant'])
             costo = float(item['costo'])
-            # 🔥 NUEVO: Precio venta nuevo
             precio_venta = float(item.get('precio_venta', 0.0))
 
             cur.execute("SELECT nombre, codigo_barras FROM Producto WHERE id_producto=%s", (id_prod,))
             prod = cur.fetchone()
             
-            # Insertar detalle con el precio de venta historico (Requiere ALTER TABLE DetalleCompra)
+            # Insertar detalle con el precio de venta historico
             cur.execute(
                 """INSERT INTO DetalleCompra (id_compra, id_producto, nombre_producto, codigo_barras, cantidad, precio_unitario, precio_venta_historico)
                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
@@ -1468,15 +1560,42 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
 
         cur.execute("UPDATE Compra SET total = %s WHERE id_compra = %s", (total_compra, id_compra))
 
-        if medio_pago == 'efectivo' and id_session:
-            cur.execute("INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, id_compra, descripcion) VALUES (%s, 'egreso', %s, 'efectivo', 'pago_proveedor', %s, %s, %s)", (id_session, total_compra, id_usuario, id_compra, f"Compra #{id_compra}"))
+        # 🔥 REGISTRAR MOVIMIENTO EN CAJA PARA TODOS LOS MÉTODOS (excepto cuenta corriente)
+        if medio_pago != 'cuenta_corriente' and id_session:
+            # Mapeo del medio de pago al campo 'medio'
+            medio_map = {
+                'efectivo': 'efectivo',
+                'transferencia': 'transferencia',
+                'cheque': 'cheque',
+                'tarjeta_debito': 'tarjeta_debito',
+                'tarjeta_credito': 'tarjeta_credito'
+            }
+            medio = medio_map.get(medio_pago, medio_pago)
+            
+            cur.execute(
+                """INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, id_compra, descripcion) 
+                   VALUES (%s, 'egreso', %s, %s, 'pago_proveedor', %s, %s, %s)""", 
+                (id_session, total_compra, medio, id_usuario, id_compra, f"Compra #{id_compra} - {medio_pago.title()}")
+            )
         elif medio_pago == 'cuenta_corriente':
             cur.execute("UPDATE Proveedor SET saldo = saldo - %s WHERE id_proveedor = %s", (total_compra, id_proveedor))
 
         conn.commit()
+        logger.info(f"✅ Compra #{id_compra} registrada: ${total_compra:.2f} ({medio_pago})")
         return id_compra
+        
+    except ValueError as ve:
+        # Errores de validación (saldo insuficiente, caja cerrada)
+        if conn:
+            try: conn.rollback()
+            except: pass
+        logger.warning(f"Validación fallida en compra: {ve}")
+        raise  # Re-lanzar para que la UI lo capture
+        
     except Exception as e:
-        if conn: conn.rollback()
+        if conn: 
+            try: conn.rollback()
+            except: pass
         logger.error(f"insertar_compra: {e}")
         raise
     finally:
@@ -1581,11 +1700,16 @@ def obtener_historial_movimientos_caja(
 ) -> list[dict]:
     """
     Obtiene el historial UNIFICADO: Movimientos normales + Cierres de Caja.
+    Corregido para evitar error de 'params_cierres' no definido.
     """
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
+        
+        # 🔥 INICIALIZACIÓN PREVENTIVA DE PARÁMETROS
+        params_movs = []
+        params_cierres = []
         
         # 1. QUERY DE MOVIMIENTOS NORMALES
         # --------------------------------
@@ -1604,7 +1728,6 @@ def obtener_historial_movimientos_caja(
             LEFT JOIN Usuario u ON cm.id_usuario = u.id_usuario
             WHERE 1=1
         """
-        params_movs = []
         
         if fecha_desde:
             sql_movs += " AND DATE(cm.fecha_hora) >= %s"
@@ -1612,7 +1735,7 @@ def obtener_historial_movimientos_caja(
         if fecha_hasta:
             sql_movs += " AND DATE(cm.fecha_hora) <= %s"
             params_movs.append(fecha_hasta)
-        if tipo and tipo != 'cierre': # 'cierre' es un tipo especial visual
+        if tipo and tipo != 'cierre':
             sql_movs += " AND cm.tipo = %s"
             params_movs.append(tipo)
         if motivo and motivo not in ('cierre_caja', 'apertura_cierre'):
@@ -1626,20 +1749,24 @@ def obtener_historial_movimientos_caja(
         # --------------------------------------------------------
         sql_cierres = """
             SELECT
-                cs.id_session + 9000000 as id_movimiento, -- ID ficticio alto para no chocar
+                cs.id_session + 9000000 as id_movimiento,
                 cs.fecha_cierre as fecha_hora,
                 'cierre' as tipo,
                 cs.efectivo_contado as monto,
                 'efectivo' as medio,
                 'cierre_caja' as motivo,
-                CONCAT('Cierre de Caja. Esperado: $', FORMAT(cs.efectivo_esperado, 2), '. Diferencia: $', FORMAT(cs.diferencia, 2)) as descripcion,
+                -- Traemos las observaciones de la tabla caja_session
+                CONCAT('Cierre. Esperado: $', FORMAT(cs.efectivo_esperado, 2), 
+                       '. Dif: $', FORMAT(cs.diferencia, 2),
+                       IF(cs.observaciones_cierre IS NOT NULL AND cs.observaciones_cierre != '', 
+                          CONCAT(' | Obs: ', cs.observaciones_cierre), '')
+                ) as descripcion,
                 u.nombre as usuario_nombre,
                 'cierre' as origen_dato
             FROM caja_session cs
             LEFT JOIN Usuario u ON cs.id_usuario_cierre = u.id_usuario
             WHERE cs.fecha_cierre IS NOT NULL
         """
-        params_cierres = []
         
         if fecha_desde:
             sql_cierres += " AND DATE(cs.fecha_cierre) >= %s"
@@ -1653,28 +1780,16 @@ def obtener_historial_movimientos_caja(
 
         # 3. UNIR Y ORDENAR
         # -----------------
-        # Si el usuario filtra por "ingreso" estricto, no mostramos cierres.
-        # Si filtra por "egreso" estricto, no mostramos cierres.
-        # Si filtra por "cierre", solo mostramos cierres.
-        
         sql_final = ""
         params_final = []
 
         incluir_movs = True
         incluir_cierres = True
 
-        if tipo == 'cierre': 
-            incluir_movs = False
-        if tipo in ('ingreso', 'egreso'): 
-            incluir_cierres = False
-        
-        # Filtro especial de motivos agrupados
-        if motivo == 'cierre_caja': 
-            incluir_movs = False
-            incluir_cierres = True
-        
-        if motivo == 'apertura_caja': # Si solo quiere aperturas, no traemos cierres
-            incluir_cierres = False
+        if tipo == 'cierre': incluir_movs = False
+        if tipo in ('ingreso', 'egreso'): incluir_cierres = False
+        if motivo == 'cierre_caja': incluir_movs = False
+        if motivo == 'apertura_caja': incluir_cierres = False
 
         if incluir_movs and incluir_cierres:
             sql_final = f"({sql_movs}) UNION ALL ({sql_cierres}) ORDER BY fecha_hora DESC"
@@ -1686,7 +1801,7 @@ def obtener_historial_movimientos_caja(
             sql_final = f"{sql_cierres} ORDER BY fecha_hora DESC"
             params_final = params_cierres
         else:
-            return [] # Nada que mostrar
+            return []
 
         cur.execute(sql_final, tuple(params_final))
         return list(cur.fetchall() or [])
@@ -1910,8 +2025,7 @@ def obtener_cuenta_por_cliente(id_cliente: int) -> Optional[dict]:
 
 # app/database/DB.py (Fragmento con la corrección de Caja)
 
-# ... (Líneas anteriores)
-
+# 🔥 ESTA ES TU FUNCIÓN DE PAGO (Mantenemos tu lógica de caja)
 def registrar_pago_cuenta_corriente(id_cuenta: int, monto: float, metodo: str, id_usuario: int) -> bool:
     if monto <= 0:
         raise ValueError("El monto del pago debe ser positivo.")
@@ -1920,79 +2034,70 @@ def registrar_pago_cuenta_corriente(id_cuenta: int, monto: float, metodo: str, i
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        
         conn.start_transaction()
 
-        # 🔥 CORRECCIÓN: Validar caja si es efectivo y obtener id_session
-        id_session = None
-        if metodo == 'efectivo':
-            # Verificamos la caja abierta del usuario
-            cur.execute(
-                "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND id_usuario_apertura = %s LIMIT 1",
-                (id_usuario,)
-            )
-            session_row = cur.fetchone()
-            
-            if not session_row:
-                raise ValueError("CAJA_CERRADA") 
-            id_session = session_row['id_session']
-        # -------------------------------------------------------------
+        # VALIDACIÓN: La caja debe estar abierta para CUALQUIER método de pago
+        cur.execute(
+            "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND id_usuario_apertura = %s LIMIT 1",
+            (id_usuario,)
+        )
+        session_row = cur.fetchone()
+        if not session_row:
+            raise ValueError("CAJA_CERRADA")
+        id_session = session_row['id_session']
         
-        # 1. Obtener ID del cliente para referencia
         cur.execute("SELECT id_cliente FROM CuentaCorriente WHERE id_cuenta = %s", (id_cuenta,))
         cuenta_row = cur.fetchone()
         if not cuenta_row:
             raise ValueError("Cuenta corriente no encontrada")
         id_cliente = cuenta_row['id_cliente']
         
-        # 2. Registrar pago
         cur.execute(
             "INSERT INTO Pago (id_cuenta, monto, metodo, id_usuario) VALUES (%s, %s, %s, %s)",
             (id_cuenta, monto, metodo, id_usuario)
         )
         
-        # 3. Actualizar saldo (sumar porque es ingreso)
         cur.execute(
             "UPDATE CuentaCorriente SET saldo = saldo + %s WHERE id_cuenta = %s",
             (monto, id_cuenta)
         )
         
-        # 4. SI ES EFECTIVO, REGISTRAR EN CAJA
-        if metodo == 'efectivo' and id_session:
-            cur.execute(
-                """
-                INSERT INTO caja_movimiento 
-                (id_session, tipo, monto, medio, motivo, id_usuario, id_cliente, descripcion)
-                VALUES (%s, 'ingreso', %s, 'efectivo', 'pago_cuenta_corriente_efectivo', %s, %s, %s)
-                """,
-                (
-                    id_session,
-                    monto,
-                    id_usuario,
-                    id_cliente,
-                    f"Pago Cta.Cte. Cliente #{id_cliente} - ${monto:.2f}"
-                )
-            )
+        # CORRECCIÓN: mapear medio y motivo a valores válidos del ENUM
+        # medio: solo acepta 'efectivo', 'tarjeta', 'transferencia', 'cuenta_corriente'
+        # motivo: usar variante específica según el método para que el historial filtre bien
+        medio_map = {
+            'efectivo':      ('efectivo',      'cobro_cuenta_corriente'),
+            'transferencia': ('transferencia',  'cobro_cuenta_corriente'),
+            'tarjeta_debito':('tarjeta',        'cobro_cuenta_corriente'),
+            'tarjeta_credito':('tarjeta',       'cobro_cuenta_corriente'),
+            'tarjeta':       ('tarjeta',        'cobro_cuenta_corriente'),
+        }
+        medio, motivo = medio_map.get(metodo, ('efectivo', 'cobro_cuenta_corriente'))
+        
+        cur.execute(
+            """
+            INSERT INTO caja_movimiento 
+            (id_session, tipo, monto, medio, motivo, id_usuario, id_cliente, descripcion)
+            VALUES (%s, 'ingreso', %s, %s, %s, %s, %s, %s)
+            """,
+            (id_session, monto, medio, motivo, id_usuario, id_cliente,
+             f"Pago Cta.Cte. Cliente #{id_cliente} - ${monto:.2f} ({metodo})")
+        )
         
         conn.commit()
-        logger.info(f"✅ Pago registrado: ${monto:.2f} ({metodo}) para cuenta #{id_cuenta}")
         return True
         
     except Exception as e:
-        if conn:
-            try: conn.rollback()
-            except Exception: pass
-        logger.error(f"registrar_pago_cuenta_corriente: {e}")
-        # 🔥 Aseguramos que el error de caja cerrada se propague
-        if str(e) == "CAJA_CERRADA":
-            raise ValueError("CAJA_CERRADA") from e
-        return False
+        if conn: conn.rollback()
+        # Relanzar siempre para que el frontend muestre el error real
+        if "CAJA_CERRADA" in str(e):
+            raise ValueError("CAJA_CERRADA")
+        raise  # CORREGIDO: antes hacía return False y tragaba el error
     finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
+        if cur: cur.close()
+        if conn: conn.close()
+
+
 # ======================================================
 # GESTIÓN DE USUARIOS
 # ======================================================
@@ -2000,16 +2105,38 @@ def _hash_password(password: str) -> str:
     """Genera un hash bcrypt."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
+# app/database/DB.py
+
+# app/database/DB.py
+
 def obtener_usuarios_con_rol() -> list[dict]:
+    """Retorna la lista de usuarios con fechas reales, incluyendo el último acceso registrado."""
     conn = cur = None
     try:
-        conn = conectar()
+        conn = conectar() 
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT u.id_usuario, u.nombre, u.id_rol, u.activo, r.nombre AS rol_nombre FROM Usuario u LEFT JOIN Rol r ON u.id_rol = r.id_rol ORDER BY u.nombre")
+        
+        # 🔥 Consulta actualizada para asegurar que traiga el dato de último acceso
+        cur.execute("""
+            SELECT 
+                u.id_usuario, 
+                u.nombre, 
+                u.id_rol, 
+                u.activo, 
+                u.fecha_creacion, 
+                u.ultimo_acceso,
+                r.nombre AS rol_nombre 
+            FROM Usuario u 
+            LEFT JOIN Rol r ON u.id_rol = r.id_rol 
+            ORDER BY u.nombre
+        """)
+        
         return list(cur.fetchall() or [])
-    except Exception: return []
-    finally: 
-        if cur: cur.close() 
+    except Exception as e:
+        logger.error(f"Error en obtener_usuarios_con_rol: {e}")
+        return []
+    finally:
+        if cur: cur.close()
         if conn: conn.close()
 
 def obtener_roles() -> list[dict]:
@@ -2237,25 +2364,19 @@ def registrar_auditoria(
 # ======================================================
 
 def obtener_session_abierta(id_usuario: int) -> dict | None:
-    """
-    Retorna la caja abierta DEL USUARIO ESPECÍFICO.
-    Sistema de caja individual: cada usuario tiene su propia caja.
-    """
+    """Busca sesión abierta. Si no encuentra por usuario, busca la última abierta general."""
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        
-        # Buscar SOLO la caja del usuario especificado
-        cur.execute(
-            "SELECT * FROM caja_session WHERE id_usuario_apertura = %s AND estado = 'abierta' LIMIT 1",
-            (id_usuario,)
-        )
-        
-        return cur.fetchone()
+        cur.execute("SELECT * FROM caja_session WHERE id_usuario_apertura = %s AND estado = 'abierta' LIMIT 1", (id_usuario,))
+        res = cur.fetchone()
+        if not res:
+            cur.execute("SELECT * FROM caja_session WHERE estado = 'abierta' ORDER BY id_session DESC LIMIT 1")
+            res = cur.fetchone()
+        return res
     except Exception as e:
-        logger.error(f"obtener_session_abierta: {e}")
-        return None
+        logger.error(f"Error sesión: {e}"); return None
     finally:
         if cur: cur.close()
         if conn: conn.close()
@@ -2328,74 +2449,132 @@ def registrar_movimiento_manual(id_session: int, tipo: str, monto: float, motivo
         if conn: conn.close()
 
 def obtener_resumen_cierre(id_session: int) -> dict:
-    """Calcula todos los totales para el arqueo."""
+    """Calcula todos los totales para el arqueo. Blindado para que la UI nunca quede en blanco."""
     conn = cur = None
+    resumen = {
+        'monto_inicial': 0.0, 'ventas_efectivo': 0.0, 'cobros_ctacte': 0.0,
+        'otros_ingresos': 0.0, 'pagos_proveedores': 0.0, 'retiros': 0.0,
+        'gastos_varios': 0.0, 'otros_egresos': 0.0,
+        'total_ingresos': 0.0,   # solo ingresos de efectivo real
+        'total_egresos': 0.0,    # solo egresos de efectivo real
+        'total_egresos_transferencia': 0.0,  # egresos pagados por transferencia
+        'total_egresos_tarjeta': 0.0,        # egresos pagados por tarjeta
+        'efectivo_esperado': 0.0, 'fecha_apertura': '-',
+        'usuario_apertura': '-',
+        'medios_pago': {'tarjetas': 0.0, 'transferencias': 0.0, 'cuenta_corriente': 0.0}
+    }
+
+    # Motivos que mueven efectivo físico real en caja
+    MOTIVOS_EFECTIVO_INGRESO = {
+        'venta_efectivo',
+        'cobro_cuenta_corriente',       # cobros de deuda en efectivo
+        'ajuste_positivo',
+    }
+    MOTIVOS_EFECTIVO_EGRESO = {
+        'pago_proveedor',
+        'retiro_caja',
+        'gasto_vario',
+        'devolucion_efectivo',
+        'ajuste_negativo',
+    }
+    # Motivos que NO mueven caja física (solo registro informativo)
+    MOTIVOS_NO_EFECTIVO = {
+        'venta_tarjeta',
+        'venta_transferencia',
+        'venta_cuenta_corriente',
+        'cobro_cuenta_corriente',       # si el medio no es efectivo
+    }
+
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        
-        # Datos de la sesión
         cur.execute("SELECT * FROM caja_session WHERE id_session = %s", (id_session,))
         session = cur.fetchone()
-        if not session: return {}
-        
-        monto_inicial = float(session['monto_apertura'])
-        
-        # Calcular totales por motivo
+        if not session: return resumen
+
+        resumen['monto_inicial'] = float(session['monto_apertura'])
+        resumen['fecha_apertura'] = str(session['fecha_apertura'])
+        resumen['usuario_apertura'] = str(session['id_usuario_apertura'])
+
+        # CORRECCIÓN: filtrar por medio='efectivo' para ingresos y egresos reales
+        # Así tarjeta/transferencia/cuenta_corriente no inflan el efectivo esperado
         cur.execute("""
-            SELECT motivo, tipo, SUM(monto) as total 
-            FROM caja_movimiento 
-            WHERE id_session = %s 
-            GROUP BY motivo, tipo
+            SELECT motivo, tipo, medio, SUM(monto) as total
+            FROM caja_movimiento
+            WHERE id_session = %s
+            GROUP BY motivo, tipo, medio
         """, (id_session,))
-        rows = cur.fetchall()
-        
-        resumen = {
-            'monto_inicial': monto_inicial,
-            'ventas_efectivo': 0.0,
-            'cobros_ctacte': 0.0,
-            'otros_ingresos': 0.0,
-            'pagos_proveedores': 0.0,
-            'retiros': 0.0,
-            'gastos_varios': 0.0,
-            'otros_egresos': 0.0
-        }
-        
-        total_ingresos = 0.0
-        total_egresos = 0.0
-        
-        for r in rows:
-            motivo = r['motivo']
-            monto = float(r['total'])
+
+        for r in cur.fetchall():
+            m    = float(r['total'])
+            mot  = r['motivo']
             tipo = r['tipo']
-            
-            if motivo == 'apertura_caja': continue
-            
+            medio = r['medio']
+
             if tipo == 'ingreso':
-                total_ingresos += monto
-                if motivo == 'venta_efectivo': resumen['ventas_efectivo'] += monto
-                elif motivo == 'pago_cuenta_corriente_efectivo': resumen['cobros_ctacte'] += monto
-                else: resumen['otros_ingresos'] += monto
-            else:
-                total_egresos += monto
-                if motivo == 'pago_proveedor': resumen['pagos_proveedores'] += monto
-                elif motivo == 'retiro_caja': resumen['retiros'] += monto
-                elif motivo == 'gasto_vario': resumen['gastos_varios'] += monto
-                else: resumen['otros_egresos'] += monto
-                
-        efectivo_esperado = monto_inicial + total_ingresos - total_egresos
-        
-        resumen['total_ingresos'] = total_ingresos
-        resumen['total_egresos'] = total_egresos
-        resumen['efectivo_esperado'] = efectivo_esperado
-        resumen['fecha_apertura'] = session['fecha_apertura']
-        resumen['usuario_apertura'] = session['id_usuario_apertura']
-        
+                if mot == 'apertura_caja':
+                    continue  # el monto inicial ya está en monto_inicial, no sumar
+
+                # Solo contar como ingreso de efectivo si el medio es efectivo
+                if medio == 'efectivo':
+                    resumen['total_ingresos'] += m
+                    if mot == 'venta_efectivo':
+                        resumen['ventas_efectivo'] += m
+                    elif mot in ('cobro_cuenta_corriente', 'pago_cuenta_corriente_efectivo'):
+                        resumen['cobros_ctacte'] += m
+                    else:
+                        resumen['otros_ingresos'] += m
+                # Si el medio NO es efectivo, solo va a medios_pago (abajo), no suma al esperado
+
+            else:  # egreso
+                # Solo egresos EN EFECTIVO afectan el efectivo esperado
+                if medio == 'efectivo':
+                    resumen['total_egresos'] += m
+                    if mot == 'pago_proveedor':
+                        resumen['pagos_proveedores'] += m
+                    elif mot == 'retiro_caja':
+                        resumen['retiros'] += m
+                    elif mot == 'gasto_vario':
+                        resumen['gastos_varios'] += m
+                    else:
+                        resumen['otros_egresos'] += m
+                elif medio == 'transferencia':
+                    resumen['total_egresos_transferencia'] += m
+                elif medio in ('tarjeta', 'debito'):
+                    resumen['total_egresos_tarjeta'] += m
+
+        # Medios electrónicos: leer directo de caja_movimiento filtrando por medio
+        # (más preciso que leer de Venta.tipo_pago, captura también cobros cta.cte.)
+        cur.execute("""
+            SELECT medio, SUM(monto) as total
+            FROM caja_movimiento
+            WHERE id_session = %s
+              AND tipo = 'ingreso'
+              AND medio IN ('tarjeta', 'transferencia', 'cuenta_corriente')
+            GROUP BY medio
+        """, (id_session,))
+        for rv in cur.fetchall():
+            med = rv['medio']
+            val = float(rv['total'])
+            if med == 'tarjeta':
+                resumen['medios_pago']['tarjetas'] = val
+            elif med == 'transferencia':
+                resumen['medios_pago']['transferencias'] = val
+            elif med == 'cuenta_corriente':
+                resumen['medios_pago']['cuenta_corriente'] = val
+
+        # CORRECCIÓN: efectivo_esperado solo usa ingresos/egresos de efectivo real
+        # El monto_inicial NO se suma al total_recaudado del ticket (es plata que ya estaba)
+        resumen['efectivo_esperado'] = (
+            resumen['monto_inicial']
+            + resumen['total_ingresos']
+            - resumen['total_egresos']
+        )
         return resumen
-        
+
     except Exception as e:
-        logger.error(f"obtener_resumen_cierre: {e}")
-        return {}
+        logger.error(f"Error resumen: {e}")
+        return resumen
     finally:
         if cur: cur.close()
         if conn: conn.close()

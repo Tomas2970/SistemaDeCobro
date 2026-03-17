@@ -1,6 +1,6 @@
 -- =========================================================
 -- Supermercado Don Atilio - Esquema DEFINITIVO
--- Versión: 3.0 - DNI/CUIT SEPARADOS en Cliente y Proveedor
+-- Versión: 3.1 - INTEGRACIÓN id_session EN Venta
 -- =========================================================
 
 CREATE DATABASE IF NOT EXISTS supermercado_don_atilio
@@ -228,7 +228,28 @@ CREATE TABLE IF NOT EXISTS Proveedor_Producto (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 5) Ventas
+-- 5) CAJA Y SESIONES (Definidas antes que Venta para FK)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS caja_session (
+    id_session INT AUTO_INCREMENT PRIMARY KEY,
+    id_usuario_apertura INT NOT NULL,
+    fecha_apertura DATETIME DEFAULT CURRENT_TIMESTAMP,
+    monto_apertura DECIMAL(10,2) NOT NULL,
+    id_usuario_cierre INT NULL,
+    fecha_cierre DATETIME NULL,
+    efectivo_esperado DECIMAL(10,2) NULL,
+    efectivo_contado DECIMAL(10,2) NULL,
+    diferencia DECIMAL(10,2) NULL,
+    observaciones_cierre TEXT NULL,
+    estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
+    FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
+    FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
+    INDEX idx_caja_estado (estado),
+    INDEX idx_caja_fecha (fecha_apertura)
+) ENGINE=InnoDB;
+
+-- =========================================================
+-- 6) Ventas
 -- =========================================================
 CREATE TABLE IF NOT EXISTS Venta (
     id_venta INT AUTO_INCREMENT PRIMARY KEY,
@@ -238,6 +259,7 @@ CREATE TABLE IF NOT EXISTS Venta (
     id_cliente INT NULL,
     estado VARCHAR(20) DEFAULT 'pendiente',
     tipo_pago VARCHAR(20) DEFAULT 'efectivo',
+    id_session INT NULL, 
     CHECK (total >= 0),
     CHECK (estado IN ('completada','cancelada','pendiente')),
     CHECK (tipo_pago IN ('efectivo','tarjeta','cuenta_corriente','transferencia')),
@@ -247,10 +269,14 @@ CREATE TABLE IF NOT EXISTS Venta (
     CONSTRAINT fk_venta_cliente
         FOREIGN KEY (id_cliente) REFERENCES Cliente(id_cliente)
         ON DELETE RESTRICT,
+    CONSTRAINT fk_venta_session
+        FOREIGN KEY (id_session) REFERENCES caja_session(id_session)
+        ON DELETE SET NULL,
     INDEX idx_venta_fecha (fecha),
     INDEX idx_venta_cliente (id_cliente),
     INDEX idx_venta_usuario (id_usuario),
-    INDEX idx_venta_estado (estado)
+    INDEX idx_venta_estado (estado),
+    INDEX idx_venta_session (id_session)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS DetalleVenta (
@@ -275,26 +301,8 @@ CREATE TABLE IF NOT EXISTS DetalleVenta (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 6) CAJA Y SESIONES
+-- 7) CAJA MOVIMIENTOS, NOTAS DE CRÉDITO Y AUDITORÍA
 -- =========================================================
-CREATE TABLE IF NOT EXISTS caja_session (
-    id_session INT AUTO_INCREMENT PRIMARY KEY,
-    id_usuario_apertura INT NOT NULL,
-    fecha_apertura DATETIME DEFAULT CURRENT_TIMESTAMP,
-    monto_apertura DECIMAL(10,2) NOT NULL,
-    id_usuario_cierre INT NULL,
-    fecha_cierre DATETIME NULL,
-    efectivo_esperado DECIMAL(10,2) NULL,
-    efectivo_contado DECIMAL(10,2) NULL,
-    diferencia DECIMAL(10,2) NULL,
-    observaciones_cierre TEXT NULL,
-    estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
-    FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
-    FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
-    INDEX idx_caja_estado (estado),
-    INDEX idx_caja_fecha (fecha_apertura)
-) ENGINE=InnoDB;
-
 CREATE TABLE IF NOT EXISTS caja_movimiento (
     id_movimiento INT AUTO_INCREMENT PRIMARY KEY,
     id_session INT NOT NULL,
@@ -304,7 +312,13 @@ CREATE TABLE IF NOT EXISTS caja_movimiento (
     motivo ENUM(
         'apertura_caja',
         'venta_efectivo',
+        'venta_tarjeta',
+        'venta_transferencia',
+        'venta_cuenta_corriente',
         'pago_cuenta_corriente_efectivo',
+        'pago_cuenta_corriente_transferencia',
+        'pago_cuenta_corriente_tarjeta',
+        'cobro_cuenta_corriente',
         'pago_proveedor',
         'gasto_vario',
         'retiro_caja',
@@ -328,9 +342,6 @@ CREATE TABLE IF NOT EXISTS caja_movimiento (
     INDEX idx_mov_tipo (tipo)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- 7) NOTAS DE CRÉDITO
--- =========================================================
 CREATE TABLE IF NOT EXISTS nota_credito (
     id_nota_credito INT AUTO_INCREMENT PRIMARY KEY,
     id_venta INT NOT NULL,
@@ -343,9 +354,6 @@ CREATE TABLE IF NOT EXISTS nota_credito (
     FOREIGN KEY (id_usuario) REFERENCES Usuario(id_usuario)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- 8) Auditoría
--- =========================================================
 CREATE TABLE IF NOT EXISTS AuditoriaInventario (
     id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
     id_producto INT NOT NULL,
@@ -373,7 +381,7 @@ CREATE TABLE IF NOT EXISTS AuditoriaAcciones (
 ) ENGINE=InnoDB;
 
 -- =========================================================
--- 9) Triggers
+-- 8) Triggers
 -- =========================================================
 DELIMITER $$
 
@@ -427,7 +435,7 @@ END $$
 DELIMITER ;
 
 -- =========================================================
--- 10) Vistas
+-- 9) Vistas
 -- =========================================================
 CREATE OR REPLACE VIEW vista_stock_bajo AS
 SELECT p.id_producto, p.nombre, p.precio, p.es_pesable, c.nombre AS categoria, 

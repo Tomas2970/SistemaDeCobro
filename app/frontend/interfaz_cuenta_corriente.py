@@ -1,7 +1,7 @@
 # app/frontend/interfaz_cuenta_corriente.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, Toplevel
+from tkinter import ttk, messagebox, Toplevel
 from typing import Optional, Any
 import logging
 
@@ -10,6 +10,22 @@ try:
 except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
+# 🔥 ENTRY QUE SOLO ACEPTA NÚMEROS Y UN PUNTO DECIMAL
+class EntryDecimal(tk.Entry):
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        vcmd = (self.register(self._validar), '%P')
+        self.config(validate='key', validatecommand=vcmd)
+    
+    def _validar(self, nuevo_valor: str) -> bool:
+        if nuevo_valor == "": return True
+        if len(nuevo_valor) > 15: return False
+        try:
+            if nuevo_valor.replace(',', '.') == ".": return True
+            float(nuevo_valor.replace(',', '.'))
+            return True
+        except ValueError: return False
+
 logger = logging.getLogger(__name__)
 
 class CuentaCorriente:
@@ -17,261 +33,239 @@ class CuentaCorriente:
         self.backend = backend
         self.usuario = usuario
         self.win = tk.Toplevel(parent)
-        self.win.title("🏦 Gestión de Cuentas Corrientes")
-        # 🔥 CORRECCIÓN FINAL: Aumento el ancho a 1100px.
-        self.win.geometry("1100x600") 
+        self.win.title("Gestión de Cuentas Corrientes")
+        self.win.geometry("1200x650")
         self.win.config(bg="#f4f4f8")
         self.win.resizable(False, False)
 
-        # Cache de todos los clientes para el buscador
-        self.clientes_cache = []
-        self._cargar_cache_clientes()
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Modern.Treeview", background="#ffffff", foreground="#1f2937", rowheight=32, fieldbackground="#ffffff", borderwidth=0, font=('Segoe UI', 10))
+        style.configure("Modern.Treeview.Heading", background="#f3f4f6", foreground="#374151", relief="flat", font=('Segoe UI', 10, 'bold'))
 
+        self.clientes_cache = []
         self.crear_widgets()
-        self.cargar_deudores() # Esto llama a _cargar_cache_clientes y filtra la lista
+        self.cargar_deudores()
         
         configurar_navegacion_ventana(self.win)
         self.win.grab_set()
-
-    def _cargar_cache_clientes(self):
-        try:
-            # Ahora traemos DNI/CUIT/Saldo/Límite
-            self.clientes_cache = self.backend.listar_clientes_con_saldos(incluir_inactivos=False)
-            # Mapa por ID para una búsqueda eficiente en doble click
-            self.clientes_map_id = {c['id_cliente']: c for c in self.clientes_cache}
-        except Exception as e:
-            logger.error(f"Error cargando cache de clientes: {e}")
-            self.clientes_cache = []
-            self.clientes_map_id = {}
-
 
     def _fmt_mon(self, val: Any) -> str:
         try: return f"$ {float(val):,.2f}"
         except: return "$ 0.00"
 
     def crear_widgets(self):
-        # Frame superior para búsqueda y mensajes
-        frm_header = tk.Frame(self.win, bg="#f4f4f8", pady=10, padx=20)
+        frm_header = tk.Frame(self.win, bg="#f4f4f8", pady=15, padx=20)
         frm_header.pack(fill=tk.X)
 
-        tk.Label(frm_header, text="🔍 Buscar (Nombre, DNI, ID):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side=tk.LEFT)
+        tk.Label(frm_header, text="🔎 Buscar:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(5,10))
         self.var_busqueda_ppal = tk.StringVar()
-        entry_busqueda = tk.Entry(frm_header, textvariable=self.var_busqueda_ppal, width=30)
-        entry_busqueda.pack(side=tk.LEFT, padx=10)
+        entry_busqueda = tk.Entry(frm_header, textvariable=self.var_busqueda_ppal, width=35, font=("Segoe UI", 10))
+        entry_busqueda.pack(side=tk.LEFT)
         self.var_busqueda_ppal.trace_add("write", self.filtrar_lista_principal)
         
-        tk.Label(frm_header, text="💡 Doble Click en un cliente para registrar pago", 
-                 bg="#f4f4f8", fg="#555", font=("Segoe UI", 10, "italic")).pack(side=tk.RIGHT)
+        tk.Label(frm_header, text="💡 Doble click para registrar pago", bg="#f4f4f8", fg="#6b7280", font=("Segoe UI", 9, "italic")).pack(side=tk.RIGHT, padx=20)
         
-        frm_lista = tk.LabelFrame(self.win, text="Estado de Cuentas", bg="#f4f4f8", padx=10, pady=10)
-        frm_lista.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        frm_lista = tk.Frame(self.win, bg="#f4f4f8", padx=20)
+        frm_lista.pack(fill=tk.BOTH, expand=True, pady=10)
 
-        # COLUMNAS ACTUALIZADAS: Añadimos DNI y CUIT.
-        cols = ("ID Cliente", "Nombre", "DNI", "CUIT", "Teléfono", "Email", "Saldo Actual", "Límite Crédito")
-        self.tree_deudores = ttk.Treeview(frm_lista, columns=cols, show="headings", height=18)
+        # 🔥 COLUMNAS CORREGIDAS: Se quitó CUIT
+        cols = ("ID Cliente", "Nombre", "DNI", "Teléfono", "Email", "Saldo Actual", "Límite Crédito")
+        self.tree_deudores = ttk.Treeview(frm_lista, columns=cols, show="headings", height=15, style="Modern.Treeview")
         self.tree_deudores.pack(side="left", fill="both", expand=True)
 
         ys = ttk.Scrollbar(frm_lista, orient="vertical", command=self.tree_deudores.yview)
         ys.pack(side="right", fill="y")
         self.tree_deudores.configure(yscrollcommand=ys.set)
 
-        for c in cols: self.tree_deudores.heading(c, text=c)
-        
-        # 🔥 DISTRIBUCIÓN DE ANCHO PARA 1100PX (Suma de anchos: 1020, queda margen para scrollbar)
-        self.tree_deudores.column("ID Cliente", width=70, anchor="center")
-        self.tree_deudores.column("Nombre", width=160)
+        for col in cols: self.tree_deudores.heading(col, text=col)
+        self.tree_deudores.column("ID Cliente", width=0, minwidth=0, stretch=False)
+        self.tree_deudores.column("Nombre", width=200)
         self.tree_deudores.column("DNI", width=90, anchor="center")
-        self.tree_deudores.column("CUIT", width=120, anchor="center")
-        self.tree_deudores.column("Teléfono", width=100)
-        self.tree_deudores.column("Email", width=180) 
-        self.tree_deudores.column("Saldo Actual", width=150, anchor="e")
-        self.tree_deudores.column("Límite Crédito", width=150, anchor="e")
+        self.tree_deudores.column("Teléfono", width=100, anchor="center")
+        self.tree_deudores.column("Email", width=180)
+        self.tree_deudores.column("Saldo Actual", width=140, anchor="e")
+        self.tree_deudores.column("Límite Crédito", width=130, anchor="e")
         
         self.tree_deudores.tag_configure("deuda", foreground="#dc2626")
         self.tree_deudores.tag_configure("favor", foreground="#16a34a")
-        self.tree_deudores.tag_configure("cero", foreground="black")
-
         self.tree_deudores.bind("<Double-1>", self.on_doble_click)
+        
+        frame_botones = tk.Frame(self.win, bg="#f4f4f8", pady=15)
+        frame_botones.pack(fill="x", padx=20)
+        
+        tk.Button(frame_botones, text="Cerrar", command=self.win.destroy, bg="#64748b", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=10, cursor="hand2").pack(side=tk.RIGHT)
 
     def on_doble_click(self, event):
         sel = self.tree_deudores.selection()
         if not sel: return
         item = self.tree_deudores.item(sel[0], "values")
-        
-        # item[1] es el Nombre del cliente (usamos el nombre para precargar el combobox en la ventana de pago)
-        self.abrir_ventana_pago(cliente_preseleccionado=item[1])
+        self.abrir_ventana_pago(int(item[0]))
 
+    def cargar_deudores(self):
+        try:
+            data = self.backend.listar_clientes_con_saldos(incluir_inactivos=False)
+            def prioridad_saldo(c):
+                s = float(c.get('saldo', 0.0))
+                if s < -0.01: return 0
+                if s > 0.01: return 1
+                return 2
+            self.clientes_cache = sorted(data, key=prioridad_saldo)
+            self.filtrar_lista_principal()
+        except Exception as e:
+            logger.error(f"Error cargando deudores: {e}")
 
     def filtrar_lista_principal(self, *args):
         q = self.var_busqueda_ppal.get().lower().strip()
-        
         for i in self.tree_deudores.get_children(): self.tree_deudores.delete(i)
 
         for d in self.clientes_cache:
-            nombre = str(d.get('nombre', '')).lower()
-            dni = str(d.get('dni', '')).lower()
-            cuit = str(d.get('cuit', '')).lower()
-            id_cli = str(d.get('id_cliente', '')).lower()
-            
-            # Filtro: Nombre, DNI, CUIT, o ID
-            if not q or q in nombre or q in dni or q in cuit or q in id_cli:
-                
+            txt_busqueda = f"{d.get('nombre','')} {d.get('dni','')} {d.get('id_cliente','')}".lower()
+            if not q or q in txt_busqueda:
                 saldo = float(d.get('saldo', 0.0))
-                limite = float(d.get('limite_credito', 0.0))
-                
+                tag = "deuda" if saldo < -0.01 else "cero"
+                # Mostrar en positivo con etiqueta clara
                 if saldo < -0.01:
-                    tag = "deuda"
-                    saldo_txt = f"- {self._fmt_mon(abs(saldo))}"
-                elif saldo > 0.01:
-                    tag = "favor"
-                    saldo_txt = f"+ {self._fmt_mon(saldo)}"
+                    saldo_txt = f"$ {abs(saldo):,.2f}"
                 else:
-                    tag = "cero"
-                    saldo_txt = "$ 0.00"
+                    saldo_txt = "Sin deuda"
 
+                # 🔥 VALORES INSERTADOS: Se quitó el dato de CUIT
                 self.tree_deudores.insert("", tk.END, values=[
-                    d.get('id_cliente'), d.get('nombre'),
-                    d.get('dni') or "-", d.get('cuit') or "-",
+                    d.get('id_cliente'), d.get('nombre'), d.get('dni') or "-",
                     d.get('telefono') or "", d.get('email') or "",
-                    saldo_txt, self._fmt_mon(limite)
+                    saldo_txt, self._fmt_mon(d.get('limite_credito', 0.0))
                 ], tags=(tag,))
 
-    def cargar_deudores(self):
-        self._cargar_cache_clientes()
-        self.filtrar_lista_principal() 
-
-    def abrir_ventana_pago(self, cliente_preseleccionado=None):
+    def abrir_ventana_pago(self, id_cliente):
         self.win_pago = Toplevel(self.win)
         self.win_pago.title("Registrar Pago")
-        self.win_pago.geometry("550x450")
+        self.win_pago.geometry("500x460")
         self.win_pago.config(bg="#f4f4f8")
+        self.win_pago.resizable(False, False)
         self.win_pago.transient(self.win)
         self.win_pago.grab_set()
 
-        self.cliente_seleccionado = None
-        self.cuenta_seleccionada = None
-        self.saldo_actual_cache = 0.0
-        
-        # Mapeamos la lista completa para el Combobox de la ventana de pago
-        clis = self.clientes_cache
-        self.clientes_map = {c.get('nombre'): c for c in clis}
-        names = sorted(self.clientes_map.keys())
+        cliente = next((c for c in self.clientes_cache if c['id_cliente'] == id_cliente), None)
+        if not cliente: return self.win_pago.destroy()
 
-        frame = tk.Frame(self.win_pago, bg="#f4f4f8")
-        frame.pack(padx=20, pady=20, fill="both", expand=True)
+        self.backend.crear_cuenta_corriente_si_no_existe(id_cliente)
+        self.cuenta_seleccionada = self.backend.obtener_cuenta_por_cliente(id_cliente)
+        self.saldo_actual_cache = float(self.cuenta_seleccionada.get('saldo', 0.0))
 
-        tk.Label(frame, text="1. Seleccione Cliente:", bg="#f4f4f8", font=("bold")).grid(row=0, column=0, sticky="w")
-            
-        self.cb_clientes_pago = ttk.Combobox(frame, state="readonly", values=names, width=40)
-        self.cb_clientes_pago.grid(row=1, column=0, columnspan=2, pady=5)
-        self.cb_clientes_pago.bind("<<ComboboxSelected>>", self.cargar_info_cuenta)
+        frame = tk.Frame(self.win_pago, bg="#ffffff", padx=30, pady=30)
+        frame.pack(fill="both", expand=True, padx=20, pady=20)
+        frame.columnconfigure(0, weight=0, minsize=120)
+        frame.columnconfigure(1, weight=1)
         
-        # 🔥 CREACIÓN DE WIDGETS COMO ATRIBUTOS DE INSTANCIA (SOLUCIÓN AL ERROR) 🔥
-        
-        tk.Label(frame, text="Saldo Actual:", bg="#f4f4f8").grid(row=2, column=0, sticky="e")
-        self.lbl_saldo = tk.Label(frame, text="-", bg="#f4f4f8", font=("bold"), fg="blue")
-        self.lbl_saldo.grid(row=2, column=1, sticky="w")
-        
-        ttk.Separator(frame).grid(row=3, column=0, columnspan=2, sticky="ew", pady=10)
+        tk.Label(frame, text="Registrar Pago de Cliente", bg="#ffffff", font=("Segoe UI", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=(0, 20), sticky="w")
 
-        tk.Label(frame, text="2. Ingrese Pago:", bg="#f4f4f8", font=("bold")).grid(row=4, column=0, sticky="w")
+        tk.Label(frame, text="Cliente:", bg="#ffffff", font=("Segoe UI", 10, "bold")).grid(row=1, column=0, sticky="e", pady=5)
+        tk.Label(frame, text=cliente['nombre'], bg="#ffffff", font=("Segoe UI", 11)).grid(row=1, column=1, sticky="w", padx=10)
 
-        tk.Label(frame, text="Monto ($):", bg="#f4f4f8").grid(row=5, column=0, sticky="e")
-        self.entry_monto = tk.Entry(frame, width=15)
-        self.entry_monto.grid(row=5, column=1, sticky="w")
+        ttk.Separator(frame, orient="horizontal").grid(row=2, column=0, columnspan=2, sticky="ew", pady=15)
+
+        tk.Label(frame, text="Monto ($):", bg="#ffffff", font=("Segoe UI", 10, "bold")).grid(row=3, column=0, sticky="e", pady=10)
+        frm_monto = tk.Frame(frame, bg="#ffffff")
+        frm_monto.grid(row=3, column=1, sticky="w", padx=10)
+        self.entry_monto = EntryDecimal(frm_monto, width=18, font=("Segoe UI", 11), justify="right")
+        self.entry_monto.pack(side=tk.LEFT)
+        self._deuda_maxima = abs(self.saldo_actual_cache) if self.saldo_actual_cache < -0.01 else 0.0
+
         self.entry_monto.bind("<KeyRelease>", self.calcular_saldo_proyectado)
         self.entry_monto.focus_set()
 
-        tk.Label(frame, text="Método:", bg="#f4f4f8").grid(row=6, column=0, sticky="e")
-        self.cb_metodo = ttk.Combobox(frame, state="readonly", values=["efectivo", "tarjeta_debito", "transferencia"], width=15)
-        self.cb_metodo.grid(row=6, column=1, sticky="w")
+        tk.Label(frame, text="Método:", bg="#ffffff", font=("Segoe UI", 10, "bold")).grid(row=4, column=0, sticky="e", pady=10)
+        self.cb_metodo = ttk.Combobox(frame, state="readonly", values=["efectivo", "transferencia", "tarjeta_debito"], width=16, font=("Segoe UI", 10))
+        self.cb_metodo.grid(row=4, column=1, sticky="w", padx=10)
         self.cb_metodo.current(0)
-        
-        tk.Label(frame, text="Resultado:", bg="#f4f4f8").grid(row=7, column=0, sticky="e", pady=10)
-        self.lbl_resultado = tk.Label(frame, text="-", bg="#f4f4f8", font=("Arial", 11, "bold"))
-        self.lbl_resultado.grid(row=7, column=1, sticky="w", pady=10)
-        
-        # 🔥 FIN CREACIÓN DE WIDGETS
-        
-        if cliente_preseleccionado and cliente_preseleccionado in names:
-            self.cb_clientes_pago.set(cliente_preseleccionado)
-            # Forzar la carga de la cuenta inmediatamente después de setear el cliente.
-            self.cargar_info_cuenta() 
 
-        btn_frame = tk.Frame(frame, bg="#f4f4f8")
-        btn_frame.grid(row=8, column=0, columnspan=2, pady=20)
-        tk.Button(btn_frame, text="Confirmar Pago", command=self.confirmar_pago, bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="Cancelar", command=self.win_pago.destroy, bg="#f44336", fg="white").pack(side=tk.LEFT, padx=10)
+        # Cuadro inferior: arranca mostrando la deuda, se actualiza al escribir
+        frame_res = tk.Frame(frame, bg="#f8fafc", relief="solid", bd=1)
+        frame_res.grid(row=5, column=0, columnspan=2, sticky="ew", pady=20)
+        tk.Label(frame_res, text="Deuda del cliente:", bg="#f8fafc", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=15, pady=10)
+        if self._deuda_maxima > 0:
+            texto_inicial = f"Debe: $ {self._deuda_maxima:,.2f}"
+            color_inicial = "#dc2626"
+        else:
+            texto_inicial = "Sin deuda"
+            color_inicial = "#6b7280"
+        self.lbl_resultado = tk.Label(frame_res, text=texto_inicial, bg="#f8fafc",
+                                      font=("Segoe UI", 11, "bold"), fg=color_inicial,
+                                      wraplength=280, anchor="w")
+        self.lbl_resultado.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        btn_frm = tk.Frame(frame, bg="#ffffff")
+        btn_frm.grid(row=7, column=0, columnspan=2, pady=(10, 0))
+        
+        tk.Button(btn_frm, text="💾 GUARDAR PAGO", command=self.confirmar_pago, bg="#16a34a", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=8, cursor="hand2").pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frm, text="CANCELAR", command=self.win_pago.destroy, bg="#64748b", fg="white", font=("Segoe UI", 10), relief="flat", padx=15, pady=8, cursor="hand2").pack(side=tk.LEFT)
 
         configurar_navegacion_ventana(self.win_pago)
 
-    def cargar_info_cuenta(self, event=None):
-        nombre = self.cb_clientes_pago.get()
-        self.cliente_seleccionado = self.clientes_map.get(nombre)
-        if not self.cliente_seleccionado: return
-        
+    # 🔥 FUNCIÓN CORREGIDA: Mensaje genérico cuando la caja está cerrada
+    def confirmar_pago(self):
         try:
-            id_cliente = self.cliente_seleccionado['id_cliente']
+            monto_raw = self.entry_monto.get().strip()
+            if not monto_raw:
+                messagebox.showwarning("Atención", "Ingrese un monto.", parent=self.win_pago)
+                return
+            monto = float(monto_raw.replace(",", "."))
             
-            # Asegurar que la cuenta existe
-            self.backend.crear_cuenta_corriente_si_no_existe(id_cliente)
-            cta = self.backend.obtener_cuenta_por_cliente(id_cliente)
-            self.cuenta_seleccionada = cta
-            
-            self.saldo_actual_cache = float(cta.get('saldo', 0.0))
-            
-            if self.saldo_actual_cache < 0:
-                txt = f"- {self._fmt_mon(abs(self.saldo_actual_cache))} (Deuda)"
-                col = "#dc2626"
-            else:
-                txt = f"+ {self._fmt_mon(self.saldo_actual_cache)} (A Favor)"
-                col = "#16a34a"
-                
-            self.lbl_saldo.config(text=txt, fg=col) 
-            self.calcular_saldo_proyectado()
-        except Exception as e: 
-            logger.error(f"Error cargando info cuenta: {e}")
-            self.lbl_saldo.config(text="Error al cargar", fg="black")
+            if monto <= 0:
+                messagebox.showwarning("Atención", "El monto debe ser mayor a 0.", parent=self.win_pago)
+                return
+            if monto > self._deuda_maxima + 0.01:
+                messagebox.showwarning(
+                    "Monto excede la deuda",
+                    f"La deuda es de $ {self._deuda_maxima:,.2f}. No puede ingresar un monto mayor.",
+                    parent=self.win_pago
+                )
+                self.entry_monto.delete(0, tk.END)
+                self.entry_monto.insert(0, f"{self._deuda_maxima:.2f}")
+                return
 
+            uid = self.usuario['id_usuario']
+            id_cuenta = self.cuenta_seleccionada.get('id_cuenta')
+            
+            resultado = self.backend.registrar_pago_cuenta_corriente(id_cuenta, monto, self.cb_metodo.get(), uid)
+            if resultado:
+                messagebox.showinfo("Éxito", "Pago registrado correctamente.", parent=self.win_pago)
+                self.win_pago.destroy()
+                self.cargar_deudores()
+            else:
+                messagebox.showerror("Error", "No se pudo registrar el pago. Revisá que la caja esté abierta.", parent=self.win_pago)
+                
+        except ValueError as ve:
+            if "CAJA_CERRADA" in str(ve):
+                messagebox.showerror("Caja Cerrada", "No se puede procesar el pago porque la caja está cerrada.", parent=self.win_pago)
+            else:
+                messagebox.showerror("Error", f"Monto inválido: {ve}", parent=self.win_pago)
+        except Exception as e:
+            messagebox.showerror("Error Crítico", f"No se pudo procesar el pago: {e}", parent=self.win_pago)
 
     def calcular_saldo_proyectado(self, event=None):
-        if not self.cuenta_seleccionada: return
-        try:
-            # Reemplazamos coma por punto para el parseo de float
-            pago = float(self.entry_monto.get().replace(",", ".") or 0)
+        try: pago = float(self.entry_monto.get().replace(",", ".") or 0)
         except: pago = 0.0
-        
-        nuevo_saldo = self.saldo_actual_cache + pago
-        
-        if nuevo_saldo >= 0:
-            self.lbl_resultado.config(text=f"Saldo Final: + {self._fmt_mon(nuevo_saldo)} (A Favor)", fg="green")
+        # Sin nada escrito: mostrar deuda original
+        if pago <= 0:
+            if self._deuda_maxima > 0:
+                self.lbl_resultado.config(text=f"Debe: $ {self._deuda_maxima:,.2f}", fg="#dc2626")
+            else:
+                self.lbl_resultado.config(text="Sin deuda", fg="#6b7280")
+            return
+        if pago > self._deuda_maxima + 0.01:
+            txt = f"⚠ Excede la deuda (máx $ {self._deuda_maxima:,.2f})"
+            col = "#f59e0b"
         else:
-            self.lbl_resultado.config(text=f"Saldo Final: - {self._fmt_mon(abs(nuevo_saldo))} (Deuda)", fg="red")
-
-    def confirmar_pago(self):
-        if not self.cliente_seleccionado: 
-            messagebox.showwarning("Error", "Debe seleccionar un cliente.", parent=self.win_pago)
-            return
-            
-        try:
-            # Reemplazamos coma por punto para el parseo de float
-            monto = float(self.entry_monto.get().replace(",", "."))
-            if monto <= 0: raise ValueError
-        except:
-            messagebox.showwarning("Error", "Monto inválido", parent=self.win_pago)
-            return
-            
-        try:
-            ok = self.backend.registrar_pago_cuenta_corriente(
-                self.cuenta_seleccionada['id_cuenta'],
-                monto, self.cb_metodo.get(), self.usuario['id_usuario']
-            )
-            if ok:
-                messagebox.showinfo("Éxito", "Pago registrado.", parent=self.win_pago)
-                self.win_pago.destroy()
-                self.cargar_deudores() # Esto actualiza la lista automáticamente
-            else: messagebox.showerror("Error", "Error al guardar", parent=self.win_pago)
-        except Exception as e: messagebox.showerror("Error", str(e), parent=self.win_pago)
+            restante = self._deuda_maxima - pago
+            if restante > 0.01:
+                txt = f"Quedará debiendo: $ {restante:,.2f}"
+                col = "#dc2626"
+            else:
+                txt = "Deuda cancelada ✓"
+                col = "#059669"
+        self.lbl_resultado.config(text=txt, fg=col)
 
 def ui_cuenta_corriente(parent: tk.Misc, backend, usuario: dict):
     CuentaCorriente(parent, backend, usuario)

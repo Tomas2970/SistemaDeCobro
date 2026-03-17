@@ -16,6 +16,14 @@ class VentanaPago:
 
     def __init__(self, parent, total_venta, cliente_seleccionado, callback):
         self.total_venta = round(float(total_venta), 2)
+        # Máximo razonable: un solo billete de 0k cubre cualquier compra hasta 0k.
+        import math
+        def _sugerir_pago(total):
+            for b in [100, 200, 500, 1000, 2000, 10000, 20000]:
+                if b >= total:
+                    return b
+            return math.ceil(total / 20000) * 20000
+        self._sugerir_pago = _sugerir_pago
         self.cliente_seleccionado = cliente_seleccionado
         self.callback = callback
         self.resultado = None
@@ -160,7 +168,12 @@ class VentanaPago:
         
         def validar_float(texto):
             if texto == "": return True
-            return re.match(r'^[0-9]*\.?[0-9]*$', texto) is not None
+            if not re.match(r'^[0-9]*\.?[0-9]*$', texto): return False
+            try:
+                tope = self._sugerir_pago(self.total_venta)
+                if float(texto) > tope: return False
+            except: pass
+            return True
 
         vcmd = (self.ventana.register(validar_float), '%P')
         
@@ -175,7 +188,19 @@ class VentanaPago:
             bg="#ffffff"
         )
         self.entry_paga.pack(side=tk.LEFT, padx=8)
-        self.entry_paga.bind("<KeyRelease>", self._calcular_vuelto)
+        def _on_key_paga(event=None):
+            self._calcular_vuelto()
+            # Aplicar tope DESPUÉS de escribir, no mientras
+            try:
+                val = float(self.entry_paga.get().replace(",", "."))
+                tope = self._sugerir_pago(self.total_venta)
+                if val > tope:
+                    self.entry_paga.delete(0, tk.END)
+                    self.entry_paga.insert(0, str(tope))
+                    self._calcular_vuelto()
+            except: pass
+
+        self.entry_paga.bind("<KeyRelease>", _on_key_paga)
         self.entry_paga.bind("<Return>", lambda e: self._confirmar())
 
         frame_vuelto = tk.Frame(self.frame_efectivo, bg="#ffffff")
@@ -241,7 +266,8 @@ class VentanaPago:
         if self.metodo_var.get() == "efectivo":
             self.frame_efectivo.pack(fill=tk.X, pady=(0, 20))
             self.entry_paga.delete(0, tk.END)
-            self.entry_paga.insert(0, f"{self.total_venta:.2f}")
+            sugerido = self._sugerir_pago(self.total_venta)
+            self.entry_paga.insert(0, str(sugerido))
             self.entry_paga.select_range(0, tk.END)
             self.entry_paga.focus_set()
             self._calcular_vuelto()

@@ -97,7 +97,7 @@ class UIManageCategorias:
         self.tree.heading("Margen (%)", text="Margen Sugerido")
         self.tree.heading("Pesable", text="¿Es Pesable?")
         
-        self.tree.column("ID", width=60, anchor="center")
+        self.tree.column("ID", width=0, minwidth=0, stretch=False)
         self.tree.column("Nombre", width=280)
         self.tree.column("Margen (%)", width=120, anchor="e")
         self.tree.column("Pesable", width=100, anchor="center")
@@ -157,6 +157,19 @@ class UIManageCategorias:
         )
         btn_eliminar.pack(side=tk.LEFT, padx=10)
 
+        tk.Button(
+            frame_btns,
+            text="Cerrar",
+            command=self.win.destroy,
+            bg="#64748b",
+            fg="white",
+            font=("Segoe UI", 10),
+            relief="flat",
+            padx=20,
+            pady=10,
+            cursor="hand2"
+        ).pack(side=tk.RIGHT, padx=10)
+
         if not self.can_manage:
             btn_nueva.config(state=tk.DISABLED, bg="#d1d5db", cursor="arrow")
             btn_editar.config(state=tk.DISABLED, bg="#d1d5db", cursor="arrow")
@@ -199,8 +212,42 @@ class UIManageCategorias:
     def _eliminar_seleccionado(self):
         if not self.can_manage: return
         sel = self.tree.selection()
-        if not sel: return
-        messagebox.showinfo("Info", "Funcionalidad de eliminar no implementada en este fragmento.")
+        if not sel:
+            messagebox.showwarning("Atención", "Seleccione una categoría.", parent=self.win)
+            return
+        
+        id_cat = int(sel[0])
+        cat_data = self.categorias_cache.get(id_cat)
+        if not cat_data: return
+        
+        nombre = cat_data.get('nombre', '')
+        confirmar = messagebox.askyesno(
+            "Confirmar eliminación",
+            f"¿Eliminar la categoría '{nombre}'?\n\nEsta acción no se puede deshacer.",
+            parent=self.win
+        )
+        if not confirmar: return
+        
+        try:
+            exito = self.backend.eliminar_categoria(id_cat)
+            if exito:
+                messagebox.showinfo("Éxito", f"Categoría '{nombre}' eliminada.", parent=self.win)
+                self.cargar_categorias()
+            else:
+                messagebox.showerror(
+                    "Error",
+                    "No se pudo eliminar la categoría.\nProbablemente tiene productos asociados.",
+                    parent=self.win
+                )
+        except Exception as e:
+            if "foreign key" in str(e).lower() or "1451" in str(e):
+                messagebox.showerror(
+                    "No se puede eliminar",
+                    f"La categoría '{nombre}' tiene productos asociados.\nReasigná los productos antes de eliminarla.",
+                    parent=self.win
+                )
+            else:
+                messagebox.showerror("Error", f"Error al eliminar: {e}", parent=self.win)
 
     def _abrir_editor(self, categoria: dict | None = None):
         if self.ventana_edicion_abierta: return

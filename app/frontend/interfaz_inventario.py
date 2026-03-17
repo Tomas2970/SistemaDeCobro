@@ -150,7 +150,7 @@ class UIInventario:
         
         for c in cols: self.tree.heading(c, text=c)
         # 🔥 ANCHOS AJUSTADOS
-        self.tree.column("ID", width=70, anchor="center")
+        self.tree.column("ID", width=0, minwidth=0, stretch=False)
         self.tree.column("Nombre", width=350)
         self.tree.column("Categoría", width=200)
         self.tree.column("Stock", width=120, anchor="e")
@@ -215,13 +215,15 @@ class UIInventario:
     def _resolver_busqueda(self, q: str) -> List[Dict[str, Any]]:
         q = q.strip()
         if not q:
-            return self.productos_cache or [] 
+            return self.productos_cache or []
 
-        resultado_unico = self.backend.buscar_producto_inteligente(q)
+        # Si parece un código de barras (solo números) o es muy corto, intentar búsqueda exacta primero
+        if q.isdigit():
+            resultado_unico = self.backend.buscar_producto_inteligente(q)
+            if resultado_unico:
+                return [resultado_unico]
         
-        if resultado_unico:
-            return [resultado_unico]
-        
+        # Para texto siempre filtrar el cache completo por nombre (permite múltiples resultados)
         q_lower = q.lower()
         return [p for p in self.productos_cache if q_lower in p.get('nombre', '').lower()]
 

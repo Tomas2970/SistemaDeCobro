@@ -154,29 +154,36 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     def guardar_cambios():
         cambios = 0
         errores = 0
-        
+
+        # Calcular cambios pendientes antes de guardar
+        pendientes = [(pid, data) for pid, data in memoria_productos.items()
+                      if data['asignado_actual'] != data['asignado_original']]
+
+        if not pendientes:
+            messagebox.showinfo("Sin cambios", "No realizaste ningún cambio para guardar.", parent=win)
+            return
+
         try:
-            for pid, data in memoria_productos.items():
-                if data['asignado_actual'] != data['asignado_original']:
-                    if data['asignado_actual']:
-                        ok = backend.asignar_producto_a_proveedor(id_proveedor, pid)
-                    else:
-                        ok = backend.quitar_producto_a_proveedor(id_proveedor, pid)
-                    
-                    if ok: 
-                        cambios += 1
-                    else:
-                        errores += 1
-            
+            for pid, data in pendientes:
+                if data['asignado_actual']:
+                    ok = backend.asignar_producto_a_proveedor(id_proveedor, pid)
+                else:
+                    ok = backend.quitar_producto_a_proveedor(id_proveedor, pid)
+
+                if ok:
+                    cambios += 1
+                else:
+                    errores += 1
+
             if errores > 0:
-                messagebox.showwarning("Resultado", f"Se aplicaron {cambios} cambios, pero hubo {errores} errores.")
+                messagebox.showwarning("Resultado", f"Se aplicaron {cambios} cambios, pero hubo {errores} errores.", parent=win)
             else:
-                messagebox.showinfo("Éxito", f"Se actualizaron correctamente los productos del proveedor.")
-            
+                messagebox.showinfo("Éxito", f"Se guardaron {cambios} cambio(s) correctamente.", parent=win)
+
             win.destroy()
-            
+
         except Exception as e:
-            messagebox.showerror("Error crítico", f"Falló el guardado: {e}")
+            messagebox.showerror("Error crítico", f"Falló el guardado: {e}", parent=win)
 
     # --- 3. Botones Inferiores ---
     frame_btns = tk.Frame(win, bg="#f4f4f8", pady=15)

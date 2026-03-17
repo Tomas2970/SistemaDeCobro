@@ -4,7 +4,7 @@
 ; =====================================================
 
 #define MyAppName "Sistema Cobros Don Atilio"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Don Atilio Supermercado"
 #define MyAppExeName "SistemaCobrosDonAtilio.exe"
 
