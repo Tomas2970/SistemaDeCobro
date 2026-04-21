@@ -15,35 +15,46 @@ class VentanaPago:
     """Ventana para seleccionar forma de pago y calcular vuelto"""
 
     def __init__(self, parent, total_venta, cliente_seleccionado, callback):
+        import customtkinter as ctk
         self.total_venta = round(float(total_venta), 2)
-        # Máximo razonable: un solo billete de 0k cubre cualquier compra hasta 0k.
         import math
         def _sugerir_pago(total):
             for b in [100, 200, 500, 1000, 2000, 10000, 20000]:
-                if b >= total:
-                    return b
+                if b >= total: return b
             return math.ceil(total / 20000) * 20000
         self._sugerir_pago = _sugerir_pago
         self.cliente_seleccionado = cliente_seleccionado
         self.callback = callback
         self.resultado = None
 
-        self.ventana = tk.Toplevel(parent)
+        self.ventana = ctk.CTkToplevel(parent)
         self.ventana.title("Método de Pago")
         self.ventana.resizable(False, False)
         self.ventana.transient(parent)
         self.ventana.grab_set()
-        self.ventana.config(bg="#f4f4f8")
+        
+        self.col_bg = "#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#111827"
+        self.col_card = "#ffffff" if ctk.get_appearance_mode()=="Light" else "#1f2937"
+        self.col_input_bg = "#f9fafb" if ctk.get_appearance_mode() == "Light" else "#374151"
+        self.col_input_fg = "#1f2937" if ctk.get_appearance_mode() == "Light" else "#f9fafb"
+        
+        self.ventana.configure(fg_color=self.col_bg)
 
         self._crear_widgets()
 
         self.ventana.update_idletasks()
-        req_w = max(500, self.ventana.winfo_reqwidth() + 20)
-        req_h = max(520, self.ventana.winfo_reqheight() + 20)
+        req_w = 580
+        # ALTURA DINÁMICA BASADA EN REQHEIGHT PARA AJUSTARSE PERFECTO:
+        req_h = min(self.ventana.winfo_reqheight() + 40, 700) 
         sw = self.ventana.winfo_screenwidth()
         sh = self.ventana.winfo_screenheight()
         x = (sw - req_w) // 2
         y = (sh - req_h) // 2
+        
+        # Permitir redimensionar si la pantalla es muy chica
+        if req_h >= sh - 50:
+            self.ventana.resizable(True, True)
+        
         self.ventana.geometry(f"{req_w}x{req_h}+{x}+{y}")
         
         configurar_navegacion_ventana(self.ventana)
@@ -51,55 +62,28 @@ class VentanaPago:
         self.ventana.wait_window()
 
     def _crear_widgets(self):
-        """Crear todos los widgets de la ventana"""
-        main_frame = tk.Frame(self.ventana, bg="#f4f4f8", padx=25, pady=25)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        import customtkinter as ctk
+        col_border = "#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#374151"
+        font_title = ("Segoe UI", 16, "bold")
+        font_normal = ("Segoe UI", 15)
 
-        # 🔥 TÍTULO MODERNO
-        titulo = tk.Label(
-            main_frame,
-            text="Método de Pago",
-            font=("Segoe UI", 16, "bold"),
-            bg="#f4f4f8",
-            fg="#1f2937"
-        )
-        titulo.pack(pady=(0, 25))
+        main_frame = ctk.CTkFrame(self.ventana, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=15)
 
-        # 🔥 FRAME TOTAL (BLANCO CON SOMBRA SUTIL)
-        frame_total = tk.Frame(main_frame, bg="#ffffff", relief="flat", bd=0)
-        frame_total.pack(fill=tk.X, pady=(0, 20))
+        ctk.CTkLabel(main_frame, text="Confirmación de Pago", font=("Segoe UI", 20, "bold"), text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").pack(pady=(0, 10))
+
+        frame_total = ctk.CTkFrame(main_frame, fg_color=self.col_card, corner_radius=10, border_color=col_border, border_width=1)
+        frame_total.pack(fill="x", pady=(0, 15))
         
-        tk.Label(
-            frame_total,
-            text="TOTAL A PAGAR",
-            font=("Segoe UI", 11),
-            bg="#ffffff",
-            fg="#6b7280"
-        ).pack(pady=(15, 5))
+        ctk.CTkLabel(frame_total, text="TOTAL A PAGAR", font=("Segoe UI", 14, "bold"), text_color="#6b7280").pack(pady=(10, 2))
+        ctk.CTkLabel(frame_total, text=f"$ {self.total_venta:,.2f}", font=("Segoe UI", 42, "bold"), text_color="#10b981").pack(pady=(0, 10))
 
-        total_label = tk.Label(
-            frame_total,
-            text=f"$ {self.total_venta:,.2f}",
-            font=("Segoe UI", 28, "bold"),
-            bg="#ffffff",
-            fg="#059669"
-        )
-        total_label.pack(pady=(0, 15))
-
-        # 🔥 MÉTODOS DE PAGO (FRAME BLANCO)
-        frame_metodo = tk.Frame(main_frame, bg="#ffffff", relief="flat", bd=0, padx=20, pady=15)
-        frame_metodo.pack(fill=tk.X, pady=(0, 15))
+        frame_metodo = ctk.CTkFrame(main_frame, fg_color=self.col_card, corner_radius=10, border_color=col_border, border_width=1)
+        frame_metodo.pack(fill="x", pady=(0, 15))
         
-        tk.Label(
-            frame_metodo,
-            text="Seleccione el método:",
-            font=("Segoe UI", 11, "bold"),
-            bg="#ffffff",
-            fg="#1f2937"
-        ).pack(anchor=tk.W, pady=(0, 10))
+        ctk.CTkLabel(frame_metodo, text="Seleccione el método:", font=font_title, text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").pack(anchor="w", padx=20, pady=(15, 10))
 
         self.metodo_var = tk.StringVar(value="efectivo")
-
         metodos = [
             ("💵 Efectivo", "efectivo"),
             ("💳 Tarjeta Débito/Crédito", "tarjeta"),
@@ -107,90 +91,32 @@ class VentanaPago:
         ]
         
         for texto, valor in metodos:
-            rb = tk.Radiobutton(
-                frame_metodo, 
-                text=texto,
-                variable=self.metodo_var, 
-                value=valor,
-                command=self._cambio_metodo,
-                bg="#ffffff",
-                fg="#374151",
-                font=("Segoe UI", 10),
-                activebackground="#ffffff",
-                activeforeground="#1f2937",
-                selectcolor="#ffffff",
-                cursor="hand2"
-            )
-            rb.pack(anchor=tk.W, pady=3)
+            ctk.CTkRadioButton(frame_metodo, text=texto, variable=self.metodo_var, value=valor, command=self._cambio_metodo, font=font_normal, fg_color="#3b82f6", text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(anchor="w", padx=25, pady=6)
 
-        rb_cc = tk.Radiobutton(
-            frame_metodo,
-            text="📋 Cuenta Corriente",
-            variable=self.metodo_var,
-            value="cuenta_corriente",
-            command=self._cambio_metodo,
-            bg="#ffffff",
-            fg="#374151",
-            font=("Segoe UI", 10),
-            activebackground="#ffffff",
-            activeforeground="#1f2937",
-            selectcolor="#ffffff",
-            cursor="hand2"
-        )
-        rb_cc.pack(anchor=tk.W, pady=3)
+        self.rb_cc = ctk.CTkRadioButton(frame_metodo, text="📋 Cuenta Corriente", variable=self.metodo_var, value="cuenta_corriente", command=self._cambio_metodo, font=font_normal, fg_color="#3b82f6", text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white")
+        self.rb_cc.pack(anchor="w", padx=25, pady=(6, 15))
         
         if not self.cliente_seleccionado:
-            rb_cc.config(state="disabled", text="📋 Cuenta Corriente (Debe elegir un cliente)", fg="#9ca3af")
+            self.rb_cc.configure(state="disabled", text="📋 Cuenta Corriente (Debe elegir un cliente)", text_color="#9ca3af")
 
-        # 🔥 FRAME EFECTIVO (BLANCO)
-        self.frame_efectivo = tk.Frame(main_frame, bg="#ffffff", relief="flat", bd=0, padx=20, pady=15)
-        self.frame_efectivo.pack(fill=tk.X, pady=(0, 20))
+        self.frame_efectivo = ctk.CTkFrame(main_frame, fg_color=self.col_card, corner_radius=10, border_color=col_border, border_width=1)
+        # No se empaqueta todavía, _cambio_metodo lo hace.
 
-        tk.Label(
-            self.frame_efectivo,
-            text="Detalles del pago en efectivo:",
-            font=("Segoe UI", 10, "bold"),
-            bg="#ffffff",
-            fg="#1f2937"
-        ).pack(anchor=tk.W, pady=(0, 10))
-
-        frame_paga = tk.Frame(self.frame_efectivo, bg="#ffffff")
-        frame_paga.pack(fill=tk.X, pady=8)
-        
-        tk.Label(
-            frame_paga, 
-            text="Paga con:", 
-            width=12,
-            bg="#ffffff",
-            fg="#374151",
-            font=("Segoe UI", 10)
-        ).pack(side=tk.LEFT)
+        ctk.CTkLabel(self.frame_efectivo, text="Paga con:", font=font_title, text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").grid(row=0, column=0, padx=(15, 5), pady=(15, 5), sticky="w")
         
         def validar_float(texto):
             if texto == "": return True
+            import re
             if not re.match(r'^[0-9]*\.?[0-9]*$', texto): return False
-            try:
-                tope = self._sugerir_pago(self.total_venta)
-                if float(texto) > tope: return False
-            except: pass
             return True
 
-        vcmd = (self.ventana.register(validar_float), '%P')
+        self.entry_paga = ctk.CTkEntry(self.frame_efectivo, font=("Segoe UI", 18, "bold"), width=180, height=50, justify="center")
+        vc_paga = (self.register(validar_decimal), '%P')
+        self.entry_paga.configure(validate="key", validatecommand=vc_paga)
+        self.entry_paga.grid(row=0, column=1, padx=10, pady=(20, 10), sticky="w")
         
-        self.entry_paga = tk.Entry(
-            frame_paga, 
-            font=("Segoe UI", 13), 
-            width=15, 
-            validate="key", 
-            validatecommand=vcmd,
-            relief="solid",
-            bd=1,
-            bg="#ffffff"
-        )
-        self.entry_paga.pack(side=tk.LEFT, padx=8)
         def _on_key_paga(event=None):
             self._calcular_vuelto()
-            # Aplicar tope DESPUÉS de escribir, no mientras
             try:
                 val = float(self.entry_paga.get().replace(",", "."))
                 tope = self._sugerir_pago(self.total_venta)
@@ -203,68 +129,21 @@ class VentanaPago:
         self.entry_paga.bind("<KeyRelease>", _on_key_paga)
         self.entry_paga.bind("<Return>", lambda e: self._confirmar())
 
-        frame_vuelto = tk.Frame(self.frame_efectivo, bg="#ffffff")
-        frame_vuelto.pack(fill=tk.X, pady=8)
-        
-        tk.Label(
-            frame_vuelto, 
-            text="Vuelto:", 
-            width=12,
-            bg="#ffffff",
-            fg="#374151",
-            font=("Segoe UI", 10)
-        ).pack(side=tk.LEFT)
-        
-        self.label_vuelto = tk.Label(
-            frame_vuelto, 
-            text="$ 0.00", 
-            font=("Segoe UI", 16, "bold"), 
-            bg="#ffffff",
-            fg="#3b82f6"
-        )
-        self.label_vuelto.pack(side=tk.LEFT, padx=8)
+        ctk.CTkLabel(self.frame_efectivo, text="Vuelto:", font=font_title, text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").grid(row=1, column=0, padx=(15, 5), pady=(5, 15), sticky="w")
+        self.label_vuelto = ctk.CTkLabel(self.frame_efectivo, text="$ 0.00", font=("Segoe UI", 20, "bold"), text_color="#3b82f6")
+        self.label_vuelto.grid(row=1, column=1, padx=5, pady=(5, 15), sticky="w")
 
-        # 🔥 BOTONES ESTILO NUEVO
-        frame_botones = tk.Frame(main_frame, bg="#f4f4f8")
-        frame_botones.pack(fill=tk.X, pady=(15, 0))
+        self.frame_botones = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self.frame_botones.pack(fill="x", side="bottom", pady=(5, 10))
         
-        btn_cancelar = tk.Button(
-            frame_botones, 
-            text="Cancelar", 
-            command=self._cancelar,
-            bg="#6b7280",
-            fg="white",
-            font=("Segoe UI", 10),
-            relief="flat",
-            padx=20,
-            pady=10,
-            cursor="hand2",
-            activebackground="#4b5563",
-            activeforeground="white"
-        )
-        btn_cancelar.pack(side=tk.RIGHT, padx=5)
-        
-        btn_confirmar = tk.Button(
-            frame_botones, 
-            text="✓ Confirmar Pago", 
-            command=self._confirmar,
-            bg="#10b981",
-            fg="white",
-            font=("Segoe UI", 11, "bold"),
-            relief="flat",
-            padx=25,
-            pady=10,
-            cursor="hand2",
-            activebackground="#059669",
-            activeforeground="white"
-        )
-        btn_confirmar.pack(side=tk.RIGHT, padx=5)
+        ctk.CTkButton(self.frame_botones, text="Cancelar", command=self._cancelar, fg_color="#ef4444", hover_color="#dc2626", font=font_title, width=130, height=45).pack(side="left")
+        ctk.CTkButton(self.frame_botones, text="✓ Confirmar Pago", command=self._confirmar, fg_color="#10b981", hover_color="#059669", font=font_title, width=180, height=45).pack(side="right")
 
         self._cambio_metodo()
 
     def _cambio_metodo(self):
         if self.metodo_var.get() == "efectivo":
-            self.frame_efectivo.pack(fill=tk.X, pady=(0, 20))
+            self.frame_efectivo.pack(fill="x", pady=(0, 10), before=self.frame_botones if hasattr(self, 'frame_botones') else None)
             self.entry_paga.delete(0, tk.END)
             sugerido = self._sugerir_pago(self.total_venta)
             self.entry_paga.insert(0, str(sugerido))
@@ -278,19 +157,19 @@ class VentanaPago:
         try:
             monto_str = self.entry_paga.get().strip().replace(",", ".")
             if not monto_str:
-                self.label_vuelto.config(text="$ 0.00", fg="#3b82f6")
+                self.label_vuelto.configure(text="$ 0.00", text_color="#3b82f6")
                 return
             
             monto_pagado = float(monto_str)
             diferencia = round(monto_pagado - self.total_venta, 2)
             
             if diferencia < 0:
-                self.label_vuelto.config(text=f"$ {abs(diferencia):,.2f} (FALTA)", fg="#ef4444")
+                self.label_vuelto.configure(text=f"$ {abs(diferencia):,.2f} (FALTA)", text_color="#ef4444")
             else:
-                self.label_vuelto.config(text=f"$ {diferencia:,.2f}", fg="#10b981")
+                self.label_vuelto.configure(text=f"$ {diferencia:,.2f}", text_color="#10b981")
                 
         except ValueError:
-            self.label_vuelto.config(text="$ 0.00", fg="#3b82f6")
+            self.label_vuelto.configure(text="$ 0.00", text_color="#3b82f6")
 
     def _confirmar(self):
         tipo_pago = self.metodo_var.get()

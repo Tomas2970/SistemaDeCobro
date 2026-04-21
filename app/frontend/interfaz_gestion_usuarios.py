@@ -12,51 +12,40 @@ except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
-    win = tk.Toplevel(parent)
+    import customtkinter as ctk
+    from app.frontend.theme_config import get_color, configurar_estilo_treeview
+    
+    # 🔥 CARGA DE ESTILOS Y COLORES
+    configurar_estilo_treeview()
+    col_bg = get_color("bg_root")
+    col_card = get_color("bg_surface")
+    col_text = get_color("text_primary")
+    col_input_bg = "#374151"
+    col_input_fg = "#ffffff"
+    col_border = "#2d3748"
+
+    win = ctk.CTkToplevel(parent)
     win.title("Gestión de Usuarios")
     win.geometry("1150x680") 
-    win.config(bg="#f4f4f8")
+    win.configure(fg_color=col_bg)
     win.resizable(False, False)
 
-    # ESTILOS MODERNOS (Los que vos definiste)
-    style = ttk.Style()
-    style.theme_use('clam')
-    
-    style.configure("Modern.Treeview",
-                    background="#ffffff",
-                    foreground="#1f2937",
-                    rowheight=32,
-                    fieldbackground="#ffffff",
-                    borderwidth=0,
-                    font=('Segoe UI', 10))
-    
-    style.configure("Modern.Treeview.Heading",
-                    background="#f3f4f6",
-                    foreground="#374151",
-                    relief="flat",
-                    borderwidth=1,
-                    font=('Segoe UI', 10, 'bold'))
-    
-    style.map("Modern.Treeview.Heading",
-              background=[('active', '#e5e7eb')])
-
     # BARRA DE BÚSQUEDA
-    frame_busqueda = tk.Frame(win, bg="#f4f4f8")
-    frame_busqueda.pack(pady=(15,0), padx=20, fill="x")
+    frame_busqueda = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_busqueda.pack(pady=(20, 5), padx=25, fill="x")
     
-    tk.Label(frame_busqueda, text="🔍", bg="#f4f4f8", font=("Segoe UI", 14)).pack(side=tk.LEFT)
-    tk.Label(frame_busqueda, text="Buscar:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(5,10))
+    ctk.CTkLabel(frame_busqueda, text="🔍 Buscar Usuario:", font=("Segoe UI", 13, "bold"), text_color=col_text).pack(side="left", padx=15, pady=15)
     var_busqueda = tk.StringVar()
-    entry_busqueda = tk.Entry(frame_busqueda, textvariable=var_busqueda, width=35, font=("Segoe UI", 10))
-    entry_busqueda.pack(side=tk.LEFT)
+    entry_busqueda = ctk.CTkEntry(frame_busqueda, textvariable=var_busqueda, font=("Segoe UI", 13), width=350, height=40, placeholder_text="Nombre de usuario o rol...")
+    entry_busqueda.pack(side="left", padx=10, pady=15)
 
     # TREEVIEW
-    frame_lista = tk.Frame(win, bg="#f4f4f8")
-    frame_lista.pack(pady=10, padx=20, fill="both", expand=True)
+    frame_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_lista.pack(pady=10, padx=25, fill="both", expand=True)
 
     cols = ["ID", "Nombre", "Rol", "Fecha Creación", "Último Acceso", "Activo"]
-    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=12, style="Modern.Treeview")
-    tree.pack(side="left", fill="both", expand=True)
+    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=8, style="Modern.Treeview")
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
     ys.pack(side="right", fill="y")
@@ -64,12 +53,13 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     
     for c in cols: tree.heading(c, text=c)
     
-    tree.column("ID", width=0, minwidth=0, stretch=False)
+    tree.column("ID", width=0, stretch=False)
     tree.column("Nombre", width=200)
     tree.column("Rol", width=150)
     tree.column("Fecha Creación", width=180, anchor="center")
     tree.column("Último Acceso", width=180, anchor="center")
     tree.column("Activo", width=80, anchor="center")
+    tree.configure(displaycolumns=[c for c in cols if c != "ID"])
 
     tree.tag_configure("activo", foreground="#16a34a")
     tree.tag_configure("inactivo", foreground="#dc2626")
@@ -166,20 +156,31 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     # 🔥 RECUPERADO: TU FUNCIÓN DE DOBLE CLIC
     tree.bind("<Double-1>", lambda e: abrir_editar())
 
-    # FRAME DE BOTONES (TU LAYOUT ORIGINAL)
-    frame_botones = tk.Frame(win, bg="#f4f4f8", height=80)
-    frame_botones.pack(pady=15, fill="x", padx=20)
-    frame_botones.pack_propagate(False)
+    # FRAME DE BOTONES
+    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
+    frame_botones.pack(pady=(5, 20), fill="x", padx=25)
 
-    frame_acciones = tk.Frame(frame_botones, bg="#f4f4f8")
-    frame_acciones.pack(side=tk.LEFT, anchor="w")
+    ctk.CTkButton(frame_botones, text="➕ Crear Usuario", command=accion_nuevo, fg_color="#16a34a", hover_color="#15803d", font=("Segoe UI", 12, "bold"), width=150, height=45).pack(side=tk.LEFT, padx=10)
+    
+    def accion_desactivar():
+        sel = tree.selection()
+        if not sel: 
+            messagebox.showwarning("Atención", "Seleccione un usuario.", parent=win)
+            return
+        item = tree.item(sel[0], "values")
+        if messagebox.askyesno("Confirmar", f"¿Desactivar al usuario {item[1]}?", parent=win):
+            try:
+                if backend.desactivar_usuario(int(item[0])):
+                    cargar_datos()
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=win)
 
-    tk.Button(frame_acciones, text="➕ Crear Usuario", command=accion_nuevo, bg="#16a34a", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=10).pack(side=tk.LEFT, padx=5)
-    tk.Button(frame_acciones, text="🗑️ Desactivar", command=lambda: messagebox.showinfo("Info", "Funcionalidad de desactivar"), bg="#dc2626", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=10).pack(side=tk.LEFT, padx=5)
-
+    ctk.CTkButton(frame_botones, text="🗑️ Desactivar", command=accion_desactivar, fg_color="#dc2626", hover_color="#b91c1c", font=("Segoe UI", 12, "bold"), width=130, height=45).pack(side=tk.LEFT, padx=5)
+    
     # CHECKBOX Y CERRAR
-    tk.Checkbutton(frame_botones, text="Ver Inactivos", variable=var_mostrar_inactivos, bg="#f4f4f8", command=cargar_datos).pack(side=tk.LEFT, padx=20)
-    tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#64748b", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=10).pack(side=tk.RIGHT)
+    ctk.CTkCheckBox(frame_botones, text="Inactivos", variable=var_mostrar_inactivos, font=("Segoe UI", 11), command=cargar_datos, width=100).pack(side=tk.LEFT, padx=10)
+    
+    ctk.CTkButton(frame_botones, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 12, "bold"), width=100, height=45).pack(side=tk.RIGHT, padx=10)
 
     cargar_datos()
     entry_busqueda.focus_set()

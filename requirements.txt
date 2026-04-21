@@ -13,6 +13,9 @@ python-dotenv==1.0.0
 # Utilidades
 python-dateutil==2.8.2
 
+# Interfaz gráfica (NUEVO)
+customtkinter>=5.2.2
+darkdetect>=0.8.0
 
 # Impresora térmica (OPCIONAL - solo si tienes impresora física)
 # Descomenta la siguiente línea si vas a usar impresora:

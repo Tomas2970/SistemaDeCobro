@@ -4,6 +4,7 @@
 import tkinter as tk
 from tkinter import ttk
 import re
+import unicodedata
 
 # ============================================================================
 # 🔒 VALIDADORES DE TECLADO (KEY PRESS) - Bloquean caracteres inválidos
@@ -21,7 +22,6 @@ class ValidadoresTeclado:
     def solo_letras(nuevo_valor: str) -> bool:
         """Solo permite letras, espacios y tildes."""
         # Incluye tildes, ñ y caracteres especiales latinos
-        import unicodedata
         if nuevo_valor == "":
             return True
         for c in nuevo_valor:
@@ -250,13 +250,13 @@ class EntryValidado(tk.Entry):
         else:
             return  # Sin validación visual para otros tipos
         
-        # Actualizar color del Entry
+        # Actualizar color del Entry (Ajustado para Dark Mode)
         if contenido.strip() == "":
             self.config(bg=self.color_original)
         elif valido:
-            self.config(bg="#d1fae5")  # Verde claro
+            self.config(bg="#064e3b")  # Verde oscuro
         else:
-            self.config(bg="#fee2e2")  # Rojo claro
+            self.config(bg="#7f1d1d")  # Rojo oscuro
         
         # Actualizar label de feedback si existe
         if self.label_feedback:
@@ -315,7 +315,7 @@ def crear_campo_validado(parent, label_texto: str, tipo_validacion: str, fila: i
     """
     # Label del campo
     texto_final = f"{label_texto} (*)" if obligatorio else label_texto
-    tk.Label(parent, text=texto_final, bg="#f4f4f8", anchor="w").grid(
+    tk.Label(parent, text=texto_final, bg="#111827", fg="white", anchor="w").grid(
         row=fila, column=0, sticky="ew", pady=5, padx=(0, 10)
     )
     
@@ -324,7 +324,7 @@ def crear_campo_validado(parent, label_texto: str, tipo_validacion: str, fila: i
     entry.grid(row=fila, column=1, sticky="ew", pady=5)
     
     # Label de feedback
-    lbl_feedback = tk.Label(parent, text="", bg="#f4f4f8", font=("Segoe UI", 8), anchor="w")
+    lbl_feedback = tk.Label(parent, text="", bg="#111827", fg="#9ca3af", font=("Segoe UI", 8), anchor="w")
     lbl_feedback.grid(row=fila, column=2, sticky="w", padx=(5, 0))
     
     entry.asociar_label_feedback(lbl_feedback)

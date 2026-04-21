@@ -46,47 +46,15 @@ echo.
 echo [2/4] Limpiando compilaciones anteriores...
 rmdir /s /q build  2>NUL
 rmdir /s /q dist   2>NUL
-REM Borramos el spec viejo para forzar que tome la nueva configuracion
-del /q SistemaCobrosDonAtilio.spec 2>NUL
+REM Ya no borraremos el spec viejo, usaremos SistemaCobrosDonAtilio.spec
 
 echo.
 echo [3/4] Compilando aplicacion...
 
-REM === VERIFICAR QUE EXISTE logo.ico ===
-if not exist "logo.ico" (
-  echo ADVERTENCIA: No se encuentra logo.ico en el directorio actual
-  echo Se usara el icono por defecto de Python
-  set "ICON_PARAM="
-) else (
-  echo Icono detectado: logo.ico
-  set "ICON_PARAM=--icon=logo.ico"
-)
+REM === COMPILACION USANDO EL ARCHIVO .SPEC MEJORADO ===
+echo Generando compilacion incluyendo recursos de CustomTkinter...
 
-REM === COMPILACION CON ICONO Y CARPETA APP COMPLETA ===
-echo Generando compilacion con imports ocultos e icono...
-
-python -m PyInstaller --noconsole --onefile %ICON_PARAM% --name SistemaCobrosDonAtilio ^
-  --hidden-import=app.frontend.interfaz_gestion_proveedores ^
-  --hidden-import=app.frontend.interfaz_crear_proveedor ^
-  --hidden-import=app.frontend.interfaz_asignar_productos ^
-  --hidden-import=app.frontend.interfaz_categorias ^
-  --hidden-import=app.frontend.interfaz_gestion_usuarios ^
-  --hidden-import=app.frontend.interfaz_crear_usuario ^
-  --hidden-import=app.frontend.interfaz_gestion_clientes ^
-  --hidden-import=app.frontend.interfaz_crear_cliente ^
-  --hidden-import=app.frontend.interfaz_inventario ^
-  --hidden-import=app.frontend.interfaz_productos ^
-  --hidden-import=app.frontend.interfaz_venta ^
-  --hidden-import=app.frontend.interfaz_reportes ^
-  --hidden-import=app.frontend.interfaz_cuenta_corriente ^
-  --hidden-import=app.frontend.interfaz_compra ^
-  --hidden-import=app.frontend.interfaz_historiales ^
-  --hidden-import=mysql.connector.plugins.caching_sha2_password ^
-  --hidden-import=bcrypt ^
-  --hidden-import=mysql.connector ^
-  --hidden-import=dotenv ^
-  --add-data "app;app" ^
-  app\main.py
+python -m PyInstaller --clean SistemaCobrosDonAtilio.spec
 
 if errorlevel 1 (
   echo ERROR: PyInstaller reporto un error durante la compilacion.

@@ -10,64 +10,45 @@ except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_proveedor: str):
-    """Nueva interfaz de asignación rápida con Checkboxes simulados en Treeview"""
-    win = Toplevel(parent)
-    win.title(f"Asignar Productos a: {nombre_proveedor}")
-    win.geometry("750x650")
-    win.config(bg="#f4f4f8")
-    win.resizable(False, True)
+    import customtkinter as ctk
+    from app.frontend.theme_config import get_color, configurar_estilo_treeview
+    
+    # 🔥 CARGA DE ESTILOS Y COLORES
+    configurar_estilo_treeview()
+    col_bg = get_color("bg_root")
+    col_card = get_color("bg_surface")
+    col_text = get_color("text_primary")
+    col_input_bg = "#374151"
+    col_input_fg = "#ffffff"
+    col_border = "#2d3748"
 
-    # 🔥 ESTILOS MODERNOS
-    style = ttk.Style()
-    style.theme_use('clam')
-    
-    style.configure("Modern.Treeview",
-                    background="#ffffff",
-                    foreground="#1f2937",
-                    rowheight=32,
-                    fieldbackground="#ffffff",
-                    borderwidth=0,
-                    font=('Segoe UI', 10))
-    
-    style.configure("Modern.Treeview.Heading",
-                    background="#f3f4f6",
-                    foreground="#374151",
-                    relief="flat",
-                    borderwidth=1,
-                    font=('Segoe UI', 10, 'bold'))
+    win = ctk.CTkToplevel(parent)
+    win.title(f"Asignar Productos a: {nombre_proveedor}")
+    win.geometry("800x700")
+    win.configure(fg_color=col_bg)
+    win.resizable(False, True)
 
     memoria_productos = {}
     
     # --- 1. Header y Búsqueda ---
-    frame_top = tk.Frame(win, bg="#ffffff", pady=12, padx=15)
-    frame_top.pack(fill=tk.X, padx=10, pady=(10, 5))
+    frame_top = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_top.pack(fill=tk.X, padx=20, pady=(20, 5))
     
-    tk.Label(
-        frame_top, 
-        text="Buscar Producto:", 
-        bg="#ffffff",
-        font=("Segoe UI", 10, "bold"),
-        fg="#1f2937"
-    ).pack(side=tk.LEFT, padx=5)
-    
+    ctk.CTkLabel(frame_top, text="🔍 Buscar Producto:", font=("Segoe UI", 13, "bold"), text_color=col_text).pack(side="left", padx=15, pady=15)
     var_buscar = tk.StringVar()
-    ent_buscar = tk.Entry(frame_top, textvariable=var_buscar, width=40, font=("Segoe UI", 10))
-    ent_buscar.pack(side=tk.LEFT, padx=10)
     
-    tk.Label(
-        frame_top, 
-        text="(Doble Clic o Espacio para marcar/desmarcar)", 
-        bg="#ffffff", 
-        fg="#6b7280",
-        font=("Segoe UI", 9)
-    ).pack(side=tk.LEFT)
+    ent_buscar = ctk.CTkEntry(frame_top, textvariable=var_buscar, font=("Segoe UI", 12), width=300, height=38, placeholder_text="Buscar producto...")
+    ent_buscar.pack(side="left", padx=15)
+    
+    ctk.CTkLabel(frame_top, text="(Espacio p/ marcar)", font=("Segoe UI", 11), text_color="#9ca3af").pack(side="left", padx=10)
 
     # --- 2. Lista Central (Treeview) ---
-    frame_lista = tk.Frame(win, bg="#f4f4f8", padx=10)
-    frame_lista.pack(fill=tk.BOTH, expand=True)
+    frame_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_lista.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
     cols = ("Estado", "ID", "Producto", "Categoría")
     tree = ttk.Treeview(frame_lista, columns=cols, show="headings", selectmode="browse", style="Modern.Treeview")
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     tree.heading("Estado", text="Selección")
     tree.heading("ID", text="ID")
@@ -186,37 +167,11 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
             messagebox.showerror("Error crítico", f"Falló el guardado: {e}", parent=win)
 
     # --- 3. Botones Inferiores ---
-    frame_btns = tk.Frame(win, bg="#f4f4f8", pady=15)
-    frame_btns.pack(fill=tk.X, side=tk.BOTTOM)
+    frame_btns = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_btns.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=(5, 20))
     
-    # 🔥 BOTONES ESTILO NUEVO
-    tk.Button(
-        frame_btns, 
-        text="Cancelar", 
-        command=win.destroy, 
-        bg="#6b7280", 
-        fg="white",
-        font=("Segoe UI", 10),
-        relief="flat",
-        padx=15,
-        pady=10,
-        cursor="hand2",
-        activebackground="#4b5563"
-    ).pack(side=tk.RIGHT, padx=10)
-    
-    tk.Button(
-        frame_btns, 
-        text="✓ Guardar Cambios", 
-        command=guardar_cambios, 
-        bg="#10b981", 
-        fg="white", 
-        font=("Segoe UI", 11, "bold"),
-        relief="flat",
-        padx=25,
-        pady=10,
-        cursor="hand2",
-        activebackground="#059669"
-    ).pack(side=tk.RIGHT, padx=10)
+    ctk.CTkButton(frame_btns, text="✓ Guardar Cambios", command=guardar_cambios, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 15, "bold"), width=200, height=45).pack(side="left", padx=20, pady=20)
+    ctk.CTkButton(frame_btns, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 14, "bold"), width=120, height=45).pack(side="right", padx=20, pady=20)
 
     cargar_datos_iniciales()
     configurar_navegacion_ventana(win)

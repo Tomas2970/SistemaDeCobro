@@ -5,18 +5,19 @@ from tkinter import ttk, messagebox, Toplevel, Listbox, SINGLE
 from datetime import date, datetime, timedelta
 import logging
 from typing import Any
+import customtkinter as ctk
 
 try:
-    from frontend.componentes_ui import EntryDecimal, SelectorFecha
-    from frontend.navegacion_teclado_comun import configurar_navegacion_ventana
-    from database.permisos import tiene_permiso
-    from frontend.interfaz_historiales import Historiales
+    from app.frontend.componentes_ui import EntryDecimal, SelectorFecha
+    from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+    from app.database.permisos import tiene_permiso
+    from app.frontend.interfaz_historiales import Historiales
 except ImportError:
-    class EntryDecimal(tk.Entry): pass
-    class SelectorFecha(tk.Frame):
+    class EntryDecimal(ctk.CTkEntry): pass
+    class SelectorFecha(ctk.CTkFrame):
         def __init__(self, master, **kw):
-            super().__init__(master, **kw)
-            self.widget_entrada = tk.Entry(self)
+            super().__init__(master, fg_color="transparent", **kw)
+            self.widget_entrada = ctk.CTkEntry(self)
             self.widget_entrada.pack()
         def get_date_sql(self): return None
     def configurar_navegacion_ventana(win): pass
@@ -30,7 +31,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-def _fmt(v): return f"$ {float(v):,.2f}"
+def _fmt(v):
+    try:
+        return f"$ {float(v or 0):,.2f}"
+    except (TypeError, ValueError):
+        return "$ 0.00"
 
 def _darken_color(hex_color):
     colors = {
@@ -45,29 +50,24 @@ def _darken_color(hex_color):
     return colors.get(hex_color, hex_color)
 
 def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja'):
-    win = tk.Toplevel(parent)
-    win.config(bg="#f4f4f8")
+    win = ctk.CTkToplevel(parent)
     
-    style = ttk.Style()
-    style.theme_use('clam')
+    from app.frontend.theme_config import configurar_estilo_treeview, get_color
+    configurar_estilo_treeview()
+    
+    col_bg = get_color("bg_root")
+    col_card = get_color("bg_surface")
+    col_text = get_color("text_primary")
+    col_input_bg = "#374151"
+    col_input_fg = "#ffffff"
 
-    style.configure("Modern.Treeview",
-                    background="#ffffff",
-                    foreground="#1f2937",
-                    rowheight=32,
-                    fieldbackground="#ffffff",
-                    borderwidth=0,
-                    font=('Segoe UI', 10))
-
-    style.configure("Modern.Treeview.Heading",
-                    background="#f3f4f6",
-                    foreground="#374151",
-                    relief="flat",
-                    borderwidth=1,
-                    font=('Segoe UI', 10, 'bold'))
-
-    style.map("Modern.Treeview.Heading",
-              background=[('active', '#e5e7eb')])
+    win.configure(fg_color=col_bg)
+    win.col_bg = col_bg
+    win.col_card = col_card
+    win.col_text = col_text
+    win.col_input_bg = col_input_bg
+    win.col_input_fg = col_input_fg
+    win.col_border = "#2d3748"  # Definido para evitar crash en paneles internos
 
     win.var_vendedor_sel = {"id": None, "nombre": "(Todos)"}
     win.vendedores_full_list = backend.obtener_vendedores() 
@@ -85,27 +85,27 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja
     win.grab_set()
 
 def _crear_selector_entidad_reportes(win: tk.Toplevel, tipo: str, var_seleccion: dict, lista_datos: list):
-    popup = Toplevel(win)
+    popup = ctk.CTkToplevel(win)
     popup.title(f"Seleccionar {tipo}")
-    popup.geometry("500x450")
-    popup.config(bg="#f4f4f8")
+    popup.geometry("500x480")
+    popup.configure(fg_color=win.col_bg)
     
     configurar_navegacion_ventana(popup)
 
-    tk.Label(popup, text=f"Buscar {tipo} (ID/Nombre):", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
     var_pat = tk.StringVar()
-    ent = tk.Entry(popup, textvariable=var_pat, width=40, font=("Segoe UI", 10))
-    ent.pack(pady=5, padx=15, fill=tk.X)
+    ctk.CTkLabel(popup, text=f"Buscar {tipo} (ID/Nombre):", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(pady=(15,5), padx=15, anchor="w")
+    ent = ctk.CTkEntry(popup, textvariable=var_pat, font=("Segoe UI", 13), height=40, placeholder_text="Buscar por ID o Nombre...")
+    ent.pack(fill="x", padx=15, pady=5)
     
-    frame_list = tk.Frame(popup)
-    frame_list.pack(expand=True, fill="both", padx=15, pady=5)
-    sc = tk.Scrollbar(frame_list)
-    sc.pack(side="right", fill="y")
+    frame_list = ctk.CTkFrame(popup, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
+    frame_list.pack(expand=True, fill="both", padx=15, pady=10)
     
     cols = ("ID", "Nombre")
     tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
-    tree_sel.pack(side="left", fill="both", expand=True)
-    sc.config(command=tree_sel.yview)
+    tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+    
+    sc = ttk.Scrollbar(frame_list, command=tree_sel.yview)
+    sc.pack(side="right", fill="y", pady=5)
     tree_sel.configure(yscrollcommand=sc.set)
     
     tree_sel.column("ID", width=60, anchor="center")
@@ -151,25 +151,16 @@ def _crear_selector_entidad_reportes(win: tk.Toplevel, tipo: str, var_seleccion:
             var_seleccion["nombre"] = vals[1]
         popup.destroy()
         if hasattr(win, 'lbl_vend_sel'):
-             win.lbl_vend_sel.config(text=win.var_vendedor_sel['nombre'])
+             win.lbl_vend_sel.configure(text=win.var_vendedor_sel['nombre'])
 
     tree_sel.bind("<Double-1>", tomar)
     tree_sel.bind("<Return>", tomar)
 
-    btn_frm = tk.Frame(popup, bg="#f4f4f8")
-    btn_frm.pack(pady=10)
+    btn_frm = ctk.CTkFrame(popup, fg_color="transparent")
+    btn_frm.pack(fill="x", side="bottom", padx=15, pady=(5, 15))
     
-    btn_sel = tk.Button(btn_frm, text="✓ Seleccionar", command=tomar, 
-                       bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
-                       relief="flat", padx=20, pady=8, cursor="hand2",
-                       activebackground="#059669")
-    btn_sel.pack(side="left", padx=5)
-    
-    btn_canc = tk.Button(btn_frm, text="Cancelar", command=popup.destroy,
-                        bg="#6b7280", fg="white", font=("Segoe UI", 10),
-                        relief="flat", padx=15, pady=8, cursor="hand2",
-                        activebackground="#4b5563")
-    btn_canc.pack(side="left", padx=5)
+    ctk.CTkButton(btn_frm, text="Cancelar", command=popup.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
+    ctk.CTkButton(btn_frm, text="✓ Seleccionar", command=tomar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), width=180, height=45).pack(side="right", padx=10)
     
     popup.after(100, lambda: ent.focus_set())
     popup.grab_set()
@@ -178,33 +169,40 @@ def _crear_selector_entidad_reportes(win: tk.Toplevel, tipo: str, var_seleccion:
 
 # --- PANEL DE CAJA ---
 def _construir_panel_caja(win, backend, usuario):
-    body = tk.Frame(win, bg="#f4f4f8", padx=20, pady=20)
-    body.pack(fill="both", expand=True)
+    body = ctk.CTkFrame(win, fg_color="transparent")
+    body.pack(fill="both", expand=True, padx=20, pady=20)
 
     session_actual = None
     puede_gestionar = tiene_permiso(usuario, 'abrir_caja')
+    ent_monto = None  # Se define en el bloque puede_gestionar
     
-    pnl_cerrada = tk.Frame(body, bg="#f4f4f8")
-    pnl_abierta = tk.Frame(body, bg="#f4f4f8")
+    pnl_cerrada = ctk.CTkFrame(body, fg_color="transparent")
+    pnl_abierta = ctk.CTkFrame(body, fg_color="transparent")
 
     def actualizar_dashboard():
         if not session_actual: return
         data = backend.obtener_resumen_cierre(session_actual['id_session'])
         if not data: return
-        lbls_val['inicial'].config(text=_fmt(data['monto_inicial']))
+        
+        lbls_val['inicial'].configure(text=_fmt(data['monto_inicial']))
+        
+        # 🔥 CORRECCIÓN: Los ingresos principales reflejan LIQUIDEZ (Efectivo + Tarjetas + Transf)
+        # pero EXCLUYEN Cuenta Corriente por ser deuda no cobrada.
         medios = data.get('medios_pago', {})
-        total_ingresos_todos = (data['total_ingresos']
-                                + medios.get('tarjetas', 0.0)
-                                + medios.get('transferencias', 0.0)
-                                + medios.get('cuenta_corriente', 0.0))
-        lbls_val['ingresos'].config(text=_fmt(total_ingresos_todos))
-        lbls_val['egresos'].config(text=_fmt(data['total_egresos']))
-        lbls_val['esperado'].config(text=_fmt(data['efectivo_esperado']))
-        lbl_status.config(text=f"✅ Caja Abierta | Apertura: {data['fecha_apertura']} por {usuario['nombre']}")
+        total_liquid = (data['total_ingresos'] 
+                        + medios.get('tarjetas', 0.0) 
+                        + medios.get('transferencias', 0.0))
+        lbls_val['ingresos'].configure(text=_fmt(total_liquid))
+        
+        lbls_val['egresos'].configure(text=_fmt(data['total_egresos']))
+        lbls_val['esperado'].configure(text=_fmt(data['efectivo_esperado']))
+        
+        # 🔥 Dinámico: usa el nombre que viene del backend
+        lbl_status.configure(text=f"✅ Caja Abierta | Apertura: {data['fecha_apertura']} por {data['usuario_apertura']}")
 
     def verificar_estado():
         nonlocal session_actual
-        session_actual = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
+        session_actual = backend.obtener_session_activa()
         pnl_cerrada.pack_forget(); pnl_abierta.pack_forget()
         if session_actual:
             pnl_abierta.pack(fill="both", expand=True)
@@ -214,40 +212,43 @@ def _construir_panel_caja(win, backend, usuario):
             if puede_gestionar and ent_monto:
                 ent_monto.delete(0, tk.END)
                 ent_monto.insert(0, PLACEHOLDER)
-                ent_monto.config(foreground=PLACEHOLDER_COLOR)
+                ent_monto.configure(text_color=PLACEHOLDER_COLOR)
 
     if puede_gestionar:
-        fr_ini = tk.Frame(pnl_cerrada, bg="white", padx=30, pady=30, relief="solid", bd=1)
-        fr_ini.pack()
-        tk.Label(fr_ini, text="Monto Inicial en Caja:", font=("Segoe UI", 12), bg="white").pack()
+        fr_ini = ctk.CTkFrame(pnl_cerrada, fg_color=win.col_card, corner_radius=15, border_color=win.col_border, border_width=1)
+        fr_ini.pack(pady=40, padx=40)
+        
+        ctk.CTkLabel(fr_ini, text="Monto Inicial en Caja ($):", font=("Segoe UI", 16, "bold"), text_color=win.col_text).pack(pady=(30, 10), padx=40)
+        
         def _val_apertura(t):
             if t == "" or t == PLACEHOLDER: return True
             import re
             if not re.match(r'^\d*\.?\d*$', t): return False
             partes = t.split('.')
             return len(partes[0]) <= 10
+            
         vc_ap = (fr_ini.register(_val_apertura), '%P')
-        ent_monto = tk.Entry(fr_ini, font=("Segoe UI", 16), width=15, justify="center",
-                             validate="key", validatecommand=vc_ap)
+        
+        ent_monto = ctk.CTkEntry(fr_ini, font=("Segoe UI", 20, "bold"), justify="center", height=50, width=250)
+        ent_monto.configure(validate="key", validatecommand=vc_ap)
         ent_monto.pack(pady=10)
 
-        # Placeholder behavior
-        PLACEHOLDER = "Ej: 1000.00"
-        PLACEHOLDER_COLOR = "#000000"
-        NORMAL_COLOR = "#1f2937"
+        PLACEHOLDER = "1000.00"
+        PLACEHOLDER_COLOR = "#9ca3af"
+        NORMAL_COLOR = win.col_input_fg
 
         def on_focus_in(e):
             if ent_monto.get() == PLACEHOLDER:
                 ent_monto.delete(0, tk.END)
-                ent_monto.config(foreground=NORMAL_COLOR)
+                ent_monto.configure(text_color=NORMAL_COLOR)
 
         def on_focus_out(e):
             if not ent_monto.get().strip():
                 ent_monto.insert(0, PLACEHOLDER)
-                ent_monto.config(foreground=PLACEHOLDER_COLOR)
+                ent_monto.configure(text_color=PLACEHOLDER_COLOR)
 
         ent_monto.insert(0, PLACEHOLDER)
-        ent_monto.config(foreground=PLACEHOLDER_COLOR)
+        ent_monto.configure(text_color=PLACEHOLDER_COLOR)
         ent_monto.bind("<FocusIn>", on_focus_in)
         ent_monto.bind("<FocusOut>", on_focus_out)
         
@@ -259,43 +260,45 @@ def _construir_panel_caja(win, backend, usuario):
                 else:
                     monto = float(texto_monto)
                 if monto <= 0:
-                    messagebox.showwarning("Atención", "El monto de apertura debe ser mayor a $0.")
+                    messagebox.showwarning("Atención", "El monto de apertura debe ser mayor a 0.\n(Si no tienes cambio, ingresa un monto mínimo como 0.01)", parent=win)
                     return
                 backend.abrir_caja_session(usuario['id_usuario'], monto)
-                messagebox.showinfo("Éxito", "Tu caja ha sido abierta correctamente.")
+                messagebox.showinfo("Éxito", "Tu caja ha sido abierta correctamente.", parent=win)
                 verificar_estado()
-            except ValueError: messagebox.showwarning("Error", "Monto inválido.")
-            except Exception as e: messagebox.showerror("Error", f"Error al abrir caja:\n{e}")
+            except ValueError: messagebox.showwarning("Error", "Monto inválido.", parent=win)
+            except Exception as e: messagebox.showerror("Error", f"Error al abrir caja:\n{e}", parent=win)
 
         ent_monto.bind("<Return>", lambda e: abrir_caja())
-        tk.Button(fr_ini, text="ABRIR MI TURNO", command=abrir_caja, bg="#10b981", fg="white", 
-                 font=("Segoe UI", 12, "bold"), relief="flat", padx=25, pady=12, cursor="hand2", 
-                 activebackground="#059669", width=20).pack(pady=10)
+        ctk.CTkButton(fr_ini, text="✓ ABRIR MI TURNO", command=abrir_caja, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 16, "bold"), height=50, width=250).pack(pady=(10, 30))
     else:
-        tk.Label(pnl_cerrada, text="⚠️ No tienes permisos para abrir caja", font=("Segoe UI", 14), fg="#ef4444", bg="#f4f4f8").pack(pady=20)
+        ctk.CTkLabel(pnl_cerrada, text="⚠️ No tienes permisos para abrir caja", font=("Segoe UI", 16, "bold"), text_color="#ef4444").pack(pady=40)
 
-    fr_head = tk.Frame(pnl_abierta, bg="#e0f2fe", pady=15, relief="solid", bd=1)
-    fr_head.pack(fill="x")
-    lbl_status = tk.Label(fr_head, text="...", bg="#e0f2fe", font=("Segoe UI", 10))
-    lbl_status.pack()
-    fr_totales = tk.Frame(fr_head, bg="#e0f2fe")
-    fr_totales.pack(pady=10)
+    # CABECERA DE CAJA ABIERTA
+    fr_head = ctk.CTkFrame(pnl_abierta, fg_color="#e0f2fe" if ctk.get_appearance_mode()=="Light" else "#1e3a8a", corner_radius=10, border_color="#bae6fd" if ctk.get_appearance_mode()=="Light" else "#1d4ed8", border_width=1)
+    fr_head.pack(fill="x", pady=(0, 20))
+    
+    lbl_status = ctk.CTkLabel(fr_head, text="...", font=("Segoe UI", 12, "bold"), text_color="#0369a1" if ctk.get_appearance_mode()=="Light" else "#bfdbfe")
+    lbl_status.pack(pady=(15, 5))
+    
+    fr_totales = ctk.CTkFrame(fr_head, fg_color="transparent")
+    fr_totales.pack(pady=(5, 15))
     
     lbls_val = {}
-    def mk_ind(parent, txt, col=0, color="black"):
-        f = tk.Frame(parent, bg="#e0f2fe"); f.grid(row=0, column=col, padx=20)
-        tk.Label(f, text=txt, bg="#e0f2fe", fg="#666").pack()
-        l = tk.Label(f, text="$ -", bg="#e0f2fe", font=("Segoe UI", 14, "bold"), fg=color)
+    def mk_ind(parent, txt, col=0, color="#1f2937", dark_color="#f9fafb"):
+        f = ctk.CTkFrame(parent, fg_color="transparent"); f.grid(row=0, column=col, padx=20)
+        ctk.CTkLabel(f, text=txt, text_color="#4b5563" if ctk.get_appearance_mode()=="Light" else "#9ca3af", font=("Segoe UI", 11, "bold")).pack()
+        c = color if ctk.get_appearance_mode()=="Light" else dark_color
+        l = ctk.CTkLabel(f, text="$ -", font=("Segoe UI", 18, "bold"), text_color=c)
         l.pack()
         return l
 
     lbls_val['inicial'] = mk_ind(fr_totales, "Inicial", 0)
-    lbls_val['ingresos'] = mk_ind(fr_totales, "(+) Ingresos", 1, "green")
-    lbls_val['egresos'] = mk_ind(fr_totales, "(-) Egresos", 2, "red")
-    lbls_val['esperado'] = mk_ind(fr_totales, "= Efectivo Esperado", 3, "blue")
+    lbls_val['ingresos'] = mk_ind(fr_totales, "(+) Ingresos", 1, "#16a34a", "#34d399")
+    lbls_val['egresos'] = mk_ind(fr_totales, "(-) Egresos", 2, "#dc2626", "#f87171")
+    lbls_val['esperado'] = mk_ind(fr_totales, "= Efectivo Esperado", 3, "#2563eb", "#60a5fa")
 
-    fr_ops = tk.Frame(pnl_abierta, bg="#f4f4f8", pady=20)
-    fr_ops.pack(fill="x")
+    fr_ops = ctk.CTkFrame(pnl_abierta, fg_color="transparent")
+    fr_ops.pack(fill="x", pady=10)
 
     def iniciar_cierre():
         if not puede_gestionar: return
@@ -303,36 +306,45 @@ def _construir_panel_caja(win, backend, usuario):
         data = backend.obtener_resumen_cierre(session_actual['id_session'])
         esperado = data['efectivo_esperado']
         medios_pago = data.get('medios_pago', {'tarjetas': 0.0, 'transferencias': 0.0, 'cuenta_corriente': 0.0})
-        # Total recaudado = solo lo que entró en el turno, sin el saldo inicial
-        # efectivo_esperado = monto_inicial + ingresos - egresos, entonces:
         ingresos_efectivo = data.get('total_ingresos', 0.0)
-        # Total recaudado = lo que ENTRÓ en el turno (sin el inicial, sin restar egresos no-efectivo)
-        total_general = ingresos_efectivo + medios_pago.get('tarjetas', 0.0) + medios_pago.get('transferencias', 0.0) + medios_pago.get('cuenta_corriente', 0.0)
+        # 🔥 CORRECCIÓN: El total recaudado (liquidez) NO debe incluir ventas a crédito (Cta. Cte.)
+        # Solo sumamos lo que entró efectivamente al sistema: Efectivo + Tarjetas + Transferencias.
+        total_general = ingresos_efectivo + medios_pago.get('tarjetas', 0.0) + medios_pago.get('transferencias', 0.0)
         
-        d = tk.Toplevel(win)
+        d = ctk.CTkToplevel(win)
         d.title("📋 Cierre de Caja Completo")
-        d.geometry("560x720")
-        d.config(bg="#f4f4f8")
+        d.geometry("580x600")
+        d.resizable(True, True)
+        d.configure(fg_color=win.col_bg)
         
-        fr_header = tk.Frame(d, bg="#3b82f6", pady=10)
+        fr_header = ctk.CTkFrame(d, fg_color="#3b82f6", corner_radius=0)
         fr_header.pack(fill="x")
-        tk.Label(fr_header, text="RESUMEN DE CIERRE DE CAJA", font=("Segoe UI", 15, "bold"), 
-                 fg="white", bg="#3b82f6").pack()
+        ctk.CTkLabel(fr_header, text="RESUMEN DE CIERRE DE CAJA", font=("Segoe UI", 16, "bold"), text_color="white").pack(pady=8)
         
-        fr_main = tk.Frame(d, bg="#f4f4f8", padx=20, pady=10)
-        fr_main.pack(fill="both", expand=True)
+        # 🔥 CAMBIO: Usar ScrollableFrame para pantallas pequeñas/high DPI
+        fr_main = ctk.CTkScrollableFrame(d, fg_color="transparent", height=450)
+        fr_main.pack(fill="both", expand=True, padx=15, pady=5)
         
-        fr_efectivo = tk.Frame(fr_main, bg="white", relief="solid", bd=1, padx=20, pady=10)
-        fr_efectivo.pack(fill="x", pady=(0, 8))
+        fr_efectivo = ctk.CTkFrame(fr_main, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
+        fr_efectivo.pack(fill="x", pady=(0, 5), ipadx=5, ipady=5)
+
+        monto_ini = data.get('monto_inicial', 0.0)
+        egresos = data.get('total_egresos', 0.0)
+
+        # Desglose de efectivo - COMPACTO
+        def crear_item_arqueo(txt, val, color=None):
+            f = ctk.CTkFrame(fr_efectivo, fg_color="transparent")
+            f.pack(fill="x", padx=15, pady=0) # Sin pady
+            ctk.CTkLabel(f, text=txt, font=("Segoe UI", 10), text_color=win.col_text).pack(side="left")
+            ctk.CTkLabel(f, text=_fmt(val), font=("Segoe UI", 10, "bold"), text_color=color or win.col_text).pack(side="right")
+
+        crear_item_arqueo("Saldo Inicial:", monto_ini)
+        crear_item_arqueo("(+) Ingresos (Efectivo):", ingresos_efectivo, "#10b981")
+        crear_item_arqueo("(-) Egresos (Efectivo):", egresos, "#ef4444")
         
-        tk.Label(fr_efectivo, text="💰 ARQUEO DE EFECTIVO", font=("Segoe UI", 12, "bold"), 
-                 bg="white", fg="#1f2937").pack(anchor="w")
-        tk.Frame(fr_efectivo, bg="#e5e7eb", height=1).pack(fill="x", pady=5)
+        ctk.CTkLabel(fr_efectivo, text=f"Efectivo Esperado: {_fmt(esperado)}", font=("Segoe UI", 12, "bold"), text_color="#3b82f6").pack(anchor="w", padx=10, pady=1)
         
-        tk.Label(fr_efectivo, text=f"Efectivo Esperado: {_fmt(esperado)}", font=("Segoe UI", 12, "bold"), 
-                 bg="white", fg="#3b82f6").pack(anchor="w", pady=5)
-        
-        tk.Label(fr_efectivo, text="Ingrese Efectivo Contado (Real):", font=("Segoe UI", 10), bg="white").pack(anchor="w")
+        ctk.CTkLabel(fr_efectivo, text="Ingrese Efectivo Contado (Real):", font=("Segoe UI", 11), text_color=win.col_text).pack(anchor="w", padx=10, pady=(2, 0))
         def _val_real(t):
             if t == "": return True
             import re
@@ -340,22 +352,23 @@ def _construir_panel_caja(win, backend, usuario):
             partes = t.split('.')
             return len(partes[0]) <= 10
         vc_real = (d.register(_val_real), '%P')
-        e_real = tk.Entry(fr_efectivo, font=("Segoe UI", 14), justify="center", width=20,
-                          validate="key", validatecommand=vc_real)
-        e_real.pack(pady=5)
+        
+        e_real = ctk.CTkEntry(fr_efectivo, font=("Segoe UI", 16, "bold"), justify="center", height=45, width=250)
+        e_real.configure(validate="key", validatecommand=vc_real)
+        e_real.pack(pady=10)
         e_real.focus_set()
         
-        lbl_dif = tk.Label(fr_efectivo, text="Diferencia: $ 0.00", font=("Segoe UI", 11, "bold"), bg="white")
-        lbl_dif.pack(pady=5)
+        lbl_dif = ctk.CTkLabel(fr_efectivo, text="Diferencia: $ 0.00", font=("Segoe UI", 12, "bold"), text_color="#059669")
+        lbl_dif.pack(pady=(0, 5))
         
-        fr_medios = tk.Frame(fr_main, bg="white", relief="solid", bd=1, padx=20, pady=10)
-        fr_medios.pack(fill="x", pady=(0, 8))
+        fr_medios = ctk.CTkFrame(fr_main, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
+        fr_medios.pack(fill="x", pady=(0, 2), ipadx=5, ipady=2)
         
-        def crear_linea_medio(parent, icono, texto, monto, color="#059669"):
-            fr = tk.Frame(parent, bg="white")
-            fr.pack(fill="x", pady=2)
-            tk.Label(fr, text=f"{icono} {texto}:", font=("Segoe UI", 9), bg="white", width=28, anchor="w").pack(side="left")
-            tk.Label(fr, text=_fmt(monto), font=("Segoe UI", 9, "bold"), bg="white", fg=color).pack(side="right")
+        def crear_linea_medio(parent, icono, texto, monto, color="#10b981"):
+            fr = ctk.CTkFrame(parent, fg_color="transparent")
+            fr.pack(fill="x", pady=0, padx=10)
+            ctk.CTkLabel(fr, text=f"{icono} {texto}:", font=("Segoe UI", 11), text_color=win.col_text, width=200, anchor="w").pack(side="left")
+            ctk.CTkLabel(fr, text=_fmt(monto), font=("Segoe UI", 12, "bold"), text_color=color).pack(side="right")
 
         tar_ing = medios_pago.get('tarjetas', 0)
         tra_ing = medios_pago.get('transferencias', 0)
@@ -363,36 +376,34 @@ def _construir_panel_caja(win, backend, usuario):
         tra_egr = data.get('total_egresos_transferencia', 0.0)
         tar_egr = data.get('total_egresos_tarjeta', 0.0)
 
-        # --- INGRESOS NO EFECTIVO ---
-        tk.Label(fr_medios, text="📥 INGRESOS (No Efectivo)", font=("Segoe UI", 11, "bold"), bg="white", fg="#1f2937").pack(anchor="w", pady=(0,4))
+        ctk.CTkLabel(fr_medios, text="📥 INGRESOS (No Efectivo)", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(anchor="w", padx=10, pady=(2, 2))
         crear_linea_medio(fr_medios, "💳", "Tarjetas", tar_ing)
         crear_linea_medio(fr_medios, "🏦", "Transferencias", tra_ing)
-        crear_linea_medio(fr_medios, "📋", "Cuenta Corriente", cc_ing)
+        crear_linea_medio(fr_medios, "📋", "Crédito (A Cobrar C.C.)", cc_ing, "#f59e0b") # Color ámbar para deuda
 
-        # --- EGRESOS NO EFECTIVO (solo si hubo) ---
         if tra_egr > 0 or tar_egr > 0:
-            tk.Frame(fr_medios, bg="#e5e7eb", height=1).pack(fill="x", pady=6)
-            tk.Label(fr_medios, text="📤 EGRESOS (No Efectivo)", font=("Segoe UI", 11, "bold"), bg="white", fg="#1f2937").pack(anchor="w", pady=(0,4))
+            ctk.CTkLabel(fr_medios, text="----------------------------------------------------------------", text_color=win.col_border).pack(fill="x", padx=10, pady=2)
+            ctk.CTkLabel(fr_medios, text="📤 EGRESOS (No Efectivo)", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(anchor="w", padx=10, pady=2)
             if tar_egr > 0:
-                crear_linea_medio(fr_medios, "💳", "Tarjetas (pagos)", tar_egr, "#dc2626")
+                crear_linea_medio(fr_medios, "💳", "Tarjetas (pagos)", tar_egr, "#ef4444")
             if tra_egr > 0:
-                crear_linea_medio(fr_medios, "🏦", "Transferencias (pagos)", tra_egr, "#dc2626")
+                crear_linea_medio(fr_medios, "🏦", "Transferencias (pagos)", tra_egr, "#ef4444")
         
-        fr_total = tk.Frame(fr_main, bg="#e0f2fe", relief="solid", bd=1, padx=20, pady=10)
-        fr_total.pack(fill="x", pady=(0, 8))
-        tk.Label(fr_total, text="📈 TOTAL RECAUDADO", font=("Segoe UI", 11, "bold"), bg="#e0f2fe").pack()
-        tk.Label(fr_total, text=_fmt(total_general), font=("Segoe UI", 16, "bold"), bg="#e0f2fe", fg="#0369a1").pack()
+        fr_total = ctk.CTkFrame(fr_main, fg_color="#e0f2fe" if ctk.get_appearance_mode()=="Light" else "#1e3a8a", corner_radius=10, border_color="#bae6fd" if ctk.get_appearance_mode()=="Light" else "#1d4ed8", border_width=1)
+        fr_total.pack(fill="x", pady=(0, 5), ipadx=5, ipady=5)
+        ctk.CTkLabel(fr_total, text="📈 TOTAL RECAUDADO", font=("Segoe UI", 11, "bold"), text_color="#0369a1" if ctk.get_appearance_mode()=="Light" else "#bfdbfe").pack(pady=(2, 0))
+        ctk.CTkLabel(fr_total, text=_fmt(total_general), font=("Segoe UI", 18, "bold"), text_color="#0284c7" if ctk.get_appearance_mode()=="Light" else "#e0f2fe").pack(pady=(0, 2))
         
-        tk.Label(fr_main, text="Observaciones:", font=("Segoe UI", 10), bg="#f4f4f8").pack(anchor="w")
-        txt_obs = tk.Text(fr_main, height=2, width=50, font=("Segoe UI", 9), relief="solid", bd=1)
-        txt_obs.pack(pady=5, fill="x")
+        ctk.CTkLabel(fr_main, text="Observaciones (opcional):", font=("Segoe UI", 11), text_color=win.col_text).pack(anchor="w", padx=5)
+        txt_obs = ctk.CTkTextbox(fr_main, height=60, font=("Segoe UI", 11))
+        txt_obs.pack(fill="x", pady=(2, 5))
         
         def calc_diff(e=None):
             try:
                 real = float(e_real.get() or 0)
                 dif = real - esperado
-                col = "#059669" if abs(dif) < 0.01 else "#dc2626"
-                lbl_dif.config(text=f"Diferencia: {'' if dif < 0 else '+'}{_fmt(dif)}", fg=col)
+                col = "#10b981" if abs(dif) < 0.01 else "#ef4444"
+                lbl_dif.configure(text=f"Diferencia: {'' if dif < 0 else '+'}{_fmt(dif)}", text_color=col)
             except: pass
         
         e_real.bind("<KeyRelease>", calc_diff)
@@ -403,44 +414,58 @@ def _construir_panel_caja(win, backend, usuario):
                 dif = real - esperado
                 obs = txt_obs.get("1.0", tk.END).strip()
                 if abs(dif) > 0.01 and len(obs) < 5:
-                    messagebox.showwarning("Atención", "Justifique la diferencia.", parent=d)
+                    messagebox.showwarning("Atención", "Por favor justifique la diferencia de caja en 'Observaciones'.", parent=d)
                     return
                 if messagebox.askyesno("Confirmar", "¿Cerrar caja definitivamente?", parent=d):
                     backend.cerrar_caja_session(session_actual['id_session'], usuario['id_usuario'], esperado, real, dif, obs)
                     if impresora:
                         dt = data.copy(); dt.update({'efectivo_contado': real, 'diferencia': dif, 'observaciones': obs, 'medios_pago': medios_pago, 'total_general': total_general})
                         impresora.imprimir_cierre_caja(dt, [], usuario['nombre'])
-                    messagebox.showinfo("Listo", "Caja cerrada.", parent=d)
-                    d.destroy(); verificar_estado()
-            except ValueError: messagebox.showerror("Error", "Monto inválido", parent=d)
+                    messagebox.showinfo("Listo", "Caja cerrada correctamente.", parent=d)
+                    try:
+                        d.destroy()
+                        # 🔥 SALIR DEL LOOP Y DESTRUIR
+                        win.quit() 
+                        win.destroy()
+                    except: pass
+            except ValueError: messagebox.showerror("Error", "Monto real inválido", parent=d)
         
-        fr_botones = tk.Frame(fr_main, bg="#f4f4f8")
-        fr_botones.pack(pady=10)
-        
-        tk.Button(fr_botones, text="✓ Confirmar Cierre", command=confirmar, bg="#10b981", fg="white", 
-                 font=("Segoe UI", 11, "bold"), relief="flat", padx=20, pady=8, cursor="hand2").pack(side="left", padx=5)
-        
-        tk.Button(fr_botones, text="Cancelar", command=d.destroy, bg="#6b7280", fg="white", 
-                 font=("Segoe UI", 11), relief="flat", padx=20, pady=8, cursor="hand2").pack(side="left", padx=5)
-        
+        fr_botones = ctk.CTkFrame(fr_main, fg_color="transparent")
+        fr_botones.pack(pady=5)
+        ctk.CTkButton(fr_botones, text="Cancelar", command=d.destroy, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 13, "bold"), width=120, height=40).pack(side="left", padx=10)
+        ctk.CTkButton(fr_botones, text="✓ CONFIRMAR CIERRE", command=confirmar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 13, "bold"), width=180, height=40).pack(side="right", padx=10)
+
         configurar_navegacion_ventana(d); d.grab_set()
 
     if tiene_permiso(usuario, 'movimientos_caja_manuales'):
         def modal_movimiento(tipo):
-            top = tk.Toplevel(win)
+            top = ctk.CTkToplevel(win)
             top.title(f"Registrar {tipo.upper()}")
-            top.geometry("400x380")
-            top.config(bg="#f4f4f8")
+            top.geometry("450x450")
+            top.configure(fg_color=win.col_bg)
             
-            tk.Label(top, text="Monto:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(15,5))
-            e_m = EntryDecimal(top, font=("Segoe UI", 12), width=20); e_m.pack(pady=5); e_m.focus_set()
+            ctk.CTkLabel(top, text="Monto a registrar ($):", font=("Segoe UI", 13, "bold"), text_color=win.col_text).pack(pady=(20,5))
+            def _val_monto_mov(t):
+                if t == "": return True
+                import re
+                return bool(re.match(r'^\d*\.?\d*$', t))
+                
+            e_m = ctk.CTkEntry(top, font=("Segoe UI", 16, "bold"), justify="center", width=200, height=45, fg_color=win.col_input_bg, text_color=win.col_input_fg)
+            e_m.configure(validate="key", validatecommand=(top.register(_val_monto_mov), '%P'))
+            e_m.pack(pady=5)
+            e_m.focus_set()
             
-            tk.Label(top, text="Motivo:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
+            ctk.CTkLabel(top, text="Motivo:", font=("Segoe UI", 13, "bold"), text_color=win.col_text).pack(pady=(15,5))
             motivos_dict = {"Gasto Vario": "gasto_vario", "Retiro/Ajuste": "retiro_caja", "Pago a Proveedor": "pago_proveedor", "Reembolso a Cliente": "devolucion_efectivo"} if tipo == 'egreso' else {"Ajuste Positivo": "ajuste_positivo"}
-            cb_mot = ttk.Combobox(top, values=list(motivos_dict.keys()), state="readonly", width=25); cb_mot.pack(pady=5); cb_mot.current(0)
             
-            tk.Label(top, text="Observaciones:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(pady=(10,5))
-            txt_obs_mov = tk.Text(top, height=4, width=35, font=("Segoe UI", 9)); txt_obs_mov.pack(pady=5, padx=15)
+            cb_mot = ctk.CTkOptionMenu(top, values=list(motivos_dict.keys()), font=("Segoe UI", 14), width=250, height=40, fg_color=win.col_input_bg, text_color=win.col_input_fg, button_color="#4b5563")
+            cb_mot.pack(pady=5)
+            cb_mot.set(list(motivos_dict.keys())[0])
+            
+            ctk.CTkLabel(top, text="Observaciones:", font=("Segoe UI", 13, "bold"), text_color=win.col_text).pack(pady=(15,5))
+            
+            txt_obs_mov = ctk.CTkTextbox(top, height=80, font=("Segoe UI", 12))
+            txt_obs_mov.pack(fill="x", padx=40, pady=5)
             
             def save():
                 try:
@@ -449,52 +474,56 @@ def _construir_panel_caja(win, backend, usuario):
                     if tipo == 'egreso':
                         data_c = backend.obtener_resumen_cierre(session_actual['id_session'])
                         if m > data_c.get('efectivo_esperado', 0.0):
-                            messagebox.showerror("Saldo Insuficiente", "No hay suficiente efectivo.", parent=top)
+                            messagebox.showerror("Saldo Insuficiente", "No hay suficiente efectivo en la caja para realizar este egreso.", parent=top)
                             return
                     backend.registrar_movimiento_manual(session_actual['id_session'], tipo, m, motivos_dict[cb_mot.get()], txt_obs_mov.get("1.0", tk.END).strip(), usuario['id_usuario'])
-                    top.destroy(); actualizar_dashboard(); messagebox.showinfo("Éxito", "Registrado.")
-                except ValueError: messagebox.showerror("Error", "Monto inválido")
+                    top.destroy(); actualizar_dashboard(); messagebox.showinfo("Éxito", "Movimiento registrado exitosamente.", parent=win)
+                except ValueError: messagebox.showerror("Error", "Monto inválido", parent=top)
             
-            tk.Button(top, text="💾 Guardar", command=save, bg="#10b981", fg="white", font=("Segoe UI", 11, "bold"), 
-                     relief="flat", padx=20, pady=10, cursor="hand2").pack(pady=20)
+            btn_frm = ctk.CTkFrame(top, fg_color="transparent")
+            btn_frm.pack(fill="x", side="bottom", padx=20, pady=(0, 20))
+            ctk.CTkButton(btn_frm, text="Cancelar", command=top.destroy, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 14, "bold"), width=120, height=45).pack(side="left", padx=10)
+            ctk.CTkButton(btn_frm, text="💾 GUARDAR", command=save, fg_color="#10b981" if tipo == 'ingreso' else "#ef4444", hover_color="#059669" if tipo == 'ingreso' else "#dc2626", font=("Segoe UI", 15, "bold"), width=160, height=45).pack(side="right", padx=10)
+
             configurar_navegacion_ventana(top); top.grab_set()
 
-        tk.Button(fr_ops, text="➖ GASTO/RETIRO", command=lambda: modal_movimiento('egreso'), bg="#ef4444", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=15, pady=8, cursor="hand2").pack(side="left", padx=20)
-        tk.Button(fr_ops, text="➕ AJUSTE (+)", command=lambda: modal_movimiento('ingreso'), bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", padx=15, pady=8, cursor="hand2").pack(side="left")
+        ctk.CTkButton(fr_ops, text="➖ GASTO/RETIRO", command=lambda: modal_movimiento('egreso'), fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), height=40).pack(side="left", padx=10)
+        ctk.CTkButton(fr_ops, text="➕ AJUSTE (+)", command=lambda: modal_movimiento('ingreso'), fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 13, "bold"), height=40).pack(side="left")
     
     if puede_gestionar:
-        tk.Button(fr_ops, text="🔒 CERRAR CAJA", command=iniciar_cierre, bg="#1f2937", fg="white", font=("Segoe UI", 11, "bold"), relief="flat", padx=20, pady=10, cursor="hand2").pack(side="right", padx=20)
+        ctk.CTkButton(fr_ops, text="🔒 CERRAR CAJA", command=iniciar_cierre, fg_color="#1f2937", hover_color="#111827", font=("Segoe UI", 14, "bold"), height=45, width=180).pack(side="right", padx=10)
     
     # --- TREEVIEW DE MOVIMIENTOS DEL TURNO ---
-    fr_mov_header = tk.Frame(pnl_abierta, bg="#f4f4f8", pady=5)
-    fr_mov_header.pack(fill="x", padx=10)
-    tk.Label(fr_mov_header, text="📋 Movimientos del día:", bg="#f4f4f8",
-             font=("Segoe UI", 10, "bold")).pack(side="left")
-    btn_refrescar = tk.Button(fr_mov_header, text="🔄 Actualizar", bg="#3b82f6", fg="white",
-                              font=("Segoe UI", 9), relief="flat", padx=10, pady=4, cursor="hand2")
-    btn_refrescar.pack(side="right", padx=5)
+    fr_mov_header = ctk.CTkFrame(pnl_abierta, fg_color="transparent")
+    fr_mov_header.pack(fill="x", pady=(10, 5))
+    ctk.CTkLabel(fr_mov_header, text="📋 Movimientos del turno:", font=("Segoe UI", 14, "bold"), text_color=win.col_text).pack(side="left")
+    
+    btn_refrescar = ctk.CTkButton(fr_mov_header, text="🔄 Actualizar", fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 12, "bold"), width=120, height=35)
+    btn_refrescar.pack(side="right")
 
+    frm_tree = ctk.CTkFrame(pnl_abierta, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
+    frm_tree.pack(fill="both", expand=True)
+
+    from app.frontend.theme_config import configurar_estilo_treeview
+    configurar_estilo_treeview()
     cols_mov = ("Hora", "Tipo", "Motivo", "Monto", "Descripción")
-    tree_mov = ttk.Treeview(pnl_abierta, columns=cols_mov, show="headings", height=8,
-                            style="Modern.Treeview" if hasattr(ttk.Style(), "layout") else "Treeview")
-    tree_mov.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+    tree_mov = ttk.Treeview(frm_tree, columns=cols_mov, show="headings", height=8, style="Modern.Treeview")
+    tree_mov.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
-    sc_mov = ttk.Scrollbar(pnl_abierta, orient="vertical", command=tree_mov.yview)
+    sc_mov = ttk.Scrollbar(frm_tree, orient="vertical", command=tree_mov.yview)
+    sc_mov.pack(side="right", fill="y", pady=5)
     tree_mov.configure(yscrollcommand=sc_mov.set)
 
-    tree_mov.heading("Hora", text="Hora")
-    tree_mov.heading("Tipo", text="Tipo")
-    tree_mov.heading("Motivo", text="Motivo")
-    tree_mov.heading("Monto", text="Monto")
-    tree_mov.heading("Descripción", text="Descripción")
-    tree_mov.column("Hora", width=90, anchor="center")
-    tree_mov.column("Tipo", width=90, anchor="center")
-    tree_mov.column("Motivo", width=160, anchor="center")
-    tree_mov.column("Monto", width=100, anchor="e")
-    tree_mov.column("Descripción", width=300)
+    for col in cols_mov: tree_mov.heading(col, text=col)
+    tree_mov.column("Hora", width=110, anchor="center")
+    tree_mov.column("Tipo", width=120, anchor="center")
+    tree_mov.column("Motivo", width=220, anchor="center")
+    tree_mov.column("Monto", width=130, anchor="e")
+    tree_mov.column("Descripción", width=350)
 
-    tree_mov.tag_configure("ingreso", background="#d1fae5")
-    tree_mov.tag_configure("egreso", background="#fee2e2")
+    # Note: the colors might look weird on dark mode if we keep bg light, let's adapt them.
+    tree_mov.tag_configure("ingreso", foreground="#16a34a" if ctk.get_appearance_mode()=="Light" else "#34d399")
+    tree_mov.tag_configure("egreso", foreground="#dc2626" if ctk.get_appearance_mode()=="Light" else "#f87171")
 
     MAPEO_MOTIVOS = {
         'venta_efectivo': 'Venta efectivo', 'venta_tarjeta': 'Venta tarjeta',
@@ -520,14 +549,13 @@ def _construir_panel_caja(win, backend, usuario):
             except: hora = ""
             tipo = "➕ Ingreso" if m.get("tipo") == "ingreso" else "➖ Egreso"
             motivo_lbl = MAPEO_MOTIVOS.get(motivo_raw, motivo_raw)
-            monto = f"$ {float(m.get('monto', 0)):,.2f}"
+            monto = _fmt(m.get('monto'))
             desc = m.get("descripcion") or ""
             tag = "ingreso" if m.get("tipo") == "ingreso" else "egreso"
             tree_mov.insert("", "end", values=(hora, tipo, motivo_lbl, monto, desc), tags=(tag,))
 
-    btn_refrescar.config(command=cargar_movimientos)
+    btn_refrescar.configure(command=cargar_movimientos)
 
-    # Sobreescribir actualizar_dashboard para que también refresque movimientos
     _orig_actualizar = actualizar_dashboard
     def actualizar_dashboard():
         _orig_actualizar()
@@ -537,11 +565,11 @@ def _construir_panel_caja(win, backend, usuario):
 
 # --- PANEL DE REPORTES ---
 def _construir_panel_reportes(win, backend, usuario):
-    body = tk.Frame(win, bg="#f4f4f8", padx=10, pady=10)
-    body.pack(fill="both", expand=True)
+    body = ctk.CTkFrame(win, fg_color="transparent")
+    body.pack(fill="both", expand=True, padx=20, pady=20)
 
-    def aplicar_filtro_rapido(event, combo, entry_desde, entry_hasta):
-        seleccion = combo.get()
+    def aplicar_filtro_rapido(nuevo_val, cb_obj, entry_desde, entry_hasta):
+        seleccion = nuevo_val
         hoy = date.today()
         f_ini, f_fin = None, None
         if seleccion == "Hoy": f_ini, f_fin = hoy, hoy
@@ -554,39 +582,72 @@ def _construir_panel_reportes(win, backend, usuario):
             entry_desde.delete(0, tk.END); entry_desde.insert(0, f_ini.strftime("%d/%m/%Y"))
             entry_hasta.delete(0, tk.END); entry_hasta.insert(0, f_fin.strftime("%d/%m/%Y"))
 
-    frm_vend = ttk.LabelFrame(body, text="📈 Ventas por Vendedor", padding=10)
-    frm_vend.pack(fill="both", expand=True, pady=(0, 10))
-    frm_f1 = tk.Frame(frm_vend); frm_f1.pack(fill="x", pady=5)
+    # ====== VENTAS POR VENDEDOR ======
+    frm_vend = ctk.CTkFrame(body, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
+    frm_vend.pack(fill="both", expand=True, pady=(0, 15))
     
-    cb_rango_v = ttk.Combobox(frm_f1, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Mes Pasado"], state="readonly", width=12); cb_rango_v.current(0); cb_rango_v.pack(side="left", padx=5)
+    frm_vend_header = ctk.CTkFrame(frm_vend, fg_color="transparent")
+    frm_vend_header.pack(fill="x", padx=15, pady=(15, 5))
+    ctk.CTkLabel(frm_vend_header, text="📈 Ventas por Vendedor", font=("Segoe UI", 15, "bold"), text_color=win.col_text).pack(side="left")
+
+    frm_f1 = ctk.CTkFrame(frm_vend, fg_color="transparent")
+    frm_f1.pack(fill="x", padx=15, pady=5)
     
-    # 🔥 CORRECCIÓN: Limpieza antes de insertar fecha para evitar duplicidad
-    fd_v = SelectorFecha(frm_f1); fd_v.pack(side="left", padx=5)
+    ctk.CTkLabel(frm_f1, text="Rango:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
+    
+    cb_rango_v = ctk.CTkOptionMenu(frm_f1, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Mes Pasado"], font=("Segoe UI", 12), width=130, fg_color=win.col_input_bg, text_color=win.col_input_fg, button_color="#4b5563")
+    cb_rango_v.set("Personalizado")
+    cb_rango_v.pack(side="left", padx=(0,15))
+    
+    ctk.CTkLabel(frm_f1, text="Desde:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
+    fd_v = SelectorFecha(frm_f1)
+    fd_v.pack(side="left", padx=(0,15))
     fd_v.widget_entrada.delete(0, tk.END)
     fd_v.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
     
-    fh_v = SelectorFecha(frm_f1); fh_v.pack(side="left", padx=5)
+    ctk.CTkLabel(frm_f1, text="Hasta:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
+    fh_v = SelectorFecha(frm_f1)
+    fh_v.pack(side="left", padx=(0,15))
     fh_v.widget_entrada.delete(0, tk.END)
     fh_v.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
+
+    cb_rango_v.configure(command=lambda val: aplicar_filtro_rapido(val, cb_rango_v, fd_v.widget_entrada, fh_v.widget_entrada))
     
-    cb_rango_v.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango_v, fd_v.widget_entrada, fh_v.widget_entrada))
+    ctk.CTkLabel(frm_f1, text="Vendedor:", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(side="left", padx=(10, 5))
+    win.lbl_vend_sel = ctk.CTkLabel(frm_f1, text=win.var_vendedor_sel['nombre'], font=("Segoe UI", 12), text_color="#6b7280" if ctk.get_appearance_mode()=="Light" else "#9ca3af")
+    win.lbl_vend_sel.pack(side="left", padx=5)
     
-    tk.Label(frm_f1, text="Vendedor:", bg="#f4f4f8").pack(side="left", padx=(10, 5))
-    win.lbl_vend_sel = tk.Label(frm_f1, text=win.var_vendedor_sel['nombre'], bg="#f4f4f8"); win.lbl_vend_sel.pack(side="left", padx=5)
+    ctk.CTkButton(frm_f1, text="Cambiar", command=lambda: _crear_selector_entidad_reportes(win, "Vendedor", win.var_vendedor_sel, win.vendedores_full_list), fg_color=win.col_card, border_color="#3b82f6", border_width=1, hover_color="#eff6ff" if ctk.get_appearance_mode()=="Light" else "#1e3a8a", text_color="#3b82f6", font=("Segoe UI", 12, "bold"), width=90, height=30).pack(side="left", padx=(5, 15))
     
-    tk.Button(frm_f1, text="Buscar Vendedor", command=lambda: _crear_selector_entidad_reportes(win, "Vendedor", win.var_vendedor_sel, win.vendedores_full_list), bg="#3b82f6", fg="white", font=("Segoe UI", 9, "bold"), relief="flat", padx=10, pady=5).pack(side="left", padx=5)
+    ctk.CTkButton(frm_f1, text="Generar Reporte", command=lambda: buscar_vend(), fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 12, "bold"), width=120, height=35).pack(side="right")
     
-    tree_v = ttk.Treeview(frm_vend, columns=("Vend", "Ventas", "Monto"), show="headings", height=5, style="Modern.Treeview"); tree_v.pack(fill="both", expand=True)
-    tree_v.heading("Vend", text="Vendedor"); tree_v.heading("Ventas", text="Cant."); tree_v.heading("Monto", text="Total")
+    frm_tree_1 = ctk.CTkFrame(frm_vend, fg_color="transparent")
+    frm_tree_1.pack(fill="both", expand=True, padx=15, pady=(5, 15))
+
+    tree_v = ttk.Treeview(frm_tree_1, columns=("Vend", "Ventas", "Monto"), show="headings", height=5, style="Modern.Treeview")
+    tree_v.pack(side="left", fill="both", expand=True)
+    sc_v = ttk.Scrollbar(frm_tree_1, command=tree_v.yview); sc_v.pack(side="right", fill="y"); tree_v.configure(yscrollcommand=sc_v.set)
+    
+    tree_v.column("Vend", width=400)
+    tree_v.column("Ventas", width=150, anchor="center")
+    tree_v.column("Monto", width=250, anchor="e")
+    tree_v.heading("Vend", text="Vendedor"); tree_v.heading("Ventas", text="Cant."); tree_v.heading("Monto", text="Total Facturado")
     
     def buscar_vend():
         for i in tree_v.get_children(): tree_v.delete(i)
-        data = backend.reporte_ventas_por_vendedor(fd_v.get_date_sql(), fh_v.get_date_sql(), win.var_vendedor_sel['id'])
-        for r in data: tree_v.insert("", "end", values=(r['vendedor'], r['total_ventas'], _fmt(r['monto_total'])))
-    
-    tk.Button(frm_f1, text="Generar", command=buscar_vend, bg="#3b82f6", fg="white", font=("Segoe UI", 9, "bold"), relief="flat", padx=10, pady=5).pack(side="left", padx=5)
+        try:
+            d_sql = datetime.strptime(fd_v.get_date_str() or fd_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fd_v.get_date_str() else datetime.strptime(fd_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
+            h_sql = datetime.strptime(fh_v.get_date_str() or fh_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fh_v.get_date_str() else datetime.strptime(fh_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
+        except:
+            d_sql = fd_v.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
+            h_sql = fh_v.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
+            
+        try:
+            data = backend.reporte_ventas_por_vendedor(d_sql, h_sql, win.var_vendedor_sel['id'])
+            for r in data: tree_v.insert("", "end", values=(r['vendedor'], r['total_ventas'], _fmt(r['monto_total'])))
+        except Exception as e:
+            pass
 
-    # DOBLE CLICK en ventas por vendedor -> abre historial con datos pre-cargados
     def on_doble_click_vend(event):
         sel = tree_v.selection()
         if not sel: return
@@ -610,43 +671,73 @@ def _construir_panel_reportes(win, backend, usuario):
             )
     tree_v.bind("<Double-1>", on_doble_click_vend)
 
-    frm_dia = ttk.LabelFrame(body, text="Ventas Diarias", padding=10)
-    frm_dia.pack(fill="both", expand=True)
-    frm_f2 = tk.Frame(frm_dia); frm_f2.pack(fill="x", pady=5)
 
-    # Filtros rapidos de fecha para ventas diarias
-    cb_rango_d = ttk.Combobox(frm_f2, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Mes Pasado"], state="readonly", width=12)
-    cb_rango_d.current(0); cb_rango_d.pack(side="left", padx=5)
-
-    fd_d = SelectorFecha(frm_f2); fd_d.pack(side="left", padx=5)
-    fd_d.widget_entrada.delete(0, tk.END)
-    fd_d.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
+    # ====== VENTAS DIARIAS ======
+    frm_dia = ctk.CTkFrame(body, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
+    frm_dia.pack(fill="both", expand=True, pady=(0, 15))
     
-    fh_d = SelectorFecha(frm_f2); fh_d.pack(side="left", padx=5)
+    frm_dia_header = ctk.CTkFrame(frm_dia, fg_color="transparent")
+    frm_dia_header.pack(fill="x", padx=15, pady=(15, 5))
+    ctk.CTkLabel(frm_dia_header, text="📅 Ventas Diarias", font=("Segoe UI", 15, "bold"), text_color=win.col_text).pack(side="left")
+
+    frm_f2 = ctk.CTkFrame(frm_dia, fg_color="transparent")
+    frm_f2.pack(fill="x", padx=15, pady=5)
+    
+    ctk.CTkLabel(frm_f2, text="Rango:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
+    
+    cb_rango_d = ctk.CTkOptionMenu(frm_f2, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Mes Pasado"], font=("Segoe UI", 12), width=130, fg_color=win.col_input_bg, text_color=win.col_input_fg, button_color="#4b5563")
+    cb_rango_d.set("Mes Pasado")
+    cb_rango_d.pack(side="left", padx=(0,15))
+
+    ctk.CTkLabel(frm_f2, text="Desde:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
+    fd_d = SelectorFecha(frm_f2)
+    fd_d.pack(side="left", padx=(0,15))
+    fd_d.widget_entrada.delete(0, tk.END)
+    fd_d.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
+    
+    ctk.CTkLabel(frm_f2, text="Hasta:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
+    fh_d = SelectorFecha(frm_f2)
+    fh_d.pack(side="left", padx=(0,15))
     fh_d.widget_entrada.delete(0, tk.END)
     fh_d.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
 
-    cb_rango_d.bind("<<ComboboxSelected>>", lambda e: aplicar_filtro_rapido(e, cb_rango_d, fd_d.widget_entrada, fh_d.widget_entrada))
+    cb_rango_d.configure(command=lambda val: aplicar_filtro_rapido(val, cb_rango_d, fd_d.widget_entrada, fh_d.widget_entrada))
     
-    tree_d = ttk.Treeview(frm_dia, columns=("Fecha", "Ventas", "Monto"), show="headings", height=5, style="Modern.Treeview"); tree_d.pack(fill="both", expand=True)
-    tree_d.heading("Fecha", text="Fecha"); tree_d.heading("Ventas", text="Cant."); tree_d.heading("Monto", text="Total")
+    ctk.CTkButton(frm_f2, text="Generar Reporte", command=lambda: buscar_dia(), fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 12, "bold"), width=120, height=35).pack(side="right")
+    
+    frm_tree_2 = ctk.CTkFrame(frm_dia, fg_color="transparent")
+    frm_tree_2.pack(fill="both", expand=True, padx=15, pady=(5, 15))
+
+    tree_d = ttk.Treeview(frm_tree_2, columns=("Fecha", "Ventas", "Monto"), show="headings", height=5, style="Modern.Treeview")
+    tree_d.pack(side="left", fill="both", expand=True)
+    sc_d = ttk.Scrollbar(frm_tree_2, command=tree_d.yview); sc_d.pack(side="right", fill="y"); tree_d.configure(yscrollcommand=sc_d.set)
+    tree_d.heading("Fecha", text="Fecha"); tree_d.heading("Ventas", text="Cant."); tree_d.heading("Monto", text="Total Diario")
+    tree_d.column("Fecha", width=150, anchor="center")
+    tree_d.column("Ventas", width=150, anchor="center")
+    tree_d.column("Monto", width=250, anchor="e")
     
     def buscar_dia():
         for i in tree_d.get_children(): tree_d.delete(i)
-        data = backend.obtener_ventas_diarias(fd_d.get_date_sql(), fh_d.get_date_sql())
-        for r in data: 
-            f_str = datetime.strptime(str(r['fecha']), "%Y-%m-%d").strftime("%d/%m/%Y")
-            tree_d.insert("", "end", values=(f_str, r['total_ventas'], _fmt(r['monto_total'])))
+        try:
+            d_sql = datetime.strptime(fd_d.get_date_str() or fd_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fd_d.get_date_str() else datetime.strptime(fd_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
+            h_sql = datetime.strptime(fh_d.get_date_str() or fh_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fh_d.get_date_str() else datetime.strptime(fh_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
+        except:
+            d_sql = fd_d.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
+            h_sql = fh_d.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
+            
+        try:
+            data = backend.obtener_ventas_diarias(d_sql, h_sql)
+            for r in data: 
+                f_str = datetime.strptime(str(r['fecha']), "%Y-%m-%d").strftime("%d/%m/%Y")
+                tree_d.insert("", "end", values=(f_str, r['total_ventas'], _fmt(r['monto_total'])))
+        except Exception as e: pass
     
-    tk.Button(frm_f2, text="Generar", command=buscar_dia, bg="#3b82f6", fg="white", font=("Segoe UI", 9, "bold"), relief="flat", padx=10, pady=5).pack(side="left", padx=5)
-
-    # DOBLE CLICK en ventas diarias -> abre historial con fecha pre-cargada
     def on_doble_click_dia(event):
         sel = tree_d.selection()
         if not sel: return
         vals = tree_d.item(sel[0], "values")
         if not vals: return
-        fecha_ui = vals[0]  # formato dd/mm/YYYY
+        fecha_ui = vals[0]
         if Historiales:
             Historiales(
                 win, backend, usuario,
@@ -656,11 +747,7 @@ def _construir_panel_reportes(win, backend, usuario):
                 filtro_fecha_hasta_default=fecha_ui
             )
     tree_d.bind("<Double-1>", on_doble_click_dia)
-    # Boton imprimir reporte diario eliminado: ver historial con doble click para el detalle del dia
 
-    # Boton cerrar al pie del panel reportes
-    frm_footer = tk.Frame(body, bg="#f4f4f8", pady=10)
+    frm_footer = ctk.CTkFrame(body, fg_color="transparent")
     frm_footer.pack(fill="x")
-    tk.Button(frm_footer, text="Cerrar", command=win.destroy,
-              bg="#64748b", fg="white", font=("Segoe UI", 10),
-              relief="flat", padx=20, pady=6, cursor="hand2").pack(side=tk.RIGHT)
+    ctk.CTkButton(frm_footer, text="Cerrar", command=win.destroy, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 14, "bold"), width=150, height=45).pack(side="right")

@@ -215,9 +215,17 @@ class BackendAdapter:
         es_pesable: bool = False,
         id_usuario: int | None = None
     ) -> int | None:
-        
+        # VALIDACIONES DE SEGURIDAD Y NEGOCIO
+        if precio < 0:
+            raise ValueError("El precio no puede ser negativo.")
+            
+        if id_usuario is not None:
+            usuarios = DB.obtener_usuarios_con_rol()
+            user = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+            if user and user.get('rol_nombre') == 'vendedor':
+                raise PermissionError("Acceso denegado: Los vendedores no tienen permisos para crear productos.")
+
         pid = DB.crear_producto_completo(nombre, precio, categoria_id, stock_inicial, stock_minimo, es_pesable)
-        
         # Auditoría de Creación
         if pid:
             self._registrar_auditoria(
@@ -248,7 +256,16 @@ class BackendAdapter:
         es_pesable: Optional[bool] = None,
         id_usuario: int | None = None
     ) -> bool:
-        
+        # VALIDACIONES DE SEGURIDAD Y NEGOCIO
+        if precio is not None and precio < 0:
+            raise ValueError("El precio no puede ser negativo.")
+            
+        if id_usuario is not None:
+            usuarios = DB.obtener_usuarios_con_rol()
+            user = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+            if user and user.get('rol_nombre') == 'vendedor':
+                raise PermissionError("Acceso denegado: Los vendedores no tienen permisos para modificar productos.")
+                
         # 1. Obtener datos anteriores PARA AUDITAR
         producto_anterior = self.buscar_producto_por_id(id_producto)
         
@@ -567,7 +584,7 @@ class BackendAdapter:
                 )
         
         return exito_rol and exito_nombre
-        return rol_ok and nombre_ok
+
     def resetear_password_usuario(self, id_usuario: int, password_plana_nueva: str) -> bool:
         fn = getattr(DB, "resetear_password_usuario", None)
         return bool(fn(id_usuario, password_plana_nueva)) if callable(fn) else False

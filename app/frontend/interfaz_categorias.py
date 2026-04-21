@@ -10,7 +10,7 @@ try:
     from app.frontend.componentes_ui import EntryDecimal
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
 except ImportError:
-    EntryDecimal = ttk.Entry
+    EntryDecimal = None  # Se resolverá al importar ctk dentro de __init__
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 try:
@@ -29,63 +29,47 @@ class UIManageCategorias:
         self.backend = backend
         self.usuario = usuario
         self.can_manage = tiene_permiso(self.usuario, 'gestionar_categorias')
+        self.ventana_edicion_abierta = False
         
-        self.win = Toplevel(parent)
+        import customtkinter as ctk
+        from app.frontend.theme_config import get_color, configurar_estilo_treeview
+        
+        # 🔥 CARGA DE ESTILOS Y COLORES
+        configurar_estilo_treeview()
+        self.col_bg = get_color("bg_root")
+        self.col_card = get_color("bg_surface")
+        self.col_text = get_color("text_primary")
+        self.col_input_bg = "#374151"
+        self.col_input_fg = "#ffffff"
+        self.col_border = "#2d3748"
+
+        self.win = ctk.CTkToplevel(parent)
         self.win.title("🏷️ Gestión de Categorías")
-        self.win.geometry("750x550")
-        self.win.config(bg="#f4f4f8")
+        self.win.geometry("750x650")
+        self.win.configure(fg_color=self.col_bg)
         self.win.resizable(False, False)
         self.win.grab_set()
-        
-        self.ventana_edicion_abierta = False
-
-        # 🔥 ESTILOS MODERNOS
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        style.configure("Modern.Treeview",
-                        background="#ffffff",
-                        foreground="#1f2937",
-                        rowheight=32,
-                        fieldbackground="#ffffff",
-                        borderwidth=0,
-                        font=('Segoe UI', 10))
-        
-        style.configure("Modern.Treeview.Heading",
-                        background="#f3f4f6",
-                        foreground="#374151",
-                        relief="flat",
-                        borderwidth=1,
-                        font=('Segoe UI', 10, 'bold'))
-        
-        style.map("Modern.Treeview.Heading",
-                  background=[('active', '#e5e7eb')])
 
         self._crear_widgets()
         self.cargar_categorias()
         
-        configurar_navegacion_ventana(self.win, confirmar_cierre=True)
+        configurar_navegacion_ventana(self.win, confirmar_cierre=False)
         self.win.after(100, lambda: self.tree.focus_set())
 
     def _crear_widgets(self):
+        import customtkinter as ctk
         # 🔥 HEADER
-        frm_header = tk.Frame(self.win, bg="#ffffff", pady=15)
-        frm_header.pack(fill=tk.X, padx=10, pady=(10, 5))
+        frm_header = ctk.CTkFrame(self.win, fg_color=self.col_card, corner_radius=10, border_color=self.col_border, border_width=1)
+        frm_header.pack(fill=tk.X, padx=20, pady=(20, 5))
         
-        tk.Label(
-            frm_header,
-            text="Listado de Categorías",
-            font=("Segoe UI", 14, "bold"),
-            bg="#ffffff",
-            fg="#1f2937"
-        ).pack()
+        ctk.CTkLabel(frm_header, text="Listado de Categorías", font=("Segoe UI", 15, "bold"), text_color=self.col_text).pack(pady=15)
 
         # 🔥 TABLA MODERNA
-        frm_tabla = tk.Frame(self.win, bg="#f4f4f8", padx=10, pady=10)
-        frm_tabla.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        frm_tabla = ctk.CTkFrame(self.win, fg_color=self.col_card, corner_radius=10, border_color=self.col_border, border_width=1)
+        frm_tabla.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         cols = ("ID", "Nombre", "Margen (%)", "Pesable")
-        self.tree = ttk.Treeview(frm_tabla, columns=cols, show="headings", style="Modern.Treeview")
+        self.tree = ttk.Treeview(frm_tabla, columns=cols, show="headings", height=6, style="Modern.Treeview")
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         vsb = ttk.Scrollbar(frm_tabla, orient="vertical", command=self.tree.yview)
@@ -98,82 +82,23 @@ class UIManageCategorias:
         self.tree.heading("Pesable", text="¿Es Pesable?")
         
         self.tree.column("ID", width=0, minwidth=0, stretch=False)
-        self.tree.column("Nombre", width=280)
-        self.tree.column("Margen (%)", width=120, anchor="e")
-        self.tree.column("Pesable", width=100, anchor="center")
-
+        self.tree.column("Nombre", width=300)
+        self.tree.column("Margen (%)", width=200, anchor="center")
+        self.tree.column("Pesable", width=150, anchor="center")
+        
         # 🔥 BOTONES ESTILO NUEVO
-        frame_btns = tk.Frame(self.win, bg="#f4f4f8")
-        frame_btns.pack(pady=15)
-
-        btn_nueva = tk.Button(
-            frame_btns, 
-            text="+ Nueva Categoría", 
-            command=lambda: self._abrir_editor(None),
-            bg="#10b981",
-            fg="white",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padx=20,
-            pady=10,
-            cursor="hand2",
-            activebackground="#059669",
-            activeforeground="white",
-            width=18
-        )
-        btn_nueva.pack(side=tk.LEFT, padx=10)
-        
-        btn_editar = tk.Button(
-            frame_btns, 
-            text="✎ Editar", 
-            command=self._editar_seleccionado,
-            bg="#3b82f6",
-            fg="white",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padx=20,
-            pady=10,
-            cursor="hand2",
-            activebackground="#2563eb",
-            activeforeground="white",
-            width=15
-        )
-        btn_editar.pack(side=tk.LEFT, padx=10)
-        
-        btn_eliminar = tk.Button(
-            frame_btns, 
-            text="× Eliminar", 
-            command=self._eliminar_seleccionado,
-            bg="#ef4444",
-            fg="white",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padx=20,
-            pady=10,
-            cursor="hand2",
-            activebackground="#dc2626",
-            activeforeground="white",
-            width=15
-        )
-        btn_eliminar.pack(side=tk.LEFT, padx=10)
-
-        tk.Button(
-            frame_btns,
-            text="Cerrar",
-            command=self.win.destroy,
-            bg="#64748b",
-            fg="white",
-            font=("Segoe UI", 10),
-            relief="flat",
-            padx=20,
-            pady=10,
-            cursor="hand2"
-        ).pack(side=tk.RIGHT, padx=10)
+        frame_btns = ctk.CTkFrame(self.win, fg_color="transparent")
+        frame_btns.pack(pady=(5, 30), fill="x", padx=20)
+ 
+        ctk.CTkButton(frame_btns, text="➕ Nueva", command=lambda: self._abrir_editor(None), fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), width=140, height=45).pack(side=tk.LEFT, padx=15)
+        ctk.CTkButton(frame_btns, text="✎ Editar", command=self._editar_seleccionado, fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 14, "bold"), width=120, height=45).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(frame_btns, text="Cerrar", command=self.win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 14, "bold"), width=120, height=45).pack(side=tk.RIGHT, padx=15)
 
         if not self.can_manage:
-            btn_nueva.config(state=tk.DISABLED, bg="#d1d5db", cursor="arrow")
-            btn_editar.config(state=tk.DISABLED, bg="#d1d5db", cursor="arrow")
-            btn_eliminar.config(state=tk.DISABLED, bg="#d1d5db", cursor="arrow")
+            # Disable buttons if user doesn't have permission
+            for child in frame_btns.winfo_children():
+                if isinstance(child, ctk.CTkButton) and child.cget("text") != "Cerrar":
+                    child.configure(state="disabled", fg_color="#6b7280", hover_color="#6b7280")
         else:
             self.tree.bind("<Double-1>", lambda e: self._editar_seleccionado())
 
@@ -247,50 +172,45 @@ class UIManageCategorias:
                     parent=self.win
                 )
             else:
-                messagebox.showerror("Error", f"Error al eliminar: {e}", parent=self.win)
+                messagebox.showerror("Error", f"Excepción al eliminar: {e}", parent=self.win)
 
     def _abrir_editor(self, categoria: dict | None = None):
         if self.ventana_edicion_abierta: return
         self.ventana_edicion_abierta = True
         
-        pop = Toplevel(self.win)
+        import customtkinter as ctk
+        pop = ctk.CTkToplevel(self.win)
         pop.title("Editar Categoría" if categoria else "Nueva Categoría")
-        pop.geometry("400x350")
-        pop.config(bg="#f4f4f8")
+        pop.geometry("450x450")
+        pop.configure(fg_color=self.col_bg)
         pop.resizable(False, False)
-
+ 
         def on_close():
             self.ventana_edicion_abierta = False
             pop.destroy()
         pop.protocol("WM_DELETE_WINDOW", on_close)
         
         # 🔥 FORMULARIO MODERNO
-        frm = tk.Frame(pop, bg="#ffffff", padx=25, pady=25)
-        frm.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        frm = ctk.CTkFrame(pop, fg_color=self.col_card, corner_radius=10, border_color=self.col_border, border_width=1)
+        frm.pack(fill=tk.BOTH, expand=True, padx=25, pady=25)
         
-        tk.Label(frm, text="Nombre:", bg="#ffffff", font=("Segoe UI", 10)).pack(pady=(10, 5), anchor="w")
-        ent_nom = tk.Entry(frm, width=35, font=("Segoe UI", 10))
-        ent_nom.pack(fill=tk.X)
+        ctk.CTkLabel(frm, text="Nombre de Categoría:", font=("Segoe UI", 13, "bold"), text_color=self.col_text).pack(pady=(20, 5), padx=20, anchor="w")
+        ent_nom = ctk.CTkEntry(frm, font=("Segoe UI", 12), height=40)
+        ent_nom.pack(fill="x", padx=20)
         if categoria: ent_nom.insert(0, categoria['nombre'])
         
-        tk.Label(frm, text="Margen de Ganancia (%):", bg="#ffffff", font=("Segoe UI", 10)).pack(pady=(15, 5), anchor="w")
-        ent_mar = EntryDecimal(frm, width=15)
-        ent_mar.pack(anchor="w")
+        ctk.CTkLabel(frm, text="Margen de Ganancia Sugerido (%):", font=("Segoe UI", 13, "bold"), text_color=self.col_text).pack(pady=(20, 5), padx=20, anchor="w")
+        ent_mar = EntryDecimal(frm, font=("Segoe UI", 12), justify="center", width=150, height=40)
+        ent_mar.pack(padx=20, anchor="w")
         val_margen = str(categoria['margen_ganancia']) if categoria else "30.00"
         ent_mar.insert(0, val_margen)
-
+ 
         var_pesable = tk.BooleanVar(value=False)
         if categoria:
             var_pesable.set(bool(categoria.get('es_pesable_default', False)))
             
-        chk = tk.Checkbutton(
-            frm, 
-            text="Productos son pesables (Kg)", 
-            variable=var_pesable, 
-            bg="#ffffff",
-            font=("Segoe UI", 10)
-        )
-        chk.pack(pady=15, anchor="w")
+        chk = ctk.CTkCheckBox(frm, text="Productos son pesables (Kg) por defecto", variable=var_pesable, font=("Segoe UI", 12), checkbox_width=22, checkbox_height=22)
+        chk.pack(pady=25, padx=20, anchor="w")
 
         def guardar():
             nom = ent_nom.get().strip()
@@ -323,19 +243,7 @@ class UIManageCategorias:
                 messagebox.showerror("Error", f"Excepción al guardar: {e}", parent=pop)
 
         # 🔥 BOTÓN GUARDAR
-        tk.Button(
-            frm, 
-            text="✓ Guardar", 
-            command=guardar,
-            bg="#10b981",
-            fg="white",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padx=25,
-            pady=10,
-            cursor="hand2",
-            activebackground="#059669"
-        ).pack(pady=20)
+        ctk.CTkButton(frm, text="✓ Guardar Categoría", command=guardar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 15, "bold"), height=50).pack(pady=10, fill="x", padx=20)
         
         configurar_navegacion_ventana(pop)
         pop.transient(self.win)

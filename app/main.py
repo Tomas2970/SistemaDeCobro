@@ -148,26 +148,40 @@ def run_app():
     from app.frontend.interfaz_iniciosesion import ui_login
     from app.frontend.interfaz_menu_principal import ui_menu_principal
     from app.database.backend_adapter import BackendAdapter
-    from app.database.permisos import tiene_permiso
+    import customtkinter as ctk
+    
+    # Configuramos el tema de apariencia oscuro de forma global y permanente
+    ctk.set_appearance_mode("Dark")
+    ctk.set_default_color_theme("blue")
     
     backend = BackendAdapter()
     
+    root_app = ctk.CTk()
+    root_app.geometry("1x1+-100+-100")  # Fuera de pantalla para evitar flash
+    root_app.update_idletasks()
+    
+    # 🔥 INICIALIZACIÓN GLOBAL DE ESTILOS (Treeview, Notebook, etc.)
+    # Se hace AQUÍ para que todas las ventanas los hereden instantáneamente
+    try:
+        from app.frontend.theme_config import inicializar_estilos_globales
+        inicializar_estilos_globales()
+    except Exception as e:
+        logging.error(f"Error al inicializar estilos globales: {e}")
+
     while True:
-        root_login = tk.Tk()
-        root_login.withdraw()
-        
         # Login
-        usuario = ui_login(parent=root_login, backend=backend)
-        root_login.destroy()
+        usuario = ui_login(parent=root_app, backend=backend)
 
         if not usuario:
+            try: root_app.destroy()
+            except: pass
             logging.info("Login cancelado. Saliendo de la aplicación.")
             break
 
         logging.info(f"Sesión iniciada: {usuario.get('nombre')}")
-        root_main = tk.Tk()
-        ui_menu_principal(parent=root_main, backend=backend, usuario=usuario)
-        root_main.mainloop()
+        
+        # Dashboard Principal
+        ui_menu_principal(parent=root_app, backend=backend, usuario=usuario)
         
         # -------------------------------------------------------------
         # AL CERRAR SESIÓN: Lógica de Caja Abierta (RECUPERADA)
@@ -175,6 +189,7 @@ def run_app():
         logging.info(f"Sesión cerrada para: {usuario.get('nombre')}")
         
         try:
+            from app.database.permisos import tiene_permiso
             # Verificar si el USUARIO tiene caja abierta
             caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
             

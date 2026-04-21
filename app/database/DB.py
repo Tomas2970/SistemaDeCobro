@@ -26,19 +26,39 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------
-# Conexión
+# Conexión (Connection Pool)
 # ------------------------------------------------------
+db_pool = None
+
+def init_db_pool():
+    global db_pool
+    if db_pool is not None:
+        return
+    try:
+        from mysql.connector import pooling
+        db_pool = mysql.connector.pooling.MySQLConnectionPool(
+            pool_name="donatilio_pool",
+            pool_size=5,
+            pool_reset_session=True,
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            autocommit=False,
+            charset="utf8mb4",
+            collation="utf8mb4_unicode_ci"
+        )
+        logger.info("Connection pool 'donatilio_pool' creado exitosamente.")
+    except Exception as e:
+        logger.error(f"Error creando connection pool: {e}")
+        raise
+
 def conectar() -> MySQLConnection:
-    return mysql.connector.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME,
-        autocommit=False,
-        charset="utf8mb4",
-        collation="utf8mb4_unicode_ci"
-    )
+    global db_pool
+    if db_pool is None:
+        init_db_pool()
+    return db_pool.get_connection()
 
 # ======================================================
 # AUTENTICACIÓN
@@ -167,21 +187,6 @@ def obtener_clientes(incluir_inactivos: bool = False) -> list[dict]:
         except Exception:
             pass
 
-def obtener_cliente_completo(id_cliente: int) -> Optional[dict]:
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor(dictionary=True)
-        # Asumiendo que la columna CUIT fue añadida a la tabla Cliente
-        cur.execute(
-            """SELECT c.id_cliente, c.nombre, c.dni, c.cuit, c.direccion, c.telefono, c.email, cc.limite_credito
-               FROM Cliente c LEFT JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente WHERE c.id_cliente = %s""", (id_cliente,)
-        )
-        return cur.fetchone()
-    except Exception: return None
-    finally:
-        if cur: cur.close()
-        if conn: conn.close()
 
 def obtener_clientes_con_saldos(incluir_inactivos: bool = False) -> list[dict]:
     conn = cur = None
@@ -219,7 +224,7 @@ def obtener_cliente_completo(id_cliente: int) -> Optional[dict]:
         cur.execute(
             """
             SELECT 
-                c.id_cliente, c.nombre, c.dni, c.direccion, c.telefono, c.email,
+                c.id_cliente, c.nombre, c.dni, c.cuit, c.direccion, c.telefono, c.email,
                 cc.limite_credito
             FROM Cliente c
             LEFT JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
@@ -834,12 +839,16 @@ def registrar_venta_completa(
         conn.start_transaction()
 
         # 0. VALIDAR QUE LA CAJA ESTÉ ABIERTA
+        # Priorizar sesión del usuario, si no, usar la última abierta (fallback multi-usuario)
         cur.execute(
             "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND id_usuario_apertura = %s LIMIT 1",
             (id_usuario,)
         )
         session_row = cur.fetchone()
-        
+        if not session_row:
+            cur.execute("SELECT id_session FROM caja_session WHERE estado = 'abierta' ORDER BY id_session DESC LIMIT 1")
+            session_row = cur.fetchone()
+
         if not session_row:
             raise ValueError("CAJA_CERRADA")
         
@@ -1116,7 +1125,7 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
             raise ValueError("CAJA_CERRADA")
         
         id_session = session_row['id_session']
-        monto_apertura = float(session_row['monto_apertura'])
+        monto_apertura = float(session_row['monto_apertura'] or 0.0)
         saldo_caja_actual = 0.0
         
         # 🔥 VALIDACIÓN DE SALDO SOLO PARA EFECTIVO
@@ -1232,10 +1241,9 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
             if conn: conn.close()
         except: pass
         
-def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor, telefono="", email="", direccion=""):
+def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor="", telefono="", email="", direccion=""):
     if not nombre.strip(): raise ValueError("Nombre proveedor obligatorio.")
     if not empresa.strip(): raise ValueError("Nombre empresa obligatorio.")
-    if not dni_vendedor.strip(): raise ValueError("DNI del vendedor obligatorio.")
     if not cuit_empresa.strip(): raise ValueError("CUIT de la empresa obligatorio.")
 
     conn = cur = None
@@ -1244,7 +1252,7 @@ def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor, telefono="",
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO Proveedor (nombre, empresa, cuit, dni, telefono, email, direccion, activo) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)",
-            (nombre.strip(), empresa.strip(), cuit_empresa.strip(), dni_vendedor.strip(), telefono.strip() or None, email.strip() or None, direccion.strip() or None)
+            (nombre.strip(), empresa.strip(), cuit_empresa.strip(), (dni_vendedor or '').strip() or None, telefono.strip() or None, email.strip() or None, direccion.strip() or None)
         )
         conn.commit()
         return cur.lastrowid
@@ -1263,9 +1271,9 @@ def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor, telefono="",
         if cur: cur.close()
         if conn: conn.close()
 
-def actualizar_proveedor(id_proveedor, nombre, empresa, cuit_empresa, dni_vendedor, telefono, email, direccion):
-    if not nombre.strip() or not empresa.strip() or not dni_vendedor.strip() or not cuit_empresa.strip():
-        raise ValueError("Campos obligatorios vacíos.")
+def actualizar_proveedor(id_proveedor, nombre, empresa, cuit_empresa, dni_vendedor="", telefono="", email="", direccion=""):
+    if not nombre.strip() or not empresa.strip() or not cuit_empresa.strip():
+        raise ValueError("Campos obligatorios vacíos (nombre, empresa, CUIT).")
     
     conn = cur = None
     try:
@@ -1273,7 +1281,7 @@ def actualizar_proveedor(id_proveedor, nombre, empresa, cuit_empresa, dni_vended
         cur = conn.cursor()
         cur.execute(
             "UPDATE Proveedor SET nombre=%s, empresa=%s, cuit=%s, dni=%s, telefono=%s, email=%s, direccion=%s WHERE id_proveedor=%s",
-            (nombre.strip(), empresa.strip(), cuit_empresa.strip(), dni_vendedor.strip(), telefono.strip() or None, email.strip() or None, direccion.strip() or None, id_proveedor)
+            (nombre.strip(), empresa.strip(), cuit_empresa.strip(), (dni_vendedor or '').strip() or None, (telefono or '').strip() or None, (email or '').strip() or None, (direccion or '').strip() or None, id_proveedor)
         )
         conn.commit()
         return cur.rowcount > 0
@@ -1471,7 +1479,7 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
                 raise ValueError("CAJA_CERRADA")
             
             id_session = session_row['id_session']
-            monto_apertura = float(session_row['monto_apertura'])
+            monto_apertura = float(session_row['monto_apertura'] or 0.0)
         else:
             id_session = None
             monto_apertura = 0.0
@@ -1828,24 +1836,30 @@ def obtener_compras_maestro(
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         
-        # Definimos los WHERE para las subconsultas
+        # WHERE parametrizados para evitar SQL injection
         where_compra = ["1=1"]
         where_pago = ["1=1"]
+        params_compra = []
+        params_pago = []
         
         if id_proveedor is not None:
-             where_compra.append(f"c.id_proveedor = {id_proveedor}")
-             where_pago.append(f"pp.id_proveedor = {id_proveedor}")
+             where_compra.append("c.id_proveedor = %s")
+             params_compra.append(id_proveedor)
+             where_pago.append("pp.id_proveedor = %s")
+             params_pago.append(id_proveedor)
 
         if fecha_desde:
-             where_compra.append(f"DATE(c.fecha) >= '{fecha_desde}'")
-             where_pago.append(f"DATE(pp.fecha) >= '{fecha_desde}'")
+             where_compra.append("DATE(c.fecha) >= %s")
+             params_compra.append(fecha_desde)
+             where_pago.append("DATE(pp.fecha) >= %s")
+             params_pago.append(fecha_desde)
              
         if fecha_hasta:
-             where_compra.append(f"DATE(c.fecha) <= '{fecha_hasta}'")
-             where_pago.append(f"DATE(pp.fecha) <= '{fecha_hasta}'")
+             where_compra.append("DATE(c.fecha) <= %s")
+             params_compra.append(fecha_hasta)
+             where_pago.append("DATE(pp.fecha) <= %s")
+             params_pago.append(fecha_hasta)
 
-
-        # REHACEMOS LA QUERY: Más clara y eficiente con WHERE inyectado
         sql = f"""
             SELECT 
                 c.id_compra, c.fecha, c.total, c.estado, c.medio_pago,
@@ -1868,8 +1882,7 @@ def obtener_compras_maestro(
             ORDER BY fecha DESC
         """
         
-        # Como inyectamos los parámetros directamente en el string SQL, no necesitamos pasar una tupla vacía
-        cur.execute(sql)
+        cur.execute(sql, tuple(params_compra + params_pago))
         return list(cur.fetchall() or [])
 
     except Exception as e:
@@ -2037,11 +2050,16 @@ def registrar_pago_cuenta_corriente(id_cuenta: int, monto: float, metodo: str, i
         conn.start_transaction()
 
         # VALIDACIÓN: La caja debe estar abierta para CUALQUIER método de pago
+        # Priorizar sesión del usuario, si no, usar la última abierta (fallback multi-usuario)
         cur.execute(
             "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND id_usuario_apertura = %s LIMIT 1",
             (id_usuario,)
         )
         session_row = cur.fetchone()
+        if not session_row:
+            cur.execute("SELECT id_session FROM caja_session WHERE estado = 'abierta' ORDER BY id_session DESC LIMIT 1")
+            session_row = cur.fetchone()
+
         if not session_row:
             raise ValueError("CAJA_CERRADA")
         id_session = session_row['id_session']
@@ -2364,40 +2382,45 @@ def registrar_auditoria(
 # ======================================================
 
 def obtener_session_abierta(id_usuario: int) -> dict | None:
-    """Busca sesión abierta. Si no encuentra por usuario, busca la última abierta general."""
+    """Busca sesión abierta ESTRICTAMENTE para el usuario indicado."""
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM caja_session WHERE id_usuario_apertura = %s AND estado = 'abierta' LIMIT 1", (id_usuario,))
-        res = cur.fetchone()
-        if not res:
-            cur.execute("SELECT * FROM caja_session WHERE estado = 'abierta' ORDER BY id_session DESC LIMIT 1")
-            res = cur.fetchone()
-        return res
+        return cur.fetchone()
     except Exception as e:
-        logger.error(f"Error sesión: {e}"); return None
+        logger.error(f"Error sesión usuario {id_usuario}: {e}"); return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+def obtener_session_activa() -> dict | None:
+    """Retorna CUALQUIER sesión de caja abierta. Útil para el POS multi-usuario."""
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM caja_session WHERE estado = 'abierta' ORDER BY id_session DESC LIMIT 1")
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"Error sesión activa: {e}"); return None
     finally:
         if cur: cur.close()
         if conn: conn.close()
 
 def abrir_caja_session(id_usuario: int, monto_inicial: float) -> bool:
-    """
-    Abre una nueva sesión de caja PARA EL USUARIO ESPECÍFICO.
-    Valida que el usuario NO tenga ya una caja abierta.
-    """
+    """Abre una nueva sesión de caja."""
+    if monto_inicial <= 0:
+        raise ValueError("El monto inicial debe ser mayor a cero para abrir la caja.")
+
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor()
         
-        # Validar que el usuario NO tenga ya una caja abierta
-        cur.execute(
-            "SELECT id_session FROM caja_session WHERE id_usuario_apertura=%s AND estado='abierta'",
-            (id_usuario,)
-        )
-        if cur.fetchone():
-            raise ValueError(f"El usuario ya tiene una caja abierta.")
+        # 🔥 AUTOLIMPIEZA: Cerrar cualquier sesión que haya quedado abierta por accidente 
+        cur.execute("UPDATE caja_session SET estado='cerrada', fecha_cierre=NOW() WHERE estado='abierta'")
 
         # 1. Crear Sesión
         cur.execute(
@@ -2488,13 +2511,18 @@ def obtener_resumen_cierre(id_session: int) -> dict:
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM caja_session WHERE id_session = %s", (id_session,))
+        cur.execute("""
+            SELECT cs.*, u.nombre as usuario_apertura_nombre 
+            FROM caja_session cs
+            LEFT JOIN Usuario u ON cs.id_usuario_apertura = u.id_usuario
+            WHERE cs.id_session = %s
+        """, (id_session,))
         session = cur.fetchone()
         if not session: return resumen
 
-        resumen['monto_inicial'] = float(session['monto_apertura'])
+        resumen['monto_inicial'] = float(session['monto_apertura'] or 0.0)
         resumen['fecha_apertura'] = str(session['fecha_apertura'])
-        resumen['usuario_apertura'] = str(session['id_usuario_apertura'])
+        resumen['usuario_apertura'] = session['usuario_apertura_nombre'] or str(session['id_usuario_apertura'])
 
         # CORRECCIÓN: filtrar por medio='efectivo' para ingresos y egresos reales
         # Así tarjeta/transferencia/cuenta_corriente no inflan el efectivo esperado
@@ -2585,6 +2613,14 @@ def cerrar_caja_session(id_session: int, id_usuario_cierre: int, efectivo_espera
     try:
         conn = conectar()
         cur = conn.cursor()
+        
+        cur.execute("SELECT estado FROM caja_session WHERE id_session = %s FOR UPDATE", (id_session,))
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"La sesión de caja {id_session} no existe.")
+        if row[0] != 'abierta':
+            raise ValueError(f"La sesión de caja {id_session} ya se encuentra cerrada.")
+            
         cur.execute(
             """
             UPDATE caja_session 
@@ -2609,6 +2645,10 @@ def cerrar_caja_session(id_session: int, id_usuario_cierre: int, efectivo_espera
         conn.commit()
         logger.info(f"✅ Caja #{id_session} cerrada por usuario {id_usuario_cierre}")
         return True
+    except ValueError as ve:
+        if conn: conn.rollback()
+        logger.warning(f"Validación fallida al cerrar caja: {ve}")
+        raise
     except Exception as e:
         if conn: conn.rollback()
         logger.error(f"cerrar_caja_session: {e}")

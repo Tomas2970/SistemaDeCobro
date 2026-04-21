@@ -6,6 +6,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, Toplevel, ttk, Listbox, SINGLE
 from typing import Any
+import re
 
 from app.frontend.interfaz_productos import ui_productos
 try:
@@ -53,36 +54,37 @@ except ImportError:
 
 
 try:
-    from app.frontend.interfaz_productos import ui_crear_producto
+    from app.frontend.theme_config import THEME_COLORS, get_color, aplicar_tema_ventana, configurar_estilo_treeview
 except ImportError:
-    def ui_crear_producto(parent, backend, callback=None): 
-        messagebox.showerror("Error", "Módulo de creación de productos no disponible")
-        return None
+    def get_color(k): return "#000000"
+    def aplicar_tema_ventana(w): pass
+    def configurar_estilo_treeview(): pass
 
 
 def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_exito=None):
-    popup = Toplevel(parent)
+    import customtkinter as ctk
+    popup = ctk.CTkToplevel(parent)
     popup.title("🔓 Autorización")
-    popup.geometry("380x300") # Ventana más angosta
-    popup.config(bg="#f4f4f8")
+    popup.geometry("400x350")
+    aplicar_tema_ventana(popup)
     popup.resizable(False, False)
     popup.transient(parent)
     popup.grab_set()
     
-    frm_main = tk.Frame(popup, bg="#ffffff", padx=20, pady=20)
-    frm_main.pack(fill="both", expand=True, padx=15, pady=15)
+    frm_main = ctk.CTkFrame(popup, fg_color=get_color("bg_surface"), corner_radius=15)
+    frm_main.pack(fill="both", expand=True, padx=20, pady=20)
     
-    tk.Label(frm_main, text="Autorización de Administrador", 
-             bg="#ffffff", font=("Segoe UI", 11, "bold"), fg="#1f2937").pack(pady=(0, 15))
+    ctk.CTkLabel(frm_main, text="Autorización de Administrador", 
+                 font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(pady=(20, 15))
     
-    tk.Label(frm_main, text="Usuario:", bg="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", padx=45)
-    entry_user = tk.Entry(frm_main, font=("Segoe UI", 10), relief="solid", bd=1, width=25, justify="center") # Campo más corto
+    ctk.CTkLabel(frm_main, text="Usuario:", font=("Segoe UI", 12), text_color=get_color("text_secondary")).pack(anchor="w", padx=50)
+    entry_user = ctk.CTkEntry(frm_main, font=("Segoe UI", 13), width=250, height=40, placeholder_text="Nombre de usuario")
     entry_user.pack(pady=(2, 10))
     entry_user.focus_set()
     
-    tk.Label(frm_main, text="Contraseña:", bg="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", padx=45)
-    entry_pass = tk.Entry(frm_main, show="●", font=("Segoe UI", 10), relief="solid", bd=1, width=25, justify="center") # Campo más corto
-    entry_pass.pack(pady=(2, 20))
+    ctk.CTkLabel(frm_main, text="Contraseña:", font=("Segoe UI", 12), text_color=get_color("text_secondary")).pack(anchor="w", padx=50)
+    entry_pass = ctk.CTkEntry(frm_main, show="●", font=("Segoe UI", 13), width=250, height=40, placeholder_text="••••••••")
+    entry_pass.pack(pady=(2, 25))
     
     def validar():
         u_nom = entry_user.get().strip()
@@ -93,8 +95,7 @@ def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_
             return
         
         try:
-            supervisor = backend.verificar_contraseña(u_nom, u_pass) #
-            
+            supervisor = backend.verificar_contraseña(u_nom, u_pass)
             if supervisor and supervisor.get('id_rol') == 1:
                 popup.grab_release()
                 popup.destroy()
@@ -103,156 +104,124 @@ def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_
             else:
                 messagebox.showerror("Error", "No autorizado.", parent=popup)
                 entry_pass.delete(0, tk.END)
-                
         except Exception as e:
             messagebox.showerror("Error", f"Fallo: {e}", parent=popup)
     
-    # 🔥 UN SOLO FRAME Y UN SOLO BOTÓN DE CADA TIPO
-    frm_btns = tk.Frame(popup, bg="#f4f4f8")
-    frm_btns.pack(pady=5)
+    frm_btns = ctk.CTkFrame(popup, fg_color="transparent")
+    frm_btns.pack(pady=(0, 20))
     
-    tk.Button(frm_btns, text="✓ Autorizar", bg="#10b981", fg="white", font=("Segoe UI", 9, "bold"), 
-              relief="flat", padx=20, pady=8, command=validar, cursor="hand2").pack(side="left", padx=5)
+    ctk.CTkButton(frm_btns, text="✓ Autorizar", fg_color=get_color("button_primary"), hover_color=get_color("button_primary_hover"),
+                  font=("Segoe UI", 12, "bold"), width=140, height=40, command=validar).pack(side="left", padx=10)
     
-    tk.Button(frm_btns, text="Cancelar", bg="#6b7280", fg="white", font=("Segoe UI", 9), 
-              relief="flat", padx=15, pady=8, command=popup.destroy, cursor="hand2").pack(side="left", padx=5)
+    ctk.CTkButton(frm_btns, text="Cancelar", fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"),
+                  font=("Segoe UI", 12), width=100, height=40, command=popup.destroy).pack(side="left", padx=10)
 
     entry_pass.bind("<Return>", lambda e: validar())
 
 
 def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
-    # Evitar múltiples ventanas de venta abiertas al mismo tiempo
+    import customtkinter as ctk
+
     for w in parent.winfo_children():
-        if isinstance(w, tk.Toplevel) and w.title() == "Punto de Venta - Supermercado Don Atilio":
+        if isinstance(w, ctk.CTkToplevel) and w.title() == "Punto de Venta - Supermercado Don Atilio":
             w.lift()
             w.focus_force()
             return
 
-    win = tk.Toplevel(parent)
+    win = ctk.CTkToplevel(parent)
     win.title("Punto de Venta - Supermercado Don Atilio")
-    win.geometry("1000x700")
-    win.config(bg="#f4f4f8")
-    win.resizable(True, True) 
-
-    # ESTILOS MODERNOS
-    style = ttk.Style()
-    style.theme_use('clam')
+    try: win.state('zoomed')
+    except: win.geometry("1100x750")
     
-    style.configure("Modern.Treeview",
-                    background="#ffffff",
-                    foreground="#1f2937",
-                    rowheight=32,
-                    fieldbackground="#ffffff",
-                    borderwidth=0,
-                    font=('Segoe UI', 10))
+    col_bg = "#f3f4f6" if ctk.get_appearance_mode() == "Light" else "#111827"
+    col_card = "#ffffff" if ctk.get_appearance_mode() == "Light" else "#1f2937"
+    col_border = "#e5e7eb" if ctk.get_appearance_mode() == "Light" else "#374151"
+    font_title = ("Segoe UI", 15, "bold")
+    font_normal = ("Segoe UI", 14)
+    font_big = ("Segoe UI", 24, "bold")
     
-    style.configure("Modern.Treeview.Heading",
-                    background="#f3f4f6",
-                    foreground="#374151",
-                    relief="flat",
-                    borderwidth=1,
-                    font=('Segoe UI', 10, 'bold'))
-    
-    style.map("Modern.Treeview.Heading",
-              background=[('active', '#e5e7eb')])
-    
-    style.map('Modern.Treeview',
-              background=[('selected', '#3b82f6')],
-              foreground=[('selected', 'white')])
+    win.configure(fg_color=col_bg)
 
     # VALIDADORES
     def validar_len_30(t): return len(t) <= 30
     def validar_cantidad(t):
         if t == "": return True
-        if len(t) > 5: return False  # max 5 chars: "1.750"
-        # Permite: solo digitos, o digitos con punto/coma decimal
-        import re
+        if len(t) > 5: return False
         return bool(re.match(r'^[0-9]{0,4}[.,]?[0-9]{0,3}$', t))
     
     vc_30 = (win.register(validar_len_30), '%P')
     vc_cantidad = (win.register(validar_cantidad), '%P')
 
-    items: list[tuple[int | None, str, int, float, str]] = []
-    cliente_sel: dict[str, Any] | None = None
-    total_venta: float = 0.0 
+    items = []
+    cliente_sel = None
+    total_venta = 0.0 
 
-    # ================================================================
-    # ESTRUCTURA DE LAYOUT (FRAMES)
-    # ================================================================
+    # ==================================
+    # ESTRUCTURA LAYOUT CTK
+    # ==================================
+    frm_header = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_width=1, border_color=col_border)
+    frm_header.pack(fill="x", padx=25, pady=(25, 10))
+
+    frm_inputs = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_width=1, border_color=col_border)
+    frm_inputs.pack(fill="x", padx=25, pady=10)
     
-    # 1. HEADER (Cliente)
-    frm_header = tk.Frame(win, bg="#ffffff", pady=12, padx=15, relief="flat", bd=0)
-    frm_header.pack(fill="x", padx=10, pady=(10, 5))
-
-    # 2. INPUTS (Cantidad y Producto - ORDEN INVERTIDO)
-    frm_inputs = tk.Frame(win, bg="#f4f4f8", pady=8)
-    frm_inputs.pack(fill="x", padx=10, pady=5)
-
-    # 3. LISTA (Treeview)
-    frm_lista = tk.Frame(win, bg="#f4f4f8", relief="flat", bd=0)
-    frm_lista.pack(fill="both", expand=True, padx=10, pady=5)
-
-    # 4. FOOTER (Total y Botones)
-    frm_footer = tk.Frame(win, bg="#f4f4f8", pady=15, padx=10)
-    frm_footer.pack(fill="x", side="bottom")
-
-    # ================================================================
-    # 1. SECCIÓN CLIENTE
-    # ================================================================
-    tk.Label(frm_header, text="👤 Cliente:", bg="#ffffff", font=("Segoe UI", 11, "bold"), fg="#1f2937").pack(side="left")
+    frm_footer = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_width=1, border_color=col_border)
+    frm_footer.pack(side="bottom", fill="x", padx=25, pady=(10, 25))
     
-    lbl_cliente = tk.Label(frm_header, text="(Consumidor Final)", bg="#ffffff", font=("Segoe UI", 11), fg="#6b7280")
-    lbl_cliente.pack(side="left", padx=(5, 20))
+    frm_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_width=1, border_color=col_border)
+    frm_lista.pack(fill="both", expand=True, padx=25, pady=10)
 
+    # 1. HEADER CLIENTE
+    ctk.CTkLabel(frm_header, text="👤 Cliente Actual:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=20, pady=20)
+    
+    lbl_cliente = ctk.CTkLabel(frm_header, text="(Consumidor Final)", font=("Segoe UI", 12), text_color="#6b7280")
+    lbl_cliente.pack(side="left")
+    
     def abrir_selector_cliente():
         nonlocal cliente_sel
-        popup = Toplevel(win)
+        popup = ctk.CTkToplevel(win)
         popup.title("Seleccionar Cliente")
-        popup.geometry("700x550")  # Altura aumentada para visibilidad
-        popup.config(bg="#f4f4f8")
+        popup.geometry("750x650")
+        aplicar_tema_ventana(popup)
+        popup.resizable(False, False)
         
-        # Marco de búsqueda
-        frm_bus = tk.Frame(popup, bg="#f4f4f8", pady=10)
-        frm_bus.pack(fill=tk.X, padx=15)
-        tk.Label(frm_bus, text="🔎 Buscar cliente:", bg="#f4f4f8", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+        frm_bus = ctk.CTkFrame(popup, fg_color="transparent")
+        frm_bus.pack(fill="x", padx=25, pady=(25, 10))
+        
+        ctk.CTkLabel(frm_bus, text="🔎 Buscar cliente:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).pack(side="left")
         var_bus = tk.StringVar()
-        ent_bus = tk.Entry(frm_bus, textvariable=var_bus, font=("Segoe UI", 10), width=40)
-        ent_bus.pack(side=tk.LEFT, padx=10)
+        ent_bus = ctk.CTkEntry(frm_bus, textvariable=var_bus, font=("Segoe UI", 13), width=450, height=40, placeholder_text="Nombre o DNI...")
+        ent_bus.pack(side="left", padx=20)
         ent_bus.focus_set()
         
-        # Marco para Treeview
-        frm_tree = tk.Frame(popup, bg="#f4f4f8")
-        frm_tree.pack(fill=tk.BOTH, expand=True, padx=15)
+        frm_tree_cont = ctk.CTkFrame(popup, fg_color=get_color("bg_surface"), corner_radius=10, border_width=1, border_color=get_color("border_color"))
+        frm_tree_cont.pack(fill="both", expand=True, padx=25, pady=10)
         
-        # 🔥 TABLA MODERNA: Solo ID, Nombre y DNI
         cols = ("ID", "Nombre", "DNI")
-        tree_c = ttk.Treeview(frm_tree, columns=cols, show="headings", height=12, style="Modern.Treeview")
-        tree_c.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        configurar_estilo_treeview()
+        tree_c = ttk.Treeview(frm_tree_cont, columns=cols, show="headings", height=8, style="Modern.Treeview")
+        tree_c.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        tree_c.column("ID", width=0, stretch=False)
+        tree_c.configure(displaycolumns=("Nombre", "DNI"))
         
-        sc_c = ttk.Scrollbar(frm_tree, orient="vertical", command=tree_c.yview)
-        sc_c.pack(side=tk.RIGHT, fill=tk.Y)
+        sc_c = ttk.Scrollbar(frm_tree_cont, orient="vertical", command=tree_c.yview)
+        sc_c.pack(side="right", fill="y", pady=5)
         tree_c.configure(yscrollcommand=sc_c.set)
         
-        tree_c.heading("ID", text="ID")
-        tree_c.heading("Nombre", text="Nombre")
-        tree_c.heading("DNI", text="DNI")
-        tree_c.column("ID", width=60, anchor="center")
-        tree_c.column("Nombre", width=350)
-        tree_c.column("DNI", width=150, anchor="center")
+        for c in cols: tree_c.heading(c, text=c)
+        tree_c.column("ID", width=80, anchor="center"); tree_c.column("Nombre", width=400); tree_c.column("DNI", width=150, anchor="center")
         
         todos_clis = backend.listar_clientes()
         
         def filtrar(*_):
-            for i in tree_c.get_children(): 
-                tree_c.delete(i)
+            for i in tree_c.get_children(): tree_c.delete(i)
             q = var_bus.get().lower()
             for c in todos_clis:
                 dni = c.get('dni') or "-"
                 if q in c['nombre'].lower() or q in str(dni):
                     tree_c.insert("", tk.END, values=(c['id_cliente'], c['nombre'], dni))
             hijos = tree_c.get_children()
-            if hijos: 
-                tree_c.selection_set(hijos[0])
+            if hijos: tree_c.selection_set(hijos[0])
         
         var_bus.trace_add("write", filtrar)
         filtrar()
@@ -260,8 +229,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         def seleccionar(event=None):
             nonlocal cliente_sel
             sel = tree_c.selection()
-            if not sel: 
-                return
+            if not sel: return
             cid = int(tree_c.item(sel[0], "values")[0])
             cliente_sel = next((c for c in todos_clis if c['id_cliente'] == cid), None)
             _upd_cliente()
@@ -270,9 +238,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         tree_c.bind("<Double-1>", seleccionar)
         tree_c.bind("<Return>", seleccionar)
         
-        # Marco de botones
-        fr_btns = tk.Frame(popup, bg="#f4f4f8", pady=15)
-        fr_btns.pack(fill=tk.X)
+        fr_btns = ctk.CTkFrame(popup, fg_color="transparent")
+        fr_btns.pack(fill="x", padx=25, pady=20)
         
         def limpiar_cliente():
             nonlocal cliente_sel
@@ -280,87 +247,68 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             _upd_cliente()
             popup.destroy()
         
-        tk.Button(fr_btns, text="✓ Seleccionar", bg="#10b981", fg="white",
-                  font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=10,
-                  command=seleccionar, cursor="hand2",
-                  activebackground="#059669", activeforeground="white").pack(side=tk.LEFT, padx=(20, 5))
-
-        def abrir_nuevo_cliente():
+        ctk.CTkButton(fr_btns, text="✓ Seleccionar", fg_color=get_color("button_primary"), hover_color=get_color("button_primary_hover"),
+                      font=("Segoe UI", 13, "bold"), height=45, command=seleccionar).pack(side="left", padx=5)
+        
+        def abrir_nuevo_cliente_popup():
             if ui_crear_cliente:
                 ui_crear_cliente(popup, backend)
-                # Recargar lista tras crear
                 nonlocal todos_clis
                 todos_clis = backend.listar_clientes()
                 filtrar()
-
-        tk.Button(fr_btns, text="➕ Nuevo Cliente", bg="#3b82f6", fg="white",
-                  font=("Segoe UI", 10, "bold"), relief="flat", padx=20, pady=10,
-                  command=abrir_nuevo_cliente, cursor="hand2").pack(side=tk.LEFT, padx=5)
-
-        tk.Button(fr_btns, text="Consumidor Final", bg="#6b7280", fg="white",
-                  font=("Segoe UI", 10), relief="flat", padx=15, pady=10,
-                  command=limpiar_cliente, cursor="hand2",
-                  activebackground="#4b5563", activeforeground="white").pack(side=tk.LEFT, padx=5)
+        
+        ctk.CTkButton(fr_btns, text="➕ Nuevo", fg_color=get_color("secondary") if hasattr(get_color, 'secondary') else "#10b981", 
+                      font=("Segoe UI", 13, "bold"), height=45, command=abrir_nuevo_cliente_popup).pack(side="left", padx=5)
+        
+        ctk.CTkButton(fr_btns, text="Consumidor Final", fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"),
+                      font=("Segoe UI", 13), height=45, command=limpiar_cliente).pack(side="left", padx=5)
         
         configurar_navegacion_ventana(popup)
         popup.after(100, lambda: ent_bus.focus_set())
         popup.grab_set()
-        popup.transient(win)
 
     def quitar_cliente():
-        nonlocal cliente_sel; cliente_sel = None; _upd_cliente()
+        nonlocal cliente_sel
+        cliente_sel = None
+        _upd_cliente()
 
     def _upd_cliente():
         if cliente_sel:
-            lbl_cliente.config(text=f"{cliente_sel.get('nombre','')} (ID: {cliente_sel.get('id_cliente','')})", 
-                             fg="#1f2937", font=("Segoe UI", 11, "bold"))
+            lbl_cliente.configure(text=f"{cliente_sel.get('nombre','')} (ID: {cliente_sel.get('id_cliente','')})", text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white", font=("Segoe UI", 12, "bold"))
         else:
-            lbl_cliente.config(text="(Consumidor Final)", fg="#6b7280", font=("Segoe UI", 11, "normal"))
+            lbl_cliente.configure(text="(Consumidor Final)", text_color="#6b7280", font=("Segoe UI", 12, "normal"))
 
-    btn_cli = tk.Button(frm_header, text="🔍 Buscar Cliente", command=abrir_selector_cliente, 
-                       bg="#3b82f6", fg="white", font=("Segoe UI", 10, "bold"),
-                       relief="flat", padx=15, pady=8, cursor="hand2",
-                       activebackground="#2563eb", activeforeground="white")
-    btn_cli.pack(side="left", padx=5)
-    
-    btn_no_cli = tk.Button(frm_header, text="× Quitar", command=quitar_cliente, 
-                          bg="#ef4444", fg="white", font=("Segoe UI", 9),
-                          relief="flat", padx=12, pady=8, cursor="hand2",
-                          activebackground="#dc2626", activeforeground="white")
-    btn_no_cli.pack(side="left", padx=5)
+    # Botones cliente
+    ctk.CTkButton(frm_header, text="🔍 Cambiar", font=font_title, fg_color="#3b82f6", width=120, height=45, command=abrir_selector_cliente).pack(side="right", padx=(10, 20))
+    btn_no_cli = ctk.CTkButton(frm_header, text="❌ Quitar", font=font_normal, fg_color="#ef4444", width=80, height=45, command=quitar_cliente)
+    btn_no_cli.pack(side="right")
 
-    # ================================================================
-    # 2. SECCIÓN INPUTS - 🔥 ORDEN INVERTIDO: CANTIDAD PRIMERO
-    # ================================================================
+    # 2. INPUTS
+    ctk.CTkLabel(frm_inputs, text="Cant.", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(20, 10), pady=20)
     
-    # 🔥 CANTIDAD PRIMERO
-    tk.Label(frm_inputs, text="Cant:", bg="#f4f4f8", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 5))
-    
-    entry_cantidad = tk.Entry(frm_inputs, width=8, font=("Segoe UI", 11), justify="center", validate="key", validatecommand=vc_cantidad)
+    entry_cantidad = ctk.CTkEntry(frm_inputs, font=font_big, width=100, height=45, justify="center")
+    entry_cantidad.configure(validate="key", validatecommand=vc_cantidad)
     entry_cantidad.insert(0, "1")
-    entry_cantidad.pack(side="left", padx=5)
+    entry_cantidad.pack(side="left", padx=10)
     
-    # 🔥 PRODUCTO DESPUÉS
-    tk.Label(frm_inputs, text="Código / Nombre:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side="left", padx=(15, 5))
+    # Forzar el foco directo al producto (evita que la etiqueta u otros elementos tomen foco intermedio)
+    entry_cantidad.bind("<Tab>", lambda e: "break" if entry_producto.focus_set() or True else "break")
     
-    entry_producto = tk.Entry(frm_inputs, width=30, font=("Segoe UI", 11), validate="key", validatecommand=vc_30)
-    entry_producto.pack(side="left", padx=5)
+    ctk.CTkLabel(frm_inputs, text="Código o Producto:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(30, 10))
     
-    # 🔥 Variables para popup de sugerencias y debounce del escáner
+    entry_producto = ctk.CTkEntry(frm_inputs, font=font_normal, height=45, placeholder_text="Escanee código o busque producto...")
+    entry_producto.configure(validate="key", validatecommand=vc_30)
+    entry_producto.pack(side="left", fill="x", expand=True, padx=10)
+    
     popup_sugerencias = None
     listbox_sugerencias = None
     sugerencias_activas = []
-    _debounce_id = None  # para cancelar búsquedas previas
+    _debounce_id = None
     
-    # BOTÓN AGREGAR
-    btn_agregar = tk.Button(frm_inputs, text="+ Agregar", 
-                           bg="#10b981", fg="white", font=("Segoe UI", 10, "bold"),
-                           relief="flat", padx=20, pady=8, cursor="hand2",
-                           activebackground="#059669", activeforeground="white")
-    btn_agregar.pack(side="left", padx=10)
-    
+    btn_agregar = ctk.CTkButton(frm_inputs, text="+ Agregar", font=font_title, fg_color="#10b981", hover_color="#059669", width=120, height=45)
+    btn_agregar.pack(side="left", padx=20)
+
     def abrir_creacion_producto_autorizado():
-        """Si el usuario es admin (rol 1), abre directamente. Si no, pide autorización."""
         def abrir_con_usuario(usr):
             if ui_productos:
                 ui_productos(
@@ -368,79 +316,58 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                     backend=backend,
                     usuario=usr,
                     id_producto_a_cargar=None,
-                    callback_on_save=lambda: messagebox.showinfo("Éxito", "Producto cargado. Ya puede escanearlo.")
+                    callback_on_save=lambda: messagebox.showinfo("Éxito", "Producto cargado. Ya puede escanearlo.", parent=win)
                 )
             else:
                 messagebox.showerror("Error", "Módulo de productos no disponible", parent=win)
 
         if usuario.get('id_rol') == 1:
-            # Admin: abre directo sin pedir autorización
             abrir_con_usuario(usuario)
         else:
             solicitar_autorizacion_supervisor(win, backend, usuario, abrir_con_usuario)
-    
-    btn_nuevo_producto = tk.Button(frm_inputs, text="🔓 Agregar Producto Nuevo", 
-                                   bg="#f59e0b", fg="white", font=("Segoe UI", 9, "bold"),
-                                   relief="flat", padx=15, pady=8, cursor="hand2",
-                                   command=abrir_creacion_producto_autorizado,
-                                   activebackground="#d97706", activeforeground="white")
+
+    btn_nuevo_producto = ctk.CTkButton(frm_inputs, text="🔓 Nuevo Prod.", font=font_normal, fg_color="#f59e0b", hover_color="#d97706", width=130, height=45, command=abrir_creacion_producto_autorizado)
     btn_nuevo_producto.pack(side="left", padx=5)
 
-    # ================================================================
-    # 3. LISTA (TREEVIEW)
-    # ================================================================
+    # 3. LISTA
+    # (Ya configurado al inicio de la función)
+    
     cols = ("ID", "Producto", "Precio", "Cant", "Subtotal")
     tree = ttk.Treeview(frm_lista, columns=cols, show="headings", style="Modern.Treeview")
-    
-    tree.column("ID", width=50, anchor="center")
-    tree.column("Producto", width=400, anchor="w")
-    tree.column("Precio", width=100, anchor="e")
-    tree.column("Cant", width=80, anchor="center")
-    tree.column("Subtotal", width=120, anchor="e")
+    tree.column("ID", width=0, stretch=False)
+    tree.configure(displaycolumns=("Producto", "Precio", "Cant", "Subtotal"))
+    tree.column("Producto", width=500, anchor="w")
+    tree.column("Precio", width=150, anchor="e")
+    tree.column("Cant", width=100, anchor="center")
+    tree.column("Subtotal", width=150, anchor="e")
     
     tree.heading("ID", text="ID")
-    tree.heading("Producto", text="Producto")
-    tree.heading("Precio", text="Precio Unit.")
-    tree.heading("Cant", text="Cant.")
-    tree.heading("Subtotal", text="Subtotal")
+    tree.heading("Producto", text="DESCRIPCIÓN")
+    tree.heading("Precio", text="PRECIO UNIT.")
+    tree.heading("Cant", text="CANT.")
+    tree.heading("Subtotal", text="SUBTOTAL")
     
     vsb = ttk.Scrollbar(frm_lista, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=vsb.set)
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+    vsb.pack(side="right", fill="y", pady=5)
+
+    # 4. FOOTER
+    btn_cancelar = ctk.CTkButton(frm_footer, text="🗑️ Cancelar", fg_color="#ef4444", hover_color="#dc2626", font=font_title, width=150, height=55)
+    btn_cancelar.pack(side="left", padx=20, pady=20)
+
+    btn_quitar = ctk.CTkButton(frm_footer, text="➖ Quitar Ítem", fg_color="#f59e0b", hover_color="#d97706", font=font_title, width=150, height=55)
+    btn_quitar.pack(side="left", padx=(0, 20), pady=20)
+
+    btn_confirmar = ctk.CTkButton(frm_footer, text="💳 COBRAR (F12)", fg_color="#10b981", hover_color="#059669", font=font_big, width=250, height=65)
+    btn_confirmar.pack(side="right", padx=20, pady=20)
+
+    lbl_total_monto = ctk.CTkLabel(frm_footer, text="$ 0.00", font=("Segoe UI", 48, "bold"), text_color="#111827" if ctk.get_appearance_mode()=="Light" else "white")
+    lbl_total_monto.pack(side="right", padx=30)
     
-    tree.pack(side="left", fill="both", expand=True)
-    vsb.pack(side="right", fill="y")
+    ctk.CTkLabel(frm_footer, text="TOTAL:", font=("Segoe UI", 18, "bold"), text_color="#6b7280").pack(side="right", padx=0)
 
-    # ================================================================
-    # 4. FOOTER (TOTALES Y ACCIONES)
-    # ================================================================
     
-    btn_quitar = tk.Button(frm_footer, text="🗑️ Quitar Seleccionado", 
-                          bg="#f3f4f6", fg="#ef4444", font=("Segoe UI", 9, "bold"),
-                          relief="flat", padx=15, pady=8, cursor="hand2",
-                          activebackground="#e5e7eb", activeforeground="#dc2626")
-    btn_quitar.pack(side="left")
-
-    frame_totales = tk.Frame(frm_footer, bg="#f4f4f8")
-    frame_totales.pack(side="right")
-
-    lbl_total_titulo = tk.Label(frame_totales, text="TOTAL A PAGAR:", font=("Segoe UI", 12), bg="#f4f4f8", fg="#6b7280")
-    lbl_total_titulo.pack(side="left", padx=5)
-    
-    lbl_total_monto = tk.Label(frame_totales, text="$ 0.00", font=("Segoe UI", 24, "bold"), bg="#f4f4f8", fg="#059669")
-    lbl_total_monto.pack(side="left", padx=10)
-
-    btn_confirmar = tk.Button(frame_totales, text="✓ COBRAR", 
-                             bg="#10b981", fg="white", font=("Segoe UI", 12, "bold"),
-                             relief="flat", padx=30, pady=10, cursor="hand2",
-                             activebackground="#059669", activeforeground="white")
-    btn_confirmar.pack(side="left", padx=(20, 5))
-    
-    btn_cancelar = tk.Button(frame_totales, text="Cancelar", 
-                            bg="#6b7280", fg="white", font=("Segoe UI", 10),
-                            relief="flat", padx=15, pady=10, cursor="hand2",
-                            activebackground="#4b5563", activeforeground="white")
-    btn_cancelar.pack(side="left", padx=5)
-
     # ================================================================
     # LÓGICA - 🔥 BÚSQUEDA DINÁMICA CON POPUP FLOTANTE
     # ================================================================
@@ -488,10 +415,10 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             
             # Crear popup si no existe
             if popup_sugerencias is None or not popup_sugerencias.winfo_exists():
-                popup_sugerencias = tk.Toplevel(win)
+                popup_sugerencias = ctk.CTkToplevel(win)
                 popup_sugerencias.withdraw()  # Ocultar inicialmente
                 popup_sugerencias.overrideredirect(True)  # Sin bordes de ventana
-                popup_sugerencias.config(bg="#ffffff", relief="solid", bd=1)
+                popup_sugerencias.config(bg="#1e293b", relief="solid", bd=1)
                 
                 listbox_sugerencias = tk.Listbox(
                     popup_sugerencias,
@@ -500,7 +427,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                     font=("Segoe UI", 10),
                     selectmode=tk.SINGLE,
                     relief="flat",
-                    bg="#ffffff",
+                    bg="#1e293b",
+                    fg="#e2e8f0",
                     selectbackground="#3b82f6",
                     selectforeground="white",
                     highlightthickness=0
@@ -644,7 +572,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                 f"$ {parcial:,.2f}"
             ))
             
-        lbl_total_monto.config(text=f"$ {total_venta:,.2f}")
+        lbl_total_monto.configure(text=f"$ {total_venta:,.2f}")
 
     def quitar_seleccion(event=None):
         sel = tree.selection()
@@ -660,7 +588,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         
         _refrescar_lista()
 
-    btn_quitar.config(command=quitar_seleccion)
+    btn_quitar.configure(command=quitar_seleccion)
     tree.bind("<Delete>", quitar_seleccion)
     
     def _reiniciar_venta_completa():
@@ -772,7 +700,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         # 🔥 VOLVER A CANTIDAD (flujo continuo)
         entry_cantidad.focus_set()
 
-    btn_agregar.config(command=agregar_producto)
+    btn_agregar.configure(command=agregar_producto)
     
     def confirmar_venta():
         if not items:
@@ -862,14 +790,20 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         _reiniciar_venta_completa()
         win.after(100, lambda: stock_events.notificar_cambio_stock())
 
-    btn_confirmar.config(command=confirmar_venta)
-    btn_cancelar.config(command=win.destroy)
+    def cancelar_venta():
+        if items:
+            if not messagebox.askyesno("Confirmar", "Hay productos en el carrito.\n¿Seguro que desea cancelar la venta?", parent=win):
+                return
+        win.destroy()
+
+    btn_confirmar.configure(command=confirmar_venta)
+    btn_cancelar.configure(command=cancelar_venta)
 
     _upd_cliente()
     
     win.bind("<F2>", lambda e: abrir_selector_cliente())
-    win.bind("<F5>", lambda e: confirmar_venta())
-    win.bind("<Escape>", lambda e: win.destroy())
+    win.bind("<F12>", lambda e: confirmar_venta())
+    win.bind("<Escape>", lambda e: cancelar_venta())
     
     configurar_navegacion_ventana(win)
     # 🔥 FOCO INICIAL EN CANTIDAD (no en producto)

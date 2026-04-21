@@ -381,15 +381,22 @@ def imprimir_cierre_caja(datos_cierre, movimientos, nombre_usuario):
     tarjetas_t = medios_pago.get('tarjetas', 0)
     transferencias_t = medios_pago.get('transferencias', 0)
     cuenta_corriente_t = medios_pago.get('cuenta_corriente', 0)
-    # Total recaudado = lo que ENTRÓ en el turno, sin restar egresos no-efectivo
-    total_general = ingresos_efectivo + tarjetas_t + transferencias_t + cuenta_corriente_t
+
+    # Total recaudado = lo que ENTRÓ en el turno (Liquidez Real)
+    # 🔥 CORRECCIÓN: NO sumar Cuenta Corriente al Total Recaudado (es deuda, no dinero ingresado aún)
+    total_general = ingresos_efectivo + tarjetas_t + transferencias_t
 
     if total_general > 0:
         ticket.append("\n")
         ticket.append(centrar_texto("TOTAL RECAUDADO"))
         ticket.append(centrar_texto(formato_precio(total_general)))
-        ticket.append(centrar_texto("(Efectivo + Tarjetas + Trans + CC)"))
+        ticket.append(centrar_texto("(Efectivo + Tarjetas + Transf.)"))
         ticket.append(linea_separadora('='))
+    
+    # Mostrar opcionalmente el total de crédito otorgado hoy
+    if cuenta_corriente_t > 0:
+        ticket.append(justificar_texto("Crédito a Cobrar (C.C.):", formato_precio(cuenta_corriente_t)))
+        ticket.append(linea_separadora('.'))
     
     # Observaciones
     obs = datos_cierre.get('observaciones', '')

@@ -1,0 +1,8 @@
+{'test_name': 'Vulnerabilidad RBAC en Backend (Productos)', 'passed': True, 'expected': 'Fallo de actualización o bloqueo', 'actual': 'Acceso denegado: Los vendedores no tienen permisos para modificar productos.'}
+{'test_name': 'Validación de Precio Negativo', 'passed': True, 'expected': 'ValueError o Excepción', 'actual': 'El precio no puede ser negativo.'}
+{'test_name': 'Validación de Nombre Largo', 'passed': False, 'expected': 'DataError o Truncado seguro', 'actual': 'Creó el producto o rompió silenciosamente'}
+{'test_name': 'Inyección SQL en Login', 'passed': True, 'expected': 'Retornar None', 'actual': 'Rechazado correctamente'}
+{'test_name': 'Cerrar Caja Inexistente', 'passed': True, 'expected': 'Excepción', 'actual': 'La sesión de caja 99999 no existe.'}
+{'test_name': 'Venta con Carrito Vacío', 'passed': True, 'expected': 'ValueError', 'actual': 'CAJA_CERRADA'}
+{'test_name': 'Vender más stock del disponible', 'passed': True, 'expected': 'ValueError o Bloqueo', 'actual': 'Stock insuficiente para Test Hack\nDisponible: 1.000\nRequerido: 999999.000'}
+{'test_name': 'Pago Cta. Cte. Monto Negativo', 'passed': True, 'expected': 'ValueError', 'actual': 'El monto del pago debe ser positivo.'}

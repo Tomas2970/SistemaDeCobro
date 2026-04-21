@@ -9,7 +9,7 @@ try:
     from app.frontend.componentes_ui import EntryDecimal
 except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
-    class EntryDecimal(tk.Entry): pass
+    EntryDecimal = None  # Se resolverá al importar ctk dentro de la función
 
 try:
     from app.frontend.interfaz_asignar_productos import ui_asignar_productos
@@ -21,47 +21,41 @@ def _fmt_mon(val):
     except: return "$ 0.00"
 
 def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None): 
+    import customtkinter as ctk
+    from app.frontend.theme_config import get_color, configurar_estilo_treeview
     
-    win = tk.Toplevel(parent)
+    # 🔥 CARGA DE ESTILOS Y COLORES
+    configurar_estilo_treeview()
+    col_bg = get_color("bg_root")
+    col_card = get_color("bg_surface")
+    col_text = get_color("text_primary")
+    col_input_bg = "#374151"
+    col_input_fg = "#ffffff"
+    col_border = "#2d3748"
+
+    win = ctk.CTkToplevel(parent)
     win.title("Gestión de Empresas Proveedoras")
     win.geometry("1150x650") 
-    win.config(bg="#f4f4f8")
+    win.configure(fg_color=col_bg)
     win.resizable(False, False)
-    
-    style = ttk.Style()
-    style.theme_use('clam')
-    style.configure("Modern.Treeview",
-                    background="#ffffff",
-                    foreground="#1f2937",
-                    rowheight=32,
-                    fieldbackground="#ffffff",
-                    borderwidth=0,
-                    font=('Segoe UI', 10))
-    style.configure("Modern.Treeview.Heading",
-                    background="#f3f4f6",
-                    foreground="#374151",
-                    relief="flat",
-                    borderwidth=1,
-                    font=('Segoe UI', 10, 'bold'))
-    style.map("Modern.Treeview.Heading", background=[('active', '#e5e7eb')])
 
     # --- BARRA DE BÚSQUEDA ---
-    frame_busqueda = tk.Frame(win, bg="#f4f4f8")
-    frame_busqueda.pack(pady=(15,0), padx=20, fill="x")
+    frame_busqueda = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_busqueda.pack(pady=(20,5), padx=25, fill="x")
     
-    tk.Label(frame_busqueda, text="🔍", bg="#f4f4f8", font=("Segoe UI", 14)).pack(side=tk.LEFT)
-    tk.Label(frame_busqueda, text="Buscar Empresa/CUIT:", bg="#f4f4f8", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(5,10))
+    ctk.CTkLabel(frame_busqueda, text="🔍 Buscar Empresa/CUIT:", font=("Segoe UI", 13, "bold"), text_color=col_text).pack(side="left", padx=15, pady=15)
     var_busqueda = tk.StringVar()
-    entry_busqueda = tk.Entry(frame_busqueda, textvariable=var_busqueda, width=35, font=("Segoe UI", 10))
-    entry_busqueda.pack(side=tk.LEFT)
+    
+    entry_busqueda = ctk.CTkEntry(frame_busqueda, textvariable=var_busqueda, font=("Segoe UI", 12), width=350, height=38, placeholder_text="Empresa o CUIT...")
+    entry_busqueda.pack(side="left", padx=10, pady=15)
 
-    frame_lista = tk.Frame(win, bg="#f4f4f8")
-    frame_lista.pack(pady=10, padx=20, fill="both", expand=True)
+    frame_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_lista.pack(pady=10, padx=25, fill="both", expand=True)
 
     # 🔥 COLUMNAS FILTRADAS: Solo datos de Empresa
     cols = ["ID", "Empresa", "CUIT", "Teléfono", "Email", "Dirección", "Saldo (Deuda)", "Activo"]
-    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=15, style="Modern.Treeview")
-    tree.pack(side="left", fill="both", expand=True)
+    tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=7, style="Modern.Treeview")
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
     ys.pack(side="right", fill="y")
@@ -70,6 +64,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     for c in cols: tree.heading(c, text=c)
     
     tree.column("ID", width=0, minwidth=0, stretch=False)
+    tree.configure(displaycolumns=[c for c in cols if c != "ID"])
     tree.column("Empresa", width=220) 
     tree.column("CUIT", width=130, anchor="center")
     tree.column("Teléfono", width=110)
@@ -78,9 +73,9 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     tree.column("Saldo (Deuda)", width=120, anchor="e")
     tree.column("Activo", width=80, anchor="center")
     
-    tree.tag_configure("deuda", foreground="#dc2626")
-    tree.tag_configure("favor", foreground="#16a34a")
-    tree.tag_configure("cero", foreground="black")
+    tree.tag_configure("deuda", foreground="#f87171")
+    tree.tag_configure("favor", foreground="#4ade80")
+    tree.tag_configure("cero", foreground="#f9fafb")
 
     var_mostrar_inactivos = tk.BooleanVar(value=False)
     todos_proveedores = []
@@ -152,27 +147,28 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         id_prov = int(item_vals[0])
         nombre_empresa = item_vals[1]
         
-        pop = Toplevel(win)
+        pop = ctk.CTkToplevel(win)
         pop.title(f"Registrar Pago a {nombre_empresa}")
-        pop.geometry("400x350")
-        pop.config(bg="#f4f4f8") 
+        pop.geometry("400x450")
+        pop.configure(fg_color=col_bg)
         pop.transient(win)
         pop.grab_set()
         
-        tk.Label(pop, text=f"Empresa: {nombre_empresa}", font=("Segoe UI", 12, "bold"), bg="#f4f4f8").pack(pady=10)
-        tk.Label(pop, text="Monto a abonar ($):", bg="#f4f4f8").pack(pady=5)
-        ent_monto = EntryDecimal(pop, font=("Segoe UI", 12), width=15, justify="center")
-        ent_monto.pack()
+        ctk.CTkLabel(pop, text=f"Empresa: {nombre_empresa}", font=("Segoe UI", 14, "bold")).pack(pady=20)
+        ctk.CTkLabel(pop, text="Monto a abonar ($):", font=("Segoe UI", 12)).pack(pady=2)
+        _EntryDecimal = EntryDecimal if EntryDecimal else ctk.CTkEntry
+        ent_monto = _EntryDecimal(pop, font=("Segoe UI", 14), width=180, height=40, justify="center")
+        ent_monto.pack(pady=5)
         ent_monto.focus_set()
         
-        tk.Label(pop, text="Medio de Pago:", bg="#f4f4f8").pack(pady=5)
-        cb_medio = ttk.Combobox(pop, values=["efectivo", "transferencia", "cheque"], state="readonly", width=18)
-        cb_medio.current(0)
-        cb_medio.pack()
+        ctk.CTkLabel(pop, text="Medio de Pago:", font=("Segoe UI", 12)).pack(pady=(10, 2))
+        cb_medio = ctk.CTkOptionMenu(pop, values=["efectivo", "transferencia", "cheque"], width=180, height=35)
+        cb_medio.set("efectivo")
+        cb_medio.pack(pady=5)
         
-        tk.Label(pop, text="Observación:", bg="#f4f4f8").pack(pady=5)
-        ent_obs = tk.Entry(pop, width=30)
-        ent_obs.pack()
+        ctk.CTkLabel(pop, text="Observación:", font=("Segoe UI", 12)).pack(pady=(10, 2))
+        ent_obs = ctk.CTkEntry(pop, width=250, height=35, placeholder_text="Opcional...")
+        ent_obs.pack(pady=5)
         
         def confirmar_pago():
             try:
@@ -196,8 +192,8 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             except Exception as e:
                 messagebox.showerror("Error", str(e), parent=pop)
                 
-        tk.Button(pop, text="CONFIRMAR PAGO", command=confirmar_pago, bg="#16a34a", fg="white", 
-                  font=("Segoe UI", 10, "bold"), relief="flat", padx=15, pady=8, cursor="hand2").pack(pady=20)
+        ctk.CTkButton(pop, text="✓ CONFIRMAR PAGO", command=confirmar_pago, fg_color="#10b981", hover_color="#059669", 
+                      font=("Segoe UI", 13, "bold"), height=45).pack(pady=20, padx=40, fill="x")
         configurar_navegacion_ventana(pop)
 
     def abrir_asignar_productos():
@@ -232,42 +228,17 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
                 messagebox.showerror("Error", f"{e}", parent=win)
 
     # --- FRAME DE BOTONES ---
-    frame_botones = tk.Frame(win, bg="#f4f4f8")
-    frame_botones.pack(pady=15, fill="x", padx=20)
+    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
+    frame_botones.pack(pady=(5, 20), fill="x", padx=25)
 
-    frame_acciones = tk.Frame(frame_botones, bg="#f4f4f8")
-    frame_acciones.pack(side=tk.LEFT)
-
-    tk.Button(frame_acciones, text="➕ Nueva Empresa", command=accion_nuevo, 
-              bg="#16a34a", fg="white", font=("Segoe UI", 10, "bold"), 
-              relief="flat", padx=15, pady=8, cursor="hand2").pack(side=tk.LEFT, padx=5)
+    ctk.CTkButton(frame_botones, text="➕ Nueva Empresa", command=accion_nuevo, fg_color="#16a34a", hover_color="#15803d", font=("Segoe UI", 13, "bold"), width=160, height=45).pack(side=tk.LEFT, padx=10)
+    ctk.CTkButton(frame_botones, text="💳 PAGAR", command=abrir_pagar_deuda, fg_color="#0ea5e9", hover_color="#0284c7", font=("Segoe UI", 13, "bold"), width=120, height=45).pack(side=tk.LEFT, padx=5)
+    ctk.CTkButton(frame_botones, text="📦 Productos", command=abrir_asignar_productos, fg_color="#7c3aed", hover_color="#6d28d9", font=("Segoe UI", 13), width=120, height=45).pack(side=tk.LEFT, padx=5)
     
-    tk.Button(frame_acciones, text="💳 PAGAR", command=abrir_pagar_deuda, 
-              bg="#0ea5e9", fg="white", font=("Segoe UI", 9, "bold"), 
-              relief="flat", padx=12, pady=7, cursor="hand2").pack(side=tk.LEFT, padx=5)
+    # CHECKBOX Y CERRAR
+    ctk.CTkCheckBox(frame_botones, text="Ver Inactivas", variable=var_mostrar_inactivos, font=("Segoe UI", 12), command=cargar_datos).pack(side=tk.LEFT, padx=15)
     
-    tk.Button(frame_acciones, text="📦 Productos", command=abrir_asignar_productos, 
-              bg="#7c3aed", fg="white", font=("Segoe UI", 9), 
-              relief="flat", padx=12, pady=7, cursor="hand2").pack(side=tk.LEFT, padx=5)
-    
-    tk.Button(frame_acciones, text="🗑️ Desactivar", command=desactivar_proveedor, 
-              bg="#dc2626", fg="white", font=("Segoe UI", 9), 
-              relief="flat", padx=12, pady=7, cursor="hand2").pack(side=tk.LEFT, padx=5)
-
-    btn_activar = tk.Button(frame_acciones, text="✅ Activar", command=activar_proveedor, 
-                            bg="#059669", fg="white", font=("Segoe UI", 9), 
-                            relief="flat", padx=12, pady=7, cursor="hand2")
-
-    def toggle_mostrar_inactivos():
-        cargar_datos()
-        if var_mostrar_inactivos.get(): btn_activar.pack(side=tk.LEFT, padx=5)
-        else: btn_activar.pack_forget()
-
-    tk.Checkbutton(frame_botones, text="Ver Inactivas", variable=var_mostrar_inactivos, 
-                   bg="#f4f4f8", font=("Segoe UI", 9), command=toggle_mostrar_inactivos).pack(side=tk.LEFT, padx=30)
-
-    tk.Button(frame_botones, text="Cerrar", command=win.destroy, bg="#64748b", fg="white", 
-              font=("Segoe UI", 9), relief="flat", padx=15, pady=7, cursor="hand2").pack(side=tk.RIGHT)
+    ctk.CTkButton(frame_botones, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 13, "bold"), width=110, height=45).pack(side=tk.RIGHT, padx=10)
 
     cargar_datos()
     entry_busqueda.focus_set()
