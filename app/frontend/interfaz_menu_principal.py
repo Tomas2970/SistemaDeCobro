@@ -1,6 +1,7 @@
 # app/frontend/interfaz_menu_principal.py
 import customtkinter as ctk
 from tkinter import messagebox
+from app.frontend.custom_dialogs import mostrar_confirmacion, mostrar_advertencia, mostrar_error, mostrar_info
 import logging
 from app.database.permisos import tiene_permiso
 from app.frontend.stock_event_manager import stock_events
@@ -29,14 +30,14 @@ ui_gestion_proveedores = _safe_import("app.frontend.interfaz_gestion_proveedores
 
 def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     if not callable(fn):
-        messagebox.showinfo("No disponible", f"La pantalla '{nombre}' no está integrada.", parent=root)
+        mostrar_info("No disponible", f"La pantalla '{nombre}' no está integrada.", parent=root)
         return
     try:
         try: fn(root, backend, usuario, **kwargs)
         except TypeError: fn(root, backend)
     except Exception as e:
         logger.exception(f"Error abriendo {nombre}")
-        messagebox.showerror("Error", f"Error al abrir {nombre}:\n{e}", parent=root)
+        mostrar_error("Error", f"Error al abrir {nombre}:\n{e}", parent=root)
 
 def ui_menu_principal(parent, backend, usuario):
     win = parent
@@ -105,9 +106,9 @@ def ui_menu_principal(parent, backend, usuario):
     def cerrar_sesion(*_):
         caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
         if caja_abierta:
-            messagebox.showwarning("Caja Abierta", "Debes cerrar tu caja antes de salir.")
+            mostrar_advertencia("Caja Abierta", "Debes cerrar tu caja antes de salir.")
             return
-        if messagebox.askyesno("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
+        if mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
             stock_events.desuscribir(check_stock)
             win.quit()
 

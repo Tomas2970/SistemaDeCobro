@@ -334,17 +334,39 @@ def activar_cliente_logico(id_cliente: int) -> bool:
 # ======================================================
 # En app/database/DB.py
 
-def obtener_categorias() -> list[dict]:
+def obtener_categorias(incluir_inactivas: bool = False) -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        # AGREGAMOS 'es_pesable_default'
-        cur.execute("SELECT id_categoria, nombre, margen_ganancia, es_pesable_default FROM Categoria WHERE activa=1 ORDER BY nombre")
+        sql = "SELECT id_categoria, nombre, margen_ganancia, es_pesable_default, activa FROM Categoria"
+        if not incluir_inactivas:
+            sql += " WHERE activa=1"
+        sql += " ORDER BY nombre"
+        cur.execute(sql)
         return list(cur.fetchall() or [])
     except Exception as e:
         logger.error(f"obtener_categorias: {e}")
         return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
+
+def obtener_categoria_por_id(id_categoria: int) -> Optional[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT id_categoria, nombre, margen_ganancia, es_pesable_default, activa FROM Categoria WHERE id_categoria = %s",
+            (id_categoria,)
+        )
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"obtener_categoria_por_id: {e}")
+        return None
     finally:
         try:
             if cur: cur.close()
@@ -424,6 +446,26 @@ def eliminar_categoria(id_categoria: int) -> bool:
     except Exception as e:
         logger.error(f"eliminar_categoria: {e}")
         raise
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception: pass
+
+def reactivar_categoria(id_categoria: int) -> bool:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE Categoria SET activa = 1 WHERE id_categoria = %s",
+            (id_categoria,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"reactivar_categoria: {e}")
+        return False
     finally:
         try:
             if cur: cur.close()

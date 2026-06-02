@@ -88,11 +88,11 @@ class CuentaCorriente:
 
         cols = ("ID Cliente", "Nombre", "DNI", "Teléfono", "Email", "Saldo Actual", "Límite Crédito")
         self.tree_deudores = ttk.Treeview(frm_lista, columns=cols, show="headings", height=15, style="Modern.Treeview")
-        self.tree_deudores.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
-        ys = ttk.Scrollbar(frm_lista, orient="vertical", command=self.tree_deudores.yview)
-        ys.pack(side="right", fill="y", pady=5)
+        ys = ctk.CTkScrollbar(frm_lista, command=self.tree_deudores.yview)
+        ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
         self.tree_deudores.configure(yscrollcommand=ys.set)
+        self.tree_deudores.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
         for col in cols: self.tree_deudores.heading(col, text=col)
         self.tree_deudores.column("ID Cliente", width=0, minwidth=0, stretch=False)
@@ -104,8 +104,8 @@ class CuentaCorriente:
         self.tree_deudores.column("Límite Crédito", width=150, anchor="e")
         
         self.tree_deudores.tag_configure("deuda", foreground="#f87171")
-        self.tree_deudores.tag_configure("favor", foreground="#4ade80")
-        self.tree_deudores.tag_configure("cero", foreground="#f9fafb")
+        self.tree_deudores.tag_configure("favor", foreground="#10b981")
+        self.tree_deudores.tag_configure("cero", foreground="#6b7280" if ctk.get_appearance_mode() == "Light" else "#9ca3af")
         self.tree_deudores.bind("<Double-1>", self.on_doble_click)
         
         frame_botones = ctk.CTkFrame(self.win, fg_color="transparent")
@@ -227,17 +227,21 @@ class CuentaCorriente:
         try:
             monto_raw = self.entry_monto.get().strip()
             if not monto_raw:
-                messagebox.showwarning("Atención", "Ingrese un monto.", parent=self.win_pago)
+                messagebox.showwarning("Monto Requerido", "Por favor, ingresa el monto del pago a registrar.", parent=self.win_pago)
                 return
-            monto = float(monto_raw.replace(",", "."))
+            try:
+                monto = float(monto_raw.replace(",", "."))
+            except ValueError:
+                messagebox.showwarning("Monto Inválido", "El monto ingresado para el pago no es un número válido.", parent=self.win_pago)
+                return
             
             if monto <= 0:
-                messagebox.showwarning("Atención", "El monto debe ser mayor a 0.", parent=self.win_pago)
+                messagebox.showwarning("Monto Inválido", "El monto ingresado para el pago debe ser mayor a cero.", parent=self.win_pago)
                 return
             if monto > self._deuda_maxima + 0.01:
                 messagebox.showwarning(
-                    "Monto excede la deuda",
-                    f"La deuda es de $ {self._deuda_maxima:,.2f}. No puede ingresar un monto mayor.",
+                    "Monto Excesivo",
+                    f"El monto ingresado supera la deuda actual del cliente ($ {self._deuda_maxima:,.2f}). Por favor, ajusta el monto del pago.",
                     parent=self.win_pago
                 )
                 self.entry_monto.delete(0, tk.END)
@@ -252,19 +256,19 @@ class CuentaCorriente:
             
             resultado = self.backend.registrar_pago_cuenta_corriente(id_cuenta, monto, metodo_sql, uid)
             if resultado:
-                messagebox.showinfo("Éxito", "Pago registrado correctamente.", parent=self.win_pago)
+                messagebox.showinfo("Éxito", "El pago de cuenta corriente fue registrado correctamente.", parent=self.win_pago)
                 self.win_pago.destroy()
                 self.cargar_deudores()
             else:
-                messagebox.showerror("Error", "No se pudo registrar el pago. Revisá que la caja esté abierta.", parent=self.win_pago)
+                from app.frontend.manejador_errores import ManejadorErroresUI
+                ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el pago. Asegúrate de que la caja de cobros esté abierta."), parent=self.win_pago, contexto="caja")
                 
         except ValueError as ve:
-            if "CAJA_CERRADA" in str(ve):
-                messagebox.showerror("Caja Cerrada", "No se puede procesar el pago porque la caja está cerrada.", parent=self.win_pago)
-            else:
-                messagebox.showerror("Error", f"Monto inválido: {ve}", parent=self.win_pago)
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(ve, parent=self.win_pago, contexto="monto")
         except Exception as e:
-            messagebox.showerror("Error Crítico", f"No se pudo procesar el pago: {e}", parent=self.win_pago)
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=self.win_pago, contexto="pago")
 
     def calcular_saldo_proyectado(self, event=None):
         try: pago = float(self.entry_monto.get().replace(",", ".") or 0)

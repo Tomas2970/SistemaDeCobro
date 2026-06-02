@@ -12,7 +12,7 @@ except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 import customtkinter as ctk
-from app.frontend.theme_config import get_color, aplicar_tema_ventana
+from app.frontend.theme_config import get_color, aplicar_tema_ventana, preparar_ventana, centrar_y_mostrar_ventana
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,9 @@ class CrearEditarUsuario:
         self.col_border = "#2d3748"
 
         self.win = ctk.CTkToplevel(parent)
-        self.win.configure(fg_color=self.col_bg)
+        preparar_ventana(self.win)
         self.win.geometry("550x550") 
         self.win.resizable(False, False)
-        aplicar_tema_ventana(self.win)
 
         self.roles_map: dict[str, int] = {}
         
@@ -44,10 +43,10 @@ class CrearEditarUsuario:
         self.cargar_datos_iniciales()
         
         configurar_navegacion_ventana(self.win)
-        
+        self.win.transient(parent)
+        centrar_y_mostrar_ventana(self.win)
         self.win.after(50, lambda: self.entry_nombre.focus_set())
         self.win.grab_set()
-        self.win.transient(parent)
 
     def crear_widgets(self):
         # Título
@@ -135,7 +134,8 @@ class CrearEditarUsuario:
             rol_nombres = list(self.roles_map.keys())
             self.combo_rol.configure(values=rol_nombres)
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron cargar los roles: {e}", parent=self.win)
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=self.win, contexto="roles")
             self.win.destroy()
             return
             
@@ -153,7 +153,7 @@ class CrearEditarUsuario:
         rol_nombre = self.combo_rol.get()
         
         if not nombre or not rol_nombre:
-            messagebox.showwarning("Campos vacíos", "Nombre y Rol son obligatorios.", parent=self.win)
+            messagebox.showwarning("Campos Obligatorios", "Por favor, completa los campos de Nombre del Usuario y Rol del Sistema.", parent=self.win)
             return
             
         id_rol = self.roles_map.get(rol_nombre)
@@ -169,45 +169,42 @@ class CrearEditarUsuario:
                 )
                 
                 if ok_rol_nombre:
-                    messagebox.showinfo("Éxito", f"Usuario '{nombre}' actualizado.", parent=self.win)
+                    messagebox.showinfo("Éxito", f"Usuario '{nombre}' actualizado correctamente.", parent=self.win)
                     if self.callback_on_save: 
                         self.callback_on_save()
                     self.win.destroy()
                 else:
-                    messagebox.showerror("Error", "No se pudo actualizar el usuario.", parent=self.win)
+                    from app.frontend.manejador_errores import ManejadorErroresUI
+                    ManejadorErroresUI.manejar_error(Exception("No se pudo actualizar la información del usuario en el sistema."), parent=self.win, contexto=nombre)
             else:
                 pass1 = self.var_pass1.get()
                 pass2 = self.var_pass2.get()
                 
                 if not pass1 or not pass2:
-                    messagebox.showwarning("Campos vacíos", "La contraseña es obligatoria.", parent=self.win)
+                    messagebox.showwarning("Contraseña Requerida", "Por favor, ingresa y confirma la contraseña para crear el usuario.", parent=self.win)
                     return
                 if pass1 != pass2:
-                    messagebox.showwarning("Error", "Las contraseñas no coinciden.", parent=self.win)
+                    messagebox.showwarning("Contraseñas no Coincidentes", "Las contraseñas ingresadas no coinciden. Por favor, verifícalas.", parent=self.win)
                     return
                 
                 nuevo_id = self.backend.crear_usuario(nombre, pass1, id_rol)
                 if nuevo_id:
-                    messagebox.showinfo("Éxito", f"Usuario '{nombre}' creado.", parent=self.win)
+                    messagebox.showinfo("Éxito", f"Usuario '{nombre}' creado correctamente.", parent=self.win)
                     if self.callback_on_save: 
                         self.callback_on_save()
                     self.win.destroy()
                 else:
-                    messagebox.showerror("Error", "No se pudo crear (¿Nombre duplicado?).", parent=self.win)
+                    from app.frontend.manejador_errores import ManejadorErroresUI
+                    ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el nuevo usuario en el sistema. Asegúrate de que el nombre no esté duplicado."), parent=self.win, contexto=nombre)
 
         except ValueError as ve:
-            if "NOMBRE_DUPLICADO" in str(ve):
-                messagebox.showerror(
-                    "Error de Duplicado", 
-                    f"El nombre de usuario '{nombre}' ya existe.", 
-                    parent=self.win
-                )
-            else:
-                messagebox.showerror("Error", f"Error de Validación:\n{ve}", parent=self.win)
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(ve, parent=self.win, contexto=nombre)
         
         except Exception as e:
             logger.exception("Error al guardar usuario")
-            messagebox.showerror("Error Crítico", f"Ocurrió un error inesperado:\n{e}", parent=self.win)
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=self.win, contexto=nombre)
 
     def resetear_password_moderno(self):
         if not self.usuario_existente: return
@@ -215,9 +212,9 @@ class CrearEditarUsuario:
         nombre = self.usuario_existente.get('nombre')
         
         popup = ctk.CTkToplevel(self.win)
+        preparar_ventana(popup)
         popup.title("🔒 Resetear Contraseña")
         popup.geometry("400x300")
-        aplicar_tema_ventana(popup)
         popup.resizable(False, False)
         
         ctk.CTkLabel(popup, text=f"Nueva contraseña para:\n'{nombre}'", font=("Segoe UI", 14, "bold"), text_color=self.col_text).pack(pady=(20, 10))
@@ -230,16 +227,18 @@ class CrearEditarUsuario:
         def confirmar():
             p = var_new_pass.get().strip()
             if not p:
-                messagebox.showwarning("Atención", "Ingrese una contraseña.", parent=popup)
+                messagebox.showwarning("Contraseña Requerida", "Por favor, ingresa una nueva contraseña para continuar.", parent=popup)
                 return
             try:
                 if self.backend.resetear_password_usuario(id_usuario, p):
-                    messagebox.showinfo("Éxito", "Contraseña actualizada.", parent=popup)
+                    messagebox.showinfo("Éxito", "Contraseña restablecida correctamente.", parent=popup)
                     popup.destroy()
                 else:
-                    messagebox.showerror("Error", "Fallo al actualizar.", parent=popup)
+                    from app.frontend.manejador_errores import ManejadorErroresUI
+                    ManejadorErroresUI.manejar_error(Exception("No se pudo restablecer la contraseña."), parent=popup)
             except Exception as e:
-                messagebox.showerror("Error", str(e), parent=popup)
+                from app.frontend.manejador_errores import ManejadorErroresUI
+                ManejadorErroresUI.manejar_error(e, parent=popup)
 
         frm_btn = ctk.CTkFrame(popup, fg_color="transparent")
         frm_btn.pack(pady=20)
@@ -248,8 +247,9 @@ class CrearEditarUsuario:
         ctk.CTkButton(frm_btn, text="Cancelar", command=popup.destroy, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 12), height=40).pack(side="left", padx=10)
         
         entry_new_pass.bind("<Return>", lambda e: confirmar())
-        popup.grab_set()
         popup.transient(self.win)
+        centrar_y_mostrar_ventana(popup)
+        popup.grab_set()
 
 def ui_crear_usuario(parent: tk.Misc, backend, id_usuario_a_editar=None, callback_on_save=None):
     usuario_existente = None

@@ -12,10 +12,12 @@ try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
     from app.database.permisos import tiene_permiso, puede_ajustar_inventario_manual
     from app.frontend.stock_event_manager import stock_events
+    from app.frontend.autorizacion import solicitar_autorizacion_supervisor
 except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
     def tiene_permiso(u, a): return True
     def puede_ajustar_inventario_manual(u): return True
+    def solicitar_autorizacion_supervisor(p, b, u, c=None): pass
     class DummyStockEvents:
         def suscribir(self, cb): pass
         def desuscribir(self, cb): pass
@@ -27,6 +29,12 @@ try:
 except ImportError:
     ui_productos = None
     EntryDecimal = None  # Se resolverá al importar ctk dentro de __init__
+
+try:
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+except ImportError:
+    def preparar_ventana(w): pass
+    def centrar_y_mostrar_ventana(w): pass
 
 
 logger = logging.getLogger(__name__)
@@ -53,13 +61,12 @@ class UIInventario:
         self.backend = backend
         self.usuario = usuario
         self.win = ctk.CTkToplevel(parent)
+        preparar_ventana(self.win)
         self.win.title("📦 Gestión de Inventario")
         self.win.geometry("1100x750")
         try: self.win.state('zoomed')
         except: pass
         self.can_ajustar_manual = puede_ajustar_inventario_manual(usuario)
-        
-        self.win.configure(fg_color="#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#111827")
         
         self.productos_cache = []
         self.cat_map = {}
@@ -73,6 +80,10 @@ class UIInventario:
         
         configurar_navegacion_ventana(self.win)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+        if self.win.state() == 'zoomed':
+            self.win.deiconify()
+        else:
+            centrar_y_mostrar_ventana(self.win)
         self.win.grab_set()
         self.win.after(100, lambda: self.entry_busqueda.focus_set())
 
@@ -98,7 +109,11 @@ class UIInventario:
         self.var_busqueda.trace_add("write", self._filtrar_lista) 
         
         ctk.CTkLabel(frm_header, text="Categoría:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(30, 10))
-        self.cb_categoria = ctk.CTkOptionMenu(frm_header, font=font_normal, fg_color="#f3f4f6", button_color="#e5e7eb", button_hover_color="#d1d5db", text_color="#1f2937", command=self._filtrar_lista, width=200, height=45)
+        col_opt_bg = "#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#374151"
+        col_opt_btn = "#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#4b5563"
+        col_opt_hover = "#d1d5db" if ctk.get_appearance_mode()=="Light" else "#6b7280"
+        col_opt_text = "#1f2937" if ctk.get_appearance_mode()=="Light" else "#f9fafb"
+        self.cb_categoria = ctk.CTkOptionMenu(frm_header, font=font_normal, fg_color=col_opt_bg, button_color=col_opt_btn, button_hover_color=col_opt_hover, text_color=col_opt_text, command=self._filtrar_lista, width=200, height=45)
         self.cb_categoria.pack(side="left", padx=5)
         
         ctk.CTkSwitch(frm_header, text="Stock Bajo / Crítico", variable=self.var_filtrar_stock_bajo, command=self._filtrar_lista, font=font_title, progress_color="#ef4444").pack(side="left", padx=40)
@@ -119,7 +134,8 @@ class UIInventario:
         cols = ("ID", "Nombre", "Categoría", "Stock", "Stock Min.", "Precio Venta")
         self.tree = ttk.Treeview(frm_lista, columns=cols, show="headings", style="Modern.Treeview")
         
-        ys = ttk.Scrollbar(frm_lista, orient="vertical", command=self.tree.yview)
+        ys = ctk.CTkScrollbar(frm_lista, command=self.tree.yview)
+        ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
         self.tree.configure(yscrollcommand=ys.set)
         
         for c in cols: self.tree.heading(c, text=c)
@@ -132,7 +148,6 @@ class UIInventario:
         self.tree.column("Precio Venta", width=150, anchor="e")
 
         self.tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        ys.pack(side="right", fill="y", pady=5)
 
         self.tree.tag_configure('bajo', foreground='#f87171') # Solo texto rojo claro, sin fondo blanco
         self.tree.bind("<Double-1>", self._on_doble_clic)
@@ -212,26 +227,24 @@ class UIInventario:
         if not ui_productos:
             messagebox.showinfo("Error", "Módulo de gestión de productos no disponible.")
             return
-            
-        if not tiene_permiso(self.usuario, 'crear_productos') and not tiene_permiso(self.usuario, 'editar_productos'):
-            messagebox.showwarning(
-                "Acceso Denegado", 
-                "⚠️ Su rol solo permite la consulta del inventario. No puede modificar o crear productos.", 
-                parent=self.win
-            )
-            return
 
-        try:
-            ui_productos(
-                parent=self.win,
-                backend=self.backend,
-                usuario=self.usuario,
-                id_producto_a_cargar=id_prod, 
-                callback_on_save=self.cargar_todo 
-            )
-        except Exception as e:
-            logger.error(f"Error abriendo UI Productos: {e}")
-            messagebox.showerror("Error", f"Fallo al abrir ABM de Producto:\n{e}")
+        def _ejecutar_abm(usr):
+            try:
+                ui_productos(
+                    parent=self.win,
+                    backend=self.backend,
+                    usuario=usr,
+                    id_producto_a_cargar=id_prod, 
+                    callback_on_save=self.cargar_todo 
+                )
+            except Exception as e:
+                logger.error(f"Error abriendo UI Productos: {e}")
+                messagebox.showerror("Error", f"Fallo al abrir ABM de Producto:\n{e}")
+
+        if self.usuario.get('id_rol') in (1, 3):  # Admin o Supervisor → acceso directo
+            _ejecutar_abm(self.usuario)
+        else:  # Vendedor → pedir credenciales de administrador
+            solicitar_autorizacion_supervisor(self.win, self.backend, self.usuario, _ejecutar_abm)
 
     def _on_doble_clic(self, event):
         sel = self.tree.selection()

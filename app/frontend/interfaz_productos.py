@@ -11,12 +11,19 @@ try:
 except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
+try:
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+except ImportError:
+    def preparar_ventana(w): pass
+    def centrar_y_mostrar_ventana(w): pass
+
 from app.frontend.stock_event_manager import stock_events
 
 def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: int | None = None, callback_on_save=None) -> None:
     win = ctk.CTkToplevel(parent)
+    preparar_ventana(win)
     win.title("Gestión de Productos (ABM)")
-    win.geometry("680x680") 
+    win.geometry("680x680")
     col_bg = "#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#111827"
     col_card = "#ffffff" if ctk.get_appearance_mode()=="Light" else "#1f2937"
     col_border = "#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#374151"
@@ -25,7 +32,6 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     col_input_fg = "#1f2937" if ctk.get_appearance_mode() == "Light" else "#f9fafb"
     col_text = "#374151" if ctk.get_appearance_mode()=="Light" else "white"
     
-    win.configure(fg_color=col_bg)
     win.resizable(True, True)
 
     def validar_len_30(t): return len(t) <= 30
@@ -138,9 +144,9 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
 
     def abrir_popup_asignacion(pid, nombre_prod):
         pop = ctk.CTkToplevel(win)
+        preparar_ventana(pop)
         pop.title(f"Asignar Empresas - {nombre_prod}")
         pop.geometry("600x500") 
-        pop.configure(fg_color=col_bg)
         
         frm_bus = ctk.CTkFrame(pop, fg_color=col_card, corner_radius=8, border_color=col_border, border_width=1)
         frm_bus.pack(fill="x", padx=15, pady=(15, 5))
@@ -183,7 +189,8 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
         cols = ("ID", "Empresa", "CUIT")
         tree_p = ttk.Treeview(frm_tree, columns=cols, show="headings", style="Modern.Treeview")
         
-        sc_p = ttk.Scrollbar(frm_tree, orient="vertical", command=tree_p.yview)
+        sc_p = ctk.CTkScrollbar(frm_tree, command=tree_p.yview)
+        sc_p.pack(side="right", fill="y", padx=(0, 5), pady=5)
         tree_p.configure(yscrollcommand=sc_p.set)
         
         tree_p.heading("ID", text="ID")
@@ -194,7 +201,6 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
         tree_p.column("CUIT", width=120, anchor="center")
         
         tree_p.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        sc_p.pack(side="right", fill="y", pady=5)
         
         tree_p.tag_configure('seleccionado', background='#dbeafe', foreground='#1e40af')
         
@@ -225,6 +231,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
         tree_p.bind("<Button-1>", lambda e: win.after(10, toggle_seleccion))
         
         configurar_navegacion_ventana(pop)
+        centrar_y_mostrar_ventana(pop)
         pop.grab_set()
         win.wait_window(pop)
 
@@ -327,4 +334,5 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     if id_producto_a_cargar: var_token.set(str(id_producto_a_cargar)); buscar()
     else: al_cambiar_categoria(None)
     configurar_navegacion_ventana(win, confirmar_cierre=False)
+    centrar_y_mostrar_ventana(win)
     win.grab_set()

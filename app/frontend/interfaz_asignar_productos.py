@@ -11,7 +11,7 @@ except ImportError:
 
 def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_proveedor: str):
     import customtkinter as ctk
-    from app.frontend.theme_config import get_color, configurar_estilo_treeview
+    from app.frontend.theme_config import get_color, configurar_estilo_treeview, preparar_ventana, centrar_y_mostrar_ventana
     
     # 🔥 CARGA DE ESTILOS Y COLORES
     configurar_estilo_treeview()
@@ -23,10 +23,11 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     col_border = "#2d3748"
 
     win = ctk.CTkToplevel(parent)
+    preparar_ventana(win)
     win.title(f"Asignar Productos a: {nombre_proveedor}")
     win.geometry("800x700")
-    win.configure(fg_color=col_bg)
-    win.resizable(False, True)
+    win.resizable(True, True)
+    win.minsize(680, 500)
 
     memoria_productos = {}
     
@@ -48,7 +49,6 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
 
     cols = ("Estado", "ID", "Producto", "Categoría")
     tree = ttk.Treeview(frame_lista, columns=cols, show="headings", selectmode="browse", style="Modern.Treeview")
-    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     tree.heading("Estado", text="Selección")
     tree.heading("ID", text="ID")
@@ -60,11 +60,10 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     tree.column("Producto", width=350)
     tree.column("Categoría", width=180)
     
-    ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
+    ys = ctk.CTkScrollbar(frame_lista, command=tree.yview)
+    ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
     tree.configure(yscrollcommand=ys.set)
-    
-    tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    ys.pack(side=tk.RIGHT, fill=tk.Y)
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
     # --- Lógica de Datos ---
     def cargar_datos_iniciales():
@@ -177,4 +176,5 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     configurar_navegacion_ventana(win)
     ent_buscar.focus_set()
     
+    centrar_y_mostrar_ventana(win)
     win.grab_set()

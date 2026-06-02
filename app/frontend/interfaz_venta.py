@@ -54,69 +54,16 @@ except ImportError:
 
 
 try:
-    from app.frontend.theme_config import THEME_COLORS, get_color, aplicar_tema_ventana, configurar_estilo_treeview
+    from app.frontend.theme_config import THEME_COLORS, get_color, aplicar_tema_ventana, configurar_estilo_treeview, preparar_ventana, centrar_y_mostrar_ventana
 except ImportError:
     def get_color(k): return "#000000"
     def aplicar_tema_ventana(w): pass
     def configurar_estilo_treeview(): pass
+    def preparar_ventana(w): pass
+    def centrar_y_mostrar_ventana(w): pass
 
 
-def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_exito=None):
-    import customtkinter as ctk
-    popup = ctk.CTkToplevel(parent)
-    popup.title("🔓 Autorización")
-    popup.geometry("400x350")
-    aplicar_tema_ventana(popup)
-    popup.resizable(False, False)
-    popup.transient(parent)
-    popup.grab_set()
-    
-    frm_main = ctk.CTkFrame(popup, fg_color=get_color("bg_surface"), corner_radius=15)
-    frm_main.pack(fill="both", expand=True, padx=20, pady=20)
-    
-    ctk.CTkLabel(frm_main, text="Autorización de Administrador", 
-                 font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(pady=(20, 15))
-    
-    ctk.CTkLabel(frm_main, text="Usuario:", font=("Segoe UI", 12), text_color=get_color("text_secondary")).pack(anchor="w", padx=50)
-    entry_user = ctk.CTkEntry(frm_main, font=("Segoe UI", 13), width=250, height=40, placeholder_text="Nombre de usuario")
-    entry_user.pack(pady=(2, 10))
-    entry_user.focus_set()
-    
-    ctk.CTkLabel(frm_main, text="Contraseña:", font=("Segoe UI", 12), text_color=get_color("text_secondary")).pack(anchor="w", padx=50)
-    entry_pass = ctk.CTkEntry(frm_main, show="●", font=("Segoe UI", 13), width=250, height=40, placeholder_text="••••••••")
-    entry_pass.pack(pady=(2, 25))
-    
-    def validar():
-        u_nom = entry_user.get().strip()
-        u_pass = entry_pass.get().strip()
-        
-        if not u_nom or not u_pass:
-            messagebox.showwarning("Atención", "Ingrese credenciales", parent=popup)
-            return
-        
-        try:
-            supervisor = backend.verificar_contraseña(u_nom, u_pass)
-            if supervisor and supervisor.get('id_rol') == 1:
-                popup.grab_release()
-                popup.destroy()
-                if callback_exito:
-                    parent.after(100, lambda: callback_exito(supervisor))
-            else:
-                messagebox.showerror("Error", "No autorizado.", parent=popup)
-                entry_pass.delete(0, tk.END)
-        except Exception as e:
-            messagebox.showerror("Error", f"Fallo: {e}", parent=popup)
-    
-    frm_btns = ctk.CTkFrame(popup, fg_color="transparent")
-    frm_btns.pack(pady=(0, 20))
-    
-    ctk.CTkButton(frm_btns, text="✓ Autorizar", fg_color=get_color("button_primary"), hover_color=get_color("button_primary_hover"),
-                  font=("Segoe UI", 12, "bold"), width=140, height=40, command=validar).pack(side="left", padx=10)
-    
-    ctk.CTkButton(frm_btns, text="Cancelar", fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"),
-                  font=("Segoe UI", 12), width=100, height=40, command=popup.destroy).pack(side="left", padx=10)
-
-    entry_pass.bind("<Return>", lambda e: validar())
+from app.frontend.autorizacion import solicitar_autorizacion_supervisor
 
 
 def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
@@ -129,6 +76,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             return
 
     win = ctk.CTkToplevel(parent)
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+    preparar_ventana(win)
     win.title("Punto de Venta - Supermercado Don Atilio")
     try: win.state('zoomed')
     except: win.geometry("1100x750")
@@ -182,7 +131,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         popup = ctk.CTkToplevel(win)
         popup.title("Seleccionar Cliente")
         popup.geometry("750x650")
-        aplicar_tema_ventana(popup)
+        preparar_ventana(popup)
         popup.resizable(False, False)
         
         frm_bus = ctk.CTkFrame(popup, fg_color="transparent")
@@ -200,13 +149,13 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         cols = ("ID", "Nombre", "DNI")
         configurar_estilo_treeview()
         tree_c = ttk.Treeview(frm_tree_cont, columns=cols, show="headings", height=8, style="Modern.Treeview")
-        tree_c.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         tree_c.column("ID", width=0, stretch=False)
         tree_c.configure(displaycolumns=("Nombre", "DNI"))
         
-        sc_c = ttk.Scrollbar(frm_tree_cont, orient="vertical", command=tree_c.yview)
-        sc_c.pack(side="right", fill="y", pady=5)
+        sc_c = ctk.CTkScrollbar(frm_tree_cont, command=tree_c.yview)
+        sc_c.pack(side="right", fill="y", padx=(0, 5), pady=5)
         tree_c.configure(yscrollcommand=sc_c.set)
+        tree_c.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         for c in cols: tree_c.heading(c, text=c)
         tree_c.column("ID", width=80, anchor="center"); tree_c.column("Nombre", width=400); tree_c.column("DNI", width=150, anchor="center")
@@ -252,19 +201,35 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         
         def abrir_nuevo_cliente_popup():
             if ui_crear_cliente:
-                ui_crear_cliente(popup, backend)
-                nonlocal todos_clis
-                todos_clis = backend.listar_clientes()
-                filtrar()
-        
+                def al_guardar_cliente(nuevo_id=None):
+                    nonlocal todos_clis, cliente_sel
+                    todos_clis = backend.listar_clientes()
+                    filtrar()
+                    if nuevo_id and isinstance(nuevo_id, int):
+                        new_cli = next((c for c in todos_clis if c['id_cliente'] == nuevo_id), None)
+                        if new_cli:
+                            cliente_sel = new_cli
+                            _upd_cliente()
+                            popup.destroy()
+                ui_crear_cliente(popup, backend, callback_on_save=al_guardar_cliente)
+
+        def abrir_creacion_cliente_autorizado():
+            if usuario.get('id_rol') in (1, 3):  # Admin o Supervisor → acceso directo
+                abrir_nuevo_cliente_popup()
+            else:  # Vendedor → pedir credenciales de administrador
+                def on_autorizado(usr_autorizado):
+                    abrir_nuevo_cliente_popup()
+                solicitar_autorizacion_supervisor(popup, backend, usuario, on_autorizado)
+
         ctk.CTkButton(fr_btns, text="➕ Nuevo", fg_color=get_color("secondary") if hasattr(get_color, 'secondary') else "#10b981", 
-                      font=("Segoe UI", 13, "bold"), height=45, command=abrir_nuevo_cliente_popup).pack(side="left", padx=5)
+                      font=("Segoe UI", 13, "bold"), height=45, command=abrir_creacion_cliente_autorizado).pack(side="left", padx=5)
         
         ctk.CTkButton(fr_btns, text="Consumidor Final", fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"),
                       font=("Segoe UI", 13), height=45, command=limpiar_cliente).pack(side="left", padx=5)
         
         configurar_navegacion_ventana(popup)
         popup.after(100, lambda: ent_bus.focus_set())
+        centrar_y_mostrar_ventana(popup)
         popup.grab_set()
 
     def quitar_cliente():
@@ -347,10 +312,10 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     tree.heading("Cant", text="CANT.")
     tree.heading("Subtotal", text="SUBTOTAL")
     
-    vsb = ttk.Scrollbar(frm_lista, orient="vertical", command=tree.yview)
+    vsb = ctk.CTkScrollbar(frm_lista, command=tree.yview)
+    vsb.pack(side="right", fill="y", padx=(0, 5), pady=5)
     tree.configure(yscrollcommand=vsb.set)
     tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-    vsb.pack(side="right", fill="y", pady=5)
 
     # 4. FOOTER
     btn_cancelar = ctk.CTkButton(frm_footer, text="🗑️ Cancelar", fg_color="#ef4444", hover_color="#dc2626", font=font_title, width=150, height=55)
@@ -597,8 +562,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         _refrescar_lista(); _upd_cliente()     
         entry_producto.delete(0, tk.END); entry_cantidad.delete(0, tk.END)
         entry_cantidad.insert(0, "1")
-        # 🔥 FOCO EN CANTIDAD (no en producto)
-        entry_cantidad.focus_set()
+        # 🔥 FOCO EN PRODUCTO (lectura continua optimizada)
+        entry_producto.focus_set()
 
     def manejar_escaneo_producto(event=None):
         """Cuando presiona Enter en Producto."""
@@ -697,8 +662,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         entry_producto.delete(0, tk.END)
         entry_cantidad.delete(0, tk.END)
         entry_cantidad.insert(0, "1")
-        # 🔥 VOLVER A CANTIDAD (flujo continuo)
-        entry_cantidad.focus_set()
+        # 🔥 VOLVER A PRODUCTO (lectura continua optimizada)
+        entry_producto.focus_set()
 
     btn_agregar.configure(command=agregar_producto)
     
@@ -772,6 +737,12 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                     "Por favor, abra la caja antes de continuar.", 
                     parent=win
                 )
+            elif "Stock insuficiente" in str(ve):
+                messagebox.showwarning(
+                    "⚠️ Stock Insuficiente", 
+                    f"No se pudo completar la venta debido a un cambio en el inventario:\n\n{ve}",
+                    parent=win
+                )
             else:
                 messagebox.showerror("Error", f"Venta revertida.\n{ve}", parent=win)
             return
@@ -779,14 +750,18 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             messagebox.showerror("Error", f"Venta revertida.\n{e}", parent=win); return
 
         try:
-            if messagebox.askyesno("Venta Registrada", "Imprimir ticket?", parent=win):
+            from app.frontend.custom_dialogs import mostrar_confirmacion_exito
+            imprimir = mostrar_confirmacion_exito(
+                "✅ Venta Registrada", 
+                f"Venta #{id_venta} registrada con éxito.\nTotal: ${total_venta:,.2f}\n\n¿Desea imprimir el ticket?",
+                parent=win
+            )
+            if imprimir:
                 imprimir_ticket(id_venta=id_venta, items_de_la_venta=items, nombre_vendedor=usuario.get("nombre", "Vendedor"), 
                                 metodo_pago=info_pago['tipo_pago'], monto_entregado=info_pago.get('monto_pagado', 0.0), 
                                 vuelto=info_pago.get('vuelto', 0.0), cliente=cliente_sel.get('nombre', 'Consumidor Final') if cliente_sel else 'Consumidor Final')
         except Exception as e:
             messagebox.showerror("Error", f"Error Impresión: {e}", parent=win)
-
-        messagebox.showinfo("Venta Exitosa", f"Venta #{id_venta} OK.\nTotal: ${total_venta:,.2f}", parent=win)
         _reiniciar_venta_completa()
         win.after(100, lambda: stock_events.notificar_cambio_stock())
 
@@ -801,11 +776,21 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
 
     _upd_cliente()
     
+    def enfocar_cantidad(event=None):
+        entry_cantidad.focus_set()
+        entry_cantidad.select_range(0, tk.END)
+        return "break"
+
     win.bind("<F2>", lambda e: abrir_selector_cliente())
     win.bind("<F12>", lambda e: confirmar_venta())
     win.bind("<Escape>", lambda e: cancelar_venta())
+    win.bind("<F5>", enfocar_cantidad)
     
     configurar_navegacion_ventana(win)
-    # 🔥 FOCO INICIAL EN CANTIDAD (no en producto)
-    win.after(50, lambda: entry_cantidad.focus_set())
+    # 🔥 FOCO INICIAL EN PRODUCTO (lectura continua optimizada)
+    win.after(50, lambda: entry_producto.focus_set())
+    if win.state() == 'zoomed':
+        win.deiconify()
+    else:
+        centrar_y_mostrar_ventana(win)
     win.grab_set()

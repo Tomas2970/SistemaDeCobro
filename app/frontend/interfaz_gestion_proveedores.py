@@ -16,6 +16,12 @@ try:
 except ImportError:
     ui_asignar_productos = None
 
+try:
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+except ImportError:
+    def preparar_ventana(w): pass
+    def centrar_y_mostrar_ventana(w): pass
+
 def _fmt_mon(val):
     try: return f"$ {float(val):,.2f}"
     except: return "$ 0.00"
@@ -34,10 +40,11 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     col_border = "#2d3748"
 
     win = ctk.CTkToplevel(parent)
+    preparar_ventana(win)
     win.title("Gestión de Empresas Proveedoras")
-    win.geometry("1150x650") 
-    win.configure(fg_color=col_bg)
-    win.resizable(False, False)
+    win.geometry("1280x650") 
+    win.resizable(True, True)
+    win.minsize(950, 550)
 
     # --- BARRA DE BÚSQUEDA ---
     frame_busqueda = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
@@ -49,29 +56,33 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     entry_busqueda = ctk.CTkEntry(frame_busqueda, textvariable=var_busqueda, font=("Segoe UI", 12), width=350, height=38, placeholder_text="Empresa o CUIT...")
     entry_busqueda.pack(side="left", padx=10, pady=15)
 
+    # --- FRAME DE BOTONES (Empacado al fondo primero para evitar que se achique) ---
+    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
+    frame_botones.pack(side=tk.BOTTOM, pady=(0, 20), fill="x", padx=25)
+
     frame_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
     frame_lista.pack(pady=10, padx=25, fill="both", expand=True)
 
     # 🔥 COLUMNAS FILTRADAS: Solo datos de Empresa
-    cols = ["ID", "Empresa", "CUIT", "Teléfono", "Email", "Dirección", "Saldo (Deuda)", "Activo"]
+    cols = ["ID", "Empresa", "CUIT", "Teléfono", "Email", "Dirección", "Saldo", "Activo"]
     tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=7, style="Modern.Treeview")
-    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
-    ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
-    ys.pack(side="right", fill="y")
+    ys = ctk.CTkScrollbar(frame_lista, command=tree.yview)
+    ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
     tree.configure(yscrollcommand=ys.set)
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     for c in cols: tree.heading(c, text=c)
     
     tree.column("ID", width=0, minwidth=0, stretch=False)
     tree.configure(displaycolumns=[c for c in cols if c != "ID"])
-    tree.column("Empresa", width=220) 
-    tree.column("CUIT", width=130, anchor="center")
-    tree.column("Teléfono", width=110)
-    tree.column("Email", width=190)
-    tree.column("Dirección", width=220)
-    tree.column("Saldo (Deuda)", width=120, anchor="e")
-    tree.column("Activo", width=80, anchor="center")
+    tree.column("Empresa", width=200, minwidth=180, stretch=True) 
+    tree.column("CUIT", width=115, minwidth=110, stretch=False)
+    tree.column("Teléfono", width=105, minwidth=100, stretch=False)
+    tree.column("Email", width=170, minwidth=150, stretch=True)
+    tree.column("Dirección", width=160, minwidth=140, stretch=True)
+    tree.column("Saldo", width=130, minwidth=120, stretch=False)
+    tree.column("Activo", width=80, minwidth=75, stretch=False)
     
     tree.tag_configure("deuda", foreground="#f87171")
     tree.tag_configure("favor", foreground="#4ade80")
@@ -148,11 +159,10 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         nombre_empresa = item_vals[1]
         
         pop = ctk.CTkToplevel(win)
+        preparar_ventana(pop)
         pop.title(f"Registrar Pago a {nombre_empresa}")
         pop.geometry("400x450")
-        pop.configure(fg_color=col_bg)
         pop.transient(win)
-        pop.grab_set()
         
         ctk.CTkLabel(pop, text=f"Empresa: {nombre_empresa}", font=("Segoe UI", 14, "bold")).pack(pady=20)
         ctk.CTkLabel(pop, text="Monto a abonar ($):", font=("Segoe UI", 12)).pack(pady=2)
@@ -195,6 +205,8 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         ctk.CTkButton(pop, text="✓ CONFIRMAR PAGO", command=confirmar_pago, fg_color="#10b981", hover_color="#059669", 
                       font=("Segoe UI", 13, "bold"), height=45).pack(pady=20, padx=40, fill="x")
         configurar_navegacion_ventana(pop)
+        centrar_y_mostrar_ventana(pop)
+        pop.grab_set()
 
     def abrir_asignar_productos():
         sel = tree.selection()
@@ -227,9 +239,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             except Exception as e:
                 messagebox.showerror("Error", f"{e}", parent=win)
 
-    # --- FRAME DE BOTONES ---
-    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
-    frame_botones.pack(pady=(5, 20), fill="x", padx=25)
+
 
     ctk.CTkButton(frame_botones, text="➕ Nueva Empresa", command=accion_nuevo, fg_color="#16a34a", hover_color="#15803d", font=("Segoe UI", 13, "bold"), width=160, height=45).pack(side=tk.LEFT, padx=10)
     ctk.CTkButton(frame_botones, text="💳 PAGAR", command=abrir_pagar_deuda, fg_color="#0ea5e9", hover_color="#0284c7", font=("Segoe UI", 13, "bold"), width=120, height=45).pack(side=tk.LEFT, padx=5)
@@ -243,5 +253,6 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     cargar_datos()
     entry_busqueda.focus_set()
     configurar_navegacion_ventana(win)
-    win.grab_set()
     win.transient(parent)
+    centrar_y_mostrar_ventana(win)
+    win.grab_set()

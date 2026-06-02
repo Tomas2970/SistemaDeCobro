@@ -146,16 +146,61 @@ class BackendAdapter:
             fn = getattr(DB, "crear_categoria", None)
             return bool(fn(nombre, margen, es_pesable)) if callable(fn) else False
 
-    def eliminar_categoria(self, id_categoria: int) -> bool:
+    def obtener_categoria_por_id(self, id_categoria: int) -> dict | None:
+        fn = getattr(DB, "obtener_categoria_por_id", None)
+        return fn(id_categoria) if callable(fn) else None
+
+    def eliminar_categoria(self, id_categoria: int, id_usuario: int | None = None) -> bool:
         fn = getattr(DB, "eliminar_categoria", None)
-        return fn(id_categoria) if fn else False
+        if not fn: return False
+        
+        # Obtener datos anteriores
+        cat_anterior = self.obtener_categoria_por_id(id_categoria)
+        
+        # Eliminar (desactivar)
+        resultado = fn(id_categoria)
+        
+        # Registrar auditoría
+        if resultado and cat_anterior:
+            self._registrar_auditoria(
+                id_usuario=id_usuario,
+                accion="DESACTIVAR_CATEGORIA",
+                tabla_afectada="Categoria",
+                id_registro=id_categoria,
+                datos_anteriores={"nombre": cat_anterior.get("nombre"), "activa": True},
+                datos_nuevos={"activa": False}
+            )
+        return resultado
+
+    def reactivar_categoria(self, id_categoria: int, id_usuario: int | None = None) -> bool:
+        fn = getattr(DB, "reactivar_categoria", None)
+        if not fn: return False
+        
+        # Obtener datos anteriores
+        cat_anterior = self.obtener_categoria_por_id(id_categoria)
+        
+        # Reactivar
+        resultado = fn(id_categoria)
+        
+        # Registrar auditoría
+        if resultado and cat_anterior:
+            self._registrar_auditoria(
+                id_usuario=id_usuario,
+                accion="REACTIVAR_CATEGORIA",
+                tabla_afectada="Categoria",
+                id_registro=id_categoria,
+                datos_anteriores={"nombre": cat_anterior.get("nombre"), "activa": False},
+                datos_nuevos={"activa": True}
+            )
+        return resultado
 
     def actualizar_categoria(self, id_categoria: int, nombre: str, margen: float, es_pesable: bool) -> bool:
         fn = getattr(DB, "actualizar_categoria", None)
         return bool(fn(id_categoria, nombre, margen, es_pesable)) if callable(fn) else False
-    def obtener_categorias(self) -> list[dict[str, Any]]:
+
+    def obtener_categorias(self, incluir_inactivas: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_categorias", None)
-        return list(fn() or []) if callable(fn) else []
+        return list(fn(incluir_inactivas) or []) if callable(fn) else []
     def obtener_productos_full(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "buscar_producto_por_nombre", None)
         return list(fn("") or []) if callable(fn) else []

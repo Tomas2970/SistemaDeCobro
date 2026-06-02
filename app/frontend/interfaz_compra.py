@@ -20,8 +20,9 @@ except ImportError:
     stock_events = DummyStockEvents()
 
 def ui_compra(parent: tk.Misc, backend, usuario: dict):
-    
     win = ctk.CTkToplevel(parent)
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+    preparar_ventana(win)
     win.title("Registrar Compra (Entrada de Mercadería)")
     win.geometry("1100x700") 
     
@@ -39,25 +40,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     win.configure(fg_color=col_bg)
     win.resizable(True, True)
     
-    style = ttk.Style(win)
-    style.theme_use('clam')
-    
-    style.configure("Modern.Treeview",
-                    background=col_tree_bg,
-                    foreground=col_tree_fg,
-                    rowheight=35,
-                    fieldbackground=col_tree_bg,
-                    borderwidth=0,
-                    font=('Segoe UI', 11))
-    
-    style.configure("Modern.Treeview.Heading",
-                    background=col_tree_head,
-                    foreground=col_text,
-                    relief="flat",
-                    borderwidth=1,
-                    font=('Segoe UI', 11, 'bold'))
-    
-    style.map('Modern.Treeview', background=[('selected', '#3b82f6')], foreground=[('selected', 'white')])
+    from app.frontend.theme_config import configurar_estilo_treeview
+    configurar_estilo_treeview()
     
     proveedor_sel: dict | None = None
     carrito: list[dict] = [] 
@@ -135,12 +119,12 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         frm_lista.pack(fill="both", expand=True, padx=15, pady=5)
         
         cols_sel = ("ID", "Empresa", "CUIT")
-        tree_provs = ttk.Treeview(frm_lista, columns=cols_sel, show="headings", height=12, style="Modern.Treeview")
-        tree_provs.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        tree_provs = ttk.Treeview(frm_lista, columns=cols_sel, show="headings", height=12, style="Compact.Treeview")
         
-        scroll = ttk.Scrollbar(frm_lista, orient="vertical", command=tree_provs.yview)
-        scroll.pack(side="right", fill="y", pady=5)
+        scroll = ctk.CTkScrollbar(frm_lista, command=tree_provs.yview)
+        scroll.pack(side="right", fill="y", padx=(0, 5), pady=5)
         tree_provs.configure(yscrollcommand=scroll.set)
+        tree_provs.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         for c in cols_sel: tree_provs.heading(c, text=c)
         tree_provs.column("ID", width=0, minwidth=0, stretch=False)
@@ -176,7 +160,7 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     frame_grilla.pack(fill="both", expand=True, padx=15, pady=5)
 
     cols = ("ID", "Producto", "Cantidad", "Costo Unit.", "Subtotal", "Precio Venta Nuevo")
-    tree = ttk.Treeview(frame_grilla, columns=cols, show="headings", style="Modern.Treeview")
+    tree = ttk.Treeview(frame_grilla, columns=cols, show="headings", style="Compact.Treeview")
     
     tree.column("ID", width=0, minwidth=0, stretch=False)
     tree.configure(displaycolumns=[c for c in cols if c != "ID"])
@@ -188,10 +172,10 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
 
     for c in cols: tree.heading(c, text=c)
 
-    vsb = ttk.Scrollbar(frame_grilla, orient="vertical", command=tree.yview)
+    vsb = ctk.CTkScrollbar(frame_grilla, command=tree.yview)
+    vsb.pack(side="right", fill="y", padx=(0, 5), pady=5)
     tree.configure(yscrollcommand=vsb.set)
     tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-    vsb.pack(side="right", fill="y", pady=5)
 
     tree.bind("<Delete>", quitar_producto_seleccionado)
 
@@ -228,7 +212,13 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         except: return
 
         # tk.Entry nativo: CTkEntry no funciona con .place() dentro de ttk.Treeview
-        entry = tk.Entry(tree, font=("Segoe UI", 11), bg=col_input_bg, fg=col_input_fg, bd=0, insertbackground=col_input_fg, justify="right")
+        def _validar_numerico(txt):
+            if txt == "": return True
+            import re
+            return bool(re.match(r'^\d{0,10}([.,]\d{0,4})?$', txt))
+        vcmd_num = (tree.register(_validar_numerico), '%P')
+        entry = tk.Entry(tree, font=("Segoe UI", 11), bg=col_input_bg, fg=col_input_fg, bd=0, insertbackground=col_input_fg, justify="right",
+                         validate="key", validatecommand=vcmd_num)
         entry.place(x=x, y=y, width=w, height=h)
         entry.insert(0, str(item[campo]))
         entry.select_range(0, tk.END)
@@ -306,12 +296,12 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         frm_tree.pack(fill="both", expand=True, padx=15, pady=5)
         
         cols_p = ("ID", "Nombre", "Stock Actual")
-        tree_p = ttk.Treeview(frm_tree, columns=cols_p, show="headings", height=12, style="Modern.Treeview")
-        tree_p.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        tree_p = ttk.Treeview(frm_tree, columns=cols_p, show="headings", height=12, style="Compact.Treeview")
         
-        sc_p = ttk.Scrollbar(frm_tree, orient="vertical", command=tree_p.yview)
-        sc_p.pack(side="right", fill="y", pady=5)
+        sc_p = ctk.CTkScrollbar(frm_tree, command=tree_p.yview)
+        sc_p.pack(side="right", fill="y", padx=(0, 5), pady=5)
         tree_p.configure(yscrollcommand=sc_p.set)
+        tree_p.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
         for c in cols_p: tree_p.heading(c, text=c)
         tree_p.column("ID", width=0, minwidth=0, stretch=False)
@@ -405,4 +395,5 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
 
     win.bind("<F2>", lambda e: btn_add_prod.invoke())
     configurar_navegacion_ventana(win, confirmar_cierre=False)
+    centrar_y_mostrar_ventana(win)
     win.grab_set()

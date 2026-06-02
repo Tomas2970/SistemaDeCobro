@@ -1,5 +1,6 @@
 import customtkinter as ctk
 from tkinter import messagebox
+from app.frontend.custom_dialogs import mostrar_confirmacion, mostrar_advertencia, mostrar_error
 import logging
 from app.frontend.navegacion_teclado_comun import configurar_navegacion_teclado
 
@@ -55,7 +56,7 @@ def ui_login(parent, backend):
         u = entry_usuario.get().strip()
         p = entry_contrasena.get().strip()
         if not u or not p:
-            messagebox.showwarning("Campos vacíos", "Complete todos los campos.")
+            mostrar_advertencia("Credenciales Requeridas", "Por favor, ingresa tanto el usuario como la contraseña para iniciar sesión.")
             entry_usuario.focus_set()
             return
         
@@ -68,16 +69,17 @@ def ui_login(parent, backend):
                 usuario_logeado = udb
                 win.quit()
             else:
-                messagebox.showerror("Error", "Usuario o contraseña incorrectos")
+                mostrar_error("Acceso Denegado", "El nombre de usuario o la contraseña ingresados son incorrectos.")
                 entry_contrasena.delete(0, 'end')
                 entry_usuario.focus_set()
                 btn_login.configure(state="normal", text="Ingresar al Sistema")
         except Exception as e:
-            messagebox.showerror("Error", f"Error de conexión: {str(e)}")
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=win, contexto="conexión")
             btn_login.configure(state="normal", text="Ingresar al Sistema")
 
     def salir(*_):
-        if messagebox.askyesno("Confirmar", "¿Desea salir del sistema?"):
+        if mostrar_confirmacion("Confirmar", "¿Desea salir del sistema?"):
             win.quit()
         
     btn_login = ctk.CTkButton(card, text="Ingresar al Sistema", fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 13, "bold"), command=iniciar_sesion)

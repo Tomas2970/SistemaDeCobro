@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 from app.frontend.interfaz_crear_cliente import ui_crear_cliente
+from app.frontend.autorizacion import solicitar_autorizacion_supervisor
 
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
@@ -10,24 +11,26 @@ except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
 try:
-    from app.frontend.theme_config import get_color, aplicar_tema_ventana, configurar_estilo_treeview
+    from app.frontend.theme_config import get_color, aplicar_tema_ventana, configurar_estilo_treeview, preparar_ventana, centrar_y_mostrar_ventana
 except ImportError:
     def get_color(k): return "#000000"
     def aplicar_tema_ventana(w): pass
     def configurar_estilo_treeview(): pass
+    def preparar_ventana(w): pass
+    def centrar_y_mostrar_ventana(w): pass
 
 import customtkinter as ctk
 
 def _fmt_mon(val):
     try: return f"$ {float(val):,.2f}"
     except: return "$ 0.00"
-
 def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     win = ctk.CTkToplevel(parent)
+    preparar_ventana(win)
     win.title("Gestión de Clientes")
-    win.geometry("1150x650")
-    aplicar_tema_ventana(win)
-    win.resizable(False, False)
+    win.geometry("1280x650")
+    win.resizable(True, True)
+    win.minsize(950, 550)
 
     configurar_estilo_treeview()
 
@@ -40,35 +43,39 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     entry_busqueda = ctk.CTkEntry(frame_busqueda, textvariable=var_busqueda, width=350, height=40, font=("Segoe UI", 13), placeholder_text="Nombre o DNI...")
     entry_busqueda.pack(side="left", padx=20)
 
+    # --- FRAME DE BOTONES (Empacado al fondo primero para evitar que se achique) ---
+    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
+    frame_botones.pack(side=tk.BOTTOM, pady=(0, 20), fill="x", padx=25)
+
     frame_lista_cont = ctk.CTkFrame(win, fg_color=get_color("bg_surface"), corner_radius=10, border_width=1, border_color=get_color("border_color"))
     frame_lista_cont.pack(pady=15, padx=25, fill="both", expand=True)
 
     # 🔥 COLUMNAS ACTUALIZADAS: Se eliminó CUIT/CUIL
-    cols = ["ID", "Nombre", "DNI", "Teléfono", "Email", "Dirección", "Saldo (Deuda)", "Límite Crédito", "Activo"]
+    cols = ["ID", "Nombre", "DNI", "Teléfono", "Email", "Dirección", "Saldo", "Límite Crédito", "Activo"]
 
     tree = ttk.Treeview(frame_lista_cont, columns=cols, show="headings", height=8, style="Modern.Treeview")
-    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
-    ys = ttk.Scrollbar(frame_lista_cont, orient="vertical", command=tree.yview)
-    ys.pack(side="right", fill="y", pady=5)
+    ys = ctk.CTkScrollbar(frame_lista_cont, command=tree.yview)
+    ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
     tree.configure(yscrollcommand=ys.set)
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     for c in cols: tree.heading(c, text=c)
     
     tree.column("ID", width=0, stretch=False)
     tree.configure(displaycolumns=[c for c in cols if c != "ID"])
-    tree.column("Nombre", width=180)
-    tree.column("DNI", width=100, anchor="center")
-    tree.column("Teléfono", width=110)
-    tree.column("Email", width=170)
-    tree.column("Dirección", width=200) 
-    tree.column("Saldo (Deuda)", width=120, anchor="e")
-    tree.column("Límite Crédito", width=120, anchor="e")
-    tree.column("Activo", width=80, anchor="center")
+    tree.column("Nombre", width=160, minwidth=140, stretch=True)
+    tree.column("DNI", width=90, minwidth=85, stretch=False)
+    tree.column("Teléfono", width=100, minwidth=95, stretch=False)
+    tree.column("Email", width=160, minwidth=145, stretch=True)
+    tree.column("Dirección", width=150, minwidth=130, stretch=True) 
+    tree.column("Saldo", width=130, minwidth=120, stretch=False)
+    tree.column("Límite Crédito", width=130, minwidth=120, stretch=False)
+    tree.column("Activo", width=80, minwidth=75, stretch=False)
 
     tree.tag_configure("deuda", foreground="#f87171") # Rojo claro (más legible en oscuro)
-    tree.tag_configure("favor", foreground="#4ade80") # Verde claro
-    tree.tag_configure("cero", foreground="#f9fafb")  # Blanco/Gris muy claro (era negro)
+    tree.tag_configure("favor", foreground="#10b981") 
+    tree.tag_configure("cero", foreground="#6b7280" if ctk.get_appearance_mode() == "Light" else "#9ca3af")
 
     var_mostrar_inactivos = tk.BooleanVar(value=False)
     todos_clientes = []
@@ -124,30 +131,46 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
 
     var_busqueda.trace_add("write", filtrar_lista)
 
-    def accion_nuevo():
-        top = ui_crear_cliente(win, backend)
+    def _ejecutar_crear_cliente():
+        top = ui_crear_cliente(win, backend, callback_on_save=cargar_datos)
         if isinstance(top, tk.Toplevel):
             win.wait_window(top)
             cargar_datos()
         else:
             win.after(1000, cargar_datos)
 
-    def abrir_editar():
-        rol_id = usuario_actual.get('id_rol')
-        if rol_id not in [1, 3]: 
-            messagebox.showwarning("Acceso Denegado", "⚠️ Solo Administradores y Supervisores pueden modificar clientes.", parent=win)
-            return
+    def accion_nuevo():
+        if usuario_actual.get('id_rol') in (1, 3):  # Admin o Supervisor → acceso directo
+            _ejecutar_crear_cliente()
+        else:  # Vendedor → pedir credenciales de administrador
+            def on_autorizado(usr_autorizado):
+                _ejecutar_crear_cliente()
+            solicitar_autorizacion_supervisor(win, backend, usuario_actual, on_autorizado)
 
+    def _ejecutar_editar_cliente():
         sel = tree.selection()
         if not sel: 
             messagebox.showwarning("Atención", "Seleccione un cliente para editar.", parent=win)
             return
         item = tree.item(sel[0], "values")
         
-        top = ui_crear_cliente(win, backend, id_cliente_a_editar=int(item[0]))
+        top = ui_crear_cliente(win, backend, id_cliente_a_editar=int(item[0]), callback_on_save=cargar_datos)
         if isinstance(top, tk.Toplevel):
             win.wait_window(top)
             cargar_datos()
+
+    def abrir_editar():
+        sel = tree.selection()
+        if not sel: 
+            messagebox.showwarning("Atención", "Seleccione un cliente para editar.", parent=win)
+            return
+
+        if usuario_actual.get('id_rol') in (1, 3):  # Admin o Supervisor → acceso directo
+            _ejecutar_editar_cliente()
+        else:  # Vendedor → pedir credenciales de administrador
+            def on_autorizado(usr_autorizado):
+                _ejecutar_editar_cliente()
+            solicitar_autorizacion_supervisor(win, backend, usuario_actual, on_autorizado)
     
     def on_doble_click(event):
         abrir_editar()
@@ -189,8 +212,7 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
             else:
                 messagebox.showerror("Error", "No se pudo activar.", parent=win)
 
-    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
-    frame_botones.pack(pady=(0, 20), fill="x", padx=25)
+
 
     frame_acciones = ctk.CTkFrame(frame_botones, fg_color="transparent")
     frame_acciones.pack(side=tk.LEFT)
@@ -239,3 +261,4 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
     entry_busqueda.focus_set()
     configurar_navegacion_ventana(win)
     win.grab_set()
+    centrar_y_mostrar_ventana(win)

@@ -11,6 +11,12 @@ try:
 except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False): pass
 
+try:
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+except ImportError:
+    def preparar_ventana(w): pass
+    def centrar_y_mostrar_ventana(w): pass
+
 def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     import customtkinter as ctk
     from app.frontend.theme_config import get_color, configurar_estilo_treeview
@@ -25,9 +31,9 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     col_border = "#2d3748"
 
     win = ctk.CTkToplevel(parent)
+    preparar_ventana(win)
     win.title("Gestión de Usuarios")
     win.geometry("1150x680") 
-    win.configure(fg_color=col_bg)
     win.resizable(False, False)
 
     # BARRA DE BÚSQUEDA
@@ -39,17 +45,21 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     entry_busqueda = ctk.CTkEntry(frame_busqueda, textvariable=var_busqueda, font=("Segoe UI", 13), width=350, height=40, placeholder_text="Nombre de usuario o rol...")
     entry_busqueda.pack(side="left", padx=10, pady=15)
 
+    # --- FRAME DE BOTONES (Empacado al fondo primero para evitar que se achique) ---
+    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
+    frame_botones.pack(side=tk.BOTTOM, pady=(0, 20), fill="x", padx=25)
+
     # TREEVIEW
     frame_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
     frame_lista.pack(pady=10, padx=25, fill="both", expand=True)
 
     cols = ["ID", "Nombre", "Rol", "Fecha Creación", "Último Acceso", "Activo"]
     tree = ttk.Treeview(frame_lista, columns=cols, show="headings", height=8, style="Modern.Treeview")
-    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
-    ys = ttk.Scrollbar(frame_lista, orient="vertical", command=tree.yview)
-    ys.pack(side="right", fill="y")
+    ys = ctk.CTkScrollbar(frame_lista, command=tree.yview)
+    ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
     tree.configure(yscrollcommand=ys.set)
+    tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     
     for c in cols: tree.heading(c, text=c)
     
@@ -156,9 +166,7 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     # 🔥 RECUPERADO: TU FUNCIÓN DE DOBLE CLIC
     tree.bind("<Double-1>", lambda e: abrir_editar())
 
-    # FRAME DE BOTONES
-    frame_botones = ctk.CTkFrame(win, fg_color="transparent")
-    frame_botones.pack(pady=(5, 20), fill="x", padx=25)
+
 
     ctk.CTkButton(frame_botones, text="➕ Crear Usuario", command=accion_nuevo, fg_color="#16a34a", hover_color="#15803d", font=("Segoe UI", 12, "bold"), width=150, height=45).pack(side=tk.LEFT, padx=10)
     
@@ -185,5 +193,6 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     cargar_datos()
     entry_busqueda.focus_set()
     configurar_navegacion_ventana(win)
-    win.grab_set()
     win.transient(parent)
+    centrar_y_mostrar_ventana(win)
+    win.grab_set()

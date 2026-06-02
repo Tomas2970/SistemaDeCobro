@@ -2,7 +2,7 @@ from __future__ import annotations
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import ttk, messagebox, filedialog
-from app.frontend.theme_config import THEME_COLORS, get_color, aplicar_tema_ventana, configurar_estilo_notebook, configurar_estilo_treeview
+from app.frontend.theme_config import THEME_COLORS, get_color, aplicar_tema_ventana, configurar_estilo_notebook, configurar_estilo_treeview, preparar_ventana, centrar_y_mostrar_ventana
 from typing import Optional, Any
 from datetime import date, datetime, timedelta
 import logging
@@ -88,11 +88,11 @@ class Historiales:
         self.usuario = usuario
         
         self.win = ctk.CTkToplevel(parent)
+        preparar_ventana(self.win)
         self.win.title("📋 Historiales del Sistema")
         
         altura = 720 
-        self.win.geometry(f"1300x{altura}") 
-        aplicar_tema_ventana(self.win)
+        self.win.geometry(f"1300x{altura}")
         
         style = ttk.Style()
         try:
@@ -106,6 +106,9 @@ class Historiales:
         frm_header.pack(fill="x")
         ctk.CTkLabel(frm_header, text="HISTORIALES DEL SISTEMA", font=("Segoe UI", 18, "bold"), text_color="white").pack(pady=15)
 
+        self.vendedores_raw = []
+        self.clientes_raw = []
+        self.proveedores_raw = []
         self.vendedor_ids = [None]
         self.vendedor_nombres = ["(Todos)"]
         self.cliente_ids = [None, 0]
@@ -124,9 +127,10 @@ class Historiales:
         self.usuario_c_sel = {"id": None, "nombre": "(Todos)"}
         self.cliente_p_sel = {"id": None, "nombre": "(Todos)"}
         self.usuario_p_sel = {"id": None, "nombre": "(Todos)"}
+        self.usuario_caja_sel = {"id": None, "nombre": "(Todos)"}
         
         # cargar_datos_combos se difiere drásticamente para que la ventana CTk se renderice fluidamente antes de bloquear mysql
-        self.win.after(300, self.cargar_datos_combos)
+        self.win.after(100, self.cargar_datos_combos)
 
         # Footer con boton cerrar - se packea ANTES del notebook para reservar espacio
         frm_footer = ctk.CTkFrame(self.win, fg_color="transparent")
@@ -173,6 +177,7 @@ class Historiales:
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
 
         configurar_navegacion_ventana(self.win)
+        centrar_y_mostrar_ventana(self.win)
         self.win.grab_set()
         
     def crear_boton_accion(self, parent, text, command, color, width=12):
@@ -191,9 +196,9 @@ class Historiales:
 
     def _abrir_selector_entidad(self, tipo: str, var_seleccion: dict, lista_datos: list, label_update: ctk.CTkLabel):
         popup = ctk.CTkToplevel(self.win)
+        preparar_ventana(popup)
         popup.title(f"Seleccionar {tipo}")
         popup.geometry("500x550")
-        aplicar_tema_ventana(popup)
         
         configurar_navegacion_ventana(popup)
 
@@ -207,11 +212,11 @@ class Historiales:
         
         cols = ("ID", "Nombre")
         tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
-        tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
-        sc = ttk.Scrollbar(frame_list, command=tree_sel.yview)
-        sc.pack(side="right", fill="y", pady=5)
+        sc = ctk.CTkScrollbar(frame_list, command=tree_sel.yview)
+        sc.pack(side="right", fill="y", padx=(0, 5), pady=5)
         tree_sel.configure(yscrollcommand=sc.set)
+        tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         tree_sel.column("ID", width=70, anchor="center")
         tree_sel.column("Nombre", width=350, anchor="w")
@@ -268,8 +273,8 @@ class Historiales:
         
         ctk.CTkButton(btn_frm, text="Cancelar", command=popup.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
         ctk.CTkButton(btn_frm, text="✓ Seleccionar", command=tomar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), width=180, height=45).pack(side="right", padx=10)
-        
         popup.after(100, lambda: ent.focus_set())
+        centrar_y_mostrar_ventana(popup)
         popup.grab_set()
         popup.transient(self.win)
         self.win.wait_window(popup)
@@ -278,41 +283,64 @@ class Historiales:
         _aplicar_filtro_rapido_logic(seleccion, selector_desde.widget_entrada, selector_hasta.widget_entrada)
 
     def cargar_datos_combos(self):
-        try:
-            vends = self.backend.obtener_vendedores() or []
-            self.vendedores_raw = vends
-            self.vendedor_nombres = ["(Todos)"] + [v.get("nombre", "") for v in vends]
-            self.vendedor_ids = [None] + [v.get("id_usuario") for v in vends]
-            
-            clis = self.backend.listar_clientes() or []
-            self.clientes_raw = clis
-            self.cliente_nombres = ["(Todos)", "(Consumidor Final)"] + [c.get("nombre", "") for c in clis]
-            self.cliente_ids = [None, 0] + [c.get("id_cliente") for c in clis]
-            
-            self.cliente_nombres_pagos = ["(Todos)"] + [c.get("nombre", "") for c in clis]
-            self.cliente_ids_pagos = [None] + [c.get("id_cliente") for c in clis]
-            
-            provs = self.backend.obtener_proveedores(incluir_inactivos=True) or []
-            self.proveedores_raw = provs
-            self.proveedor_nombres = ["(Todos)"] + [p.get("nombre", "") for p in provs]
-            self.proveedor_ids = [None] + [p.get("id_proveedor") for p in provs]
-            self.proveedores_map_id = {p['id_proveedor']: p for p in provs} 
-            self.proveedores_map_nombre = {p['nombre']: p for p in provs} 
-        except Exception as e:
-            logger.error(f"Error carga combos: {e}")
-        finally:
-            # Actualizar los combos ya renderizados con los datos recién cargados
+        def _bg_load():
             try:
-                if hasattr(self, 'cb_vendedor_v'):
-                    self.cb_vendedor_v.configure(values=self.vendedor_nombres)
-                if hasattr(self, 'cb_cliente_v'):
-                    self.cb_cliente_v.configure(values=self.cliente_nombres)
-                if hasattr(self, 'cb_proveedor_c'):
-                    self.cb_proveedor_c.configure(values=self.proveedor_nombres)
-                if hasattr(self, 'cb_cliente_p'):
-                    self.cb_cliente_p.configure(values=self.cliente_nombres_pagos)
-            except Exception:
-                pass
+                # 1. Consultar base de datos en segundo plano
+                vends = self.backend.obtener_vendedores() or []
+                clis = self.backend.listar_clientes() or []
+                provs = self.backend.obtener_proveedores(incluir_inactivos=True) or []
+                
+                # 2. Preparar estructuras de datos
+                v_nombres = ["(Todos)"] + [v.get("nombre", "") for v in vends]
+                v_ids = [None] + [v.get("id_usuario") for v in vends]
+                
+                c_nombres = ["(Todos)", "(Consumidor Final)"] + [c.get("nombre", "") for c in clis]
+                c_ids = [None, 0] + [c.get("id_cliente") for c in clis]
+                
+                c_nombres_p = ["(Todos)"] + [c.get("nombre", "") for c in clis]
+                c_ids_p = [None] + [c.get("id_cliente") for c in clis]
+                
+                p_nombres = ["(Todos)"] + [p.get("nombre", "") for p in provs]
+                p_ids = [None] + [p.get("id_proveedor") for p in provs]
+                p_map_id = {p['id_proveedor']: p for p in provs} 
+                p_map_nombre = {p['nombre']: p for p in provs}
+                
+                # 3. Asignar y actualizar la UI de forma segura en el hilo principal
+                def _update_ui():
+                    self.vendedores_raw = vends
+                    self.clientes_raw = clis
+                    self.proveedores_raw = provs
+                    
+                    self.vendedor_nombres = v_nombres
+                    self.vendedor_ids = v_ids
+                    self.cliente_nombres = c_nombres
+                    self.cliente_ids = c_ids
+                    self.cliente_nombres_pagos = c_nombres_p
+                    self.cliente_ids_pagos = c_ids_p
+                    self.proveedor_nombres = p_nombres
+                    self.proveedor_ids = p_ids
+                    self.proveedores_map_id = p_map_id
+                    self.proveedores_map_nombre = p_map_nombre
+                    
+                    try:
+                        if hasattr(self, 'cb_vendedor_v'):
+                            self.cb_vendedor_v.configure(values=self.vendedor_nombres)
+                        if hasattr(self, 'cb_cliente_v'):
+                            self.cb_cliente_v.configure(values=self.cliente_nombres)
+                        if hasattr(self, 'cb_proveedor_c'):
+                            self.cb_proveedor_c.configure(values=self.proveedor_nombres)
+                        if hasattr(self, 'cb_cliente_p'):
+                            self.cb_cliente_p.configure(values=self.cliente_nombres_pagos)
+                    except Exception:
+                        pass
+                
+                if self.win.winfo_exists():
+                    self.win.after(0, _update_ui)
+            except Exception as e:
+                logger.error(f"Error asíncrono en cargar_datos_combos: {e}")
+
+        import threading
+        threading.Thread(target=_bg_load, daemon=True).start()
 
     def _aplicar_filtros_iniciales(self, f_fecha, f_desde, f_hasta, f_vend, f_vta, f_comp, f_cli):
         if f_fecha:
@@ -325,7 +353,10 @@ class Historiales:
         if f_vend:
             try:
                 idx = self.vendedor_ids.index(f_vend)
-                self.cb_vendedor_v.current(idx)
+                self.vendedor_sel['id'] = f_vend
+                self.vendedor_sel['nombre'] = self.vendedor_nombres[idx]
+                if hasattr(self, 'lbl_vendedor_v'):
+                    self.lbl_vendedor_v.configure(text=self.vendedor_nombres[idx])
             except: pass
             
         self.filtro_venta_id = f_vta
@@ -349,43 +380,89 @@ class Historiales:
         frm = ctk.CTkFrame(self.bg_ventas, fg_color="transparent")
         frm.pack(fill="x", padx=10, pady=(2, 5))
 
-        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, sticky="e")
+        # Asignar peso para que los buscadores absorban espacio restante de forma fluida
+        frm.grid_columnconfigure(7, weight=1)
+        frm.grid_columnconfigure(9, weight=1)
+
+        # 1. Filtro Rango
+        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
         cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_v, self.fecha_hasta_v),
-                                     width=140, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
+                                     width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
         cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=5)
+        cb_rango.grid(row=0, column=1, padx=3)
 
-        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2)
+        # 2. Fecha Desde
+        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
         self.fecha_desde_v = SelectorFecha(frm)
-        self.fecha_desde_v.grid(row=0, column=3)
+        self.fecha_desde_v.grid(row=0, column=3, padx=3)
         self.fecha_desde_v.widget_entrada.delete(0, tk.END)
         self.fecha_desde_v.widget_entrada.insert(0, f"01/{date.today().month:02d}/{date.today().year}")
 
-        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4)
+        # 3. Fecha Hasta
+        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4, padx=3, sticky="e")
         self.fecha_hasta_v = SelectorFecha(frm)
-        self.fecha_hasta_v.grid(row=0, column=5)
+        self.fecha_hasta_v.grid(row=0, column=5, padx=3)
         self.fecha_hasta_v.widget_entrada.delete(0, tk.END)
         self.fecha_hasta_v.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
         
         cb_rango.bind("<<ComboboxSelected>>", lambda e: _aplicar_filtro_rapido_logic(cb_rango.get(), self.fecha_desde_v.widget_entrada, self.fecha_hasta_v.widget_entrada))
 
-        ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=0, sticky="e", pady=5)
-        self.lbl_vendedor_v = ctk.CTkLabel(frm, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"))
-        self.lbl_vendedor_v.grid(row=1, column=1, padx=5, sticky="w")
-        ctk.CTkButton(frm, text="🔍", width=35, height=30, fg_color="#3b82f6", command=lambda: self._abrir_selector_entidad("Vendedor", self.vendedor_sel, self.vendedores_raw, self.lbl_vendedor_v)).grid(row=1, column=1, padx=(70, 0), sticky="w")
+        # 4. Buscador Vendedor (Encapsulado en sub-frame)
+        ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=6, padx=(10, 3), sticky="e")
+        frm_vendedor = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_vendedor.grid(row=0, column=7, padx=3, sticky="w")
+        
+        self.lbl_vendedor_v = ctk.CTkLabel(frm_vendedor, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_vendedor_v.pack(side="left", padx=(0, 5))
+        
+        btn_vendedor = ctk.CTkButton(frm_vendedor, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                     command=lambda: self._abrir_selector_entidad("Vendedor", self.vendedor_sel, self.vendedores_raw, self.lbl_vendedor_v))
+        btn_vendedor.pack(side="left")
 
-        ctk.CTkLabel(frm, text="Cliente:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=2, sticky="e")
-        self.lbl_cliente_v = ctk.CTkLabel(frm, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"))
-        self.lbl_cliente_v.grid(row=1, column=3, padx=5, sticky="w")
-        ctk.CTkButton(frm, text="🔍", width=35, height=30, fg_color="#3b82f6", command=lambda: self._abrir_selector_entidad("Cliente", self.cliente_sel, self.clientes_raw, self.lbl_cliente_v)).grid(row=1, column=3, padx=(70, 0), sticky="w")
+        # 5. Buscador Cliente (Encapsulado en sub-frame)
+        ctk.CTkLabel(frm, text="Cliente:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
+        frm_cliente = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_cliente.grid(row=0, column=9, padx=3, sticky="w")
+        
+        self.lbl_cliente_v = ctk.CTkLabel(frm_cliente, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_cliente_v.pack(side="left", padx=(0, 5))
+        
+        btn_cliente = ctk.CTkButton(frm_cliente, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                   command=lambda: self._abrir_selector_entidad("Cliente", self.cliente_sel, self.clientes_raw, self.lbl_cliente_v))
+        btn_cliente.pack(side="left")
 
-        self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_ventas, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
-        self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(0), "#10b981", width=10).grid(row=1, column=5, padx=5)
+        # 6. Botones de Acción (Grupo alineado a la derecha)
+        frm_acciones = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_acciones.grid(row=0, column=10, padx=(15, 0), sticky="e")
+        
+        btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_ventas, "#3b82f6", width=8)
+        btn_buscar.pack(side="left", padx=3)
+        
+        btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(0), "#10b981", width=8)
+        btn_exportar.pack(side="left", padx=3)
+
+        if tiene_permiso(self.usuario, 'cancelar_ventas'):
+            btn_anular = self.crear_boton_accion(frm_acciones, "🗑️ Anular", self.anular_venta_ui, "#ef4444", width=8)
+            btn_anular.pack(side="left", padx=3)
         
         cols = ("ID", "Fecha", "Cliente", "Vendedor", "Total", "Estado", "Pago")
-        self.tree_maestro_v = ttk.Treeview(self.bg_ventas, columns=cols, show="headings", height=5, style="Modern.Treeview") 
-        self.tree_maestro_v.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Frame contenedor para Ventas Maestro + Scrollbar
+        frm_maestro_v_cont = ctk.CTkFrame(self.bg_ventas, fg_color="transparent")
+        frm_maestro_v_cont.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.tree_maestro_v = ttk.Treeview(frm_maestro_v_cont, columns=cols, show="headings", height=5, style="Modern.Treeview") 
+        ys_maestro_v = ctk.CTkScrollbar(frm_maestro_v_cont, command=self.tree_maestro_v.yview)
+        ys_maestro_v.pack(side="right", fill="y")
+        try:
+            from app.frontend.componentes_ui import configurar_scrollbar_coherente
+            configurar_scrollbar_coherente(ys_maestro_v)
+        except ImportError: pass
+        
+        self.tree_maestro_v.configure(yscrollcommand=ys_maestro_v.set)
+        self.tree_maestro_v.pack(side="left", fill="both", expand=True)
+        
         for c in cols: self.tree_maestro_v.heading(c, text=c)
         self.tree_maestro_v.column("ID", width=0, stretch=False)
         self.tree_maestro_v.configure(displaycolumns=("Fecha", "Cliente", "Vendedor", "Total", "Estado", "Pago"))
@@ -393,35 +470,96 @@ class Historiales:
         self.tree_maestro_v.bind("<<TreeviewSelect>>", self.mostrar_detalle_venta)
 
         cols_d = ("Prod", "Código", "Cant", "P. Unit", "Subtotal")
-        self.tree_detalle_v = ttk.Treeview(self.bg_ventas, columns=cols_d, show="headings", height=8, style="Modern.Treeview") 
-        self.tree_detalle_v.pack(fill="both", expand=True, padx=10, pady=(0,10))
+        
+        # Frame contenedor para Ventas Detalle + Scrollbar
+        frm_detalle_v_cont = ctk.CTkFrame(self.bg_ventas, fg_color="transparent")
+        frm_detalle_v_cont.pack(fill="both", expand=True, padx=10, pady=(0,10))
+        
+        self.tree_detalle_v = ttk.Treeview(frm_detalle_v_cont, columns=cols_d, show="headings", height=8, style="Modern.Treeview") 
+        ys_detalle_v = ctk.CTkScrollbar(frm_detalle_v_cont, command=self.tree_detalle_v.yview)
+        ys_detalle_v.pack(side="right", fill="y")
+        try:
+            configurar_scrollbar_coherente(ys_detalle_v)
+        except: pass
+        
+        self.tree_detalle_v.configure(yscrollcommand=ys_detalle_v.set)
+        self.tree_detalle_v.pack(side="left", fill="both", expand=True)
+        
         for c in cols_d: self.tree_detalle_v.heading(c, text=c)
         self.tree_detalle_v.column("P. Unit", anchor="e")
         self.tree_detalle_v.column("Subtotal", anchor="e")
 
+    def anular_venta_ui(self):
+        sel = self.tree_maestro_v.selection()
+        if not sel:
+            messagebox.showwarning("Atención", "Por favor, seleccione la venta que desea anular.", parent=self.win)
+            return
+            
+        vals = self.tree_maestro_v.item(sel[0], "values")
+        if not vals or vals[0] == "Aviso":
+            return
+            
+        id_venta = int(vals[0])
+        estado = vals[5]
+        total = vals[4]
+        
+        if estado == "cancelada":
+            messagebox.showwarning("Atención", "Esta venta ya se encuentra anulada/cancelada.", parent=self.win)
+            return
+            
+        if not messagebox.askyesno(
+            "Confirmar Anulación",
+            f"¿Está seguro de que desea ANULAR la Venta #{id_venta} por un total de {total}?\n\n"
+            "Esta acción restituirá el stock de los productos vendidos y revertirá el saldo corriente del cliente si corresponde. Esta operación es irreversible.",
+            parent=self.win
+        ):
+            return
+            
+        try:
+            exito = self.backend.anular_venta(id_venta, self.usuario['id_usuario'])
+            if exito:
+                messagebox.showinfo("Éxito", f"La Venta #{id_venta} ha sido anulada correctamente y el stock fue restituido.", parent=self.win)
+                self.buscar_ventas()
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo anular la venta:\n{e}", parent=self.win)
+
     def buscar_ventas(self):
+        # 1. Limpiar UI
         for i in self.tree_maestro_v.get_children(): self.tree_maestro_v.delete(i)
         for i in self.tree_detalle_v.get_children(): self.tree_detalle_v.delete(i)
-        try:
-            d_sql = self.fecha_desde_v.get_date_sql()
-            h_sql = self.fecha_hasta_v.get_date_sql()
-            id_vend = self.vendedor_sel['id']
-            id_cli = self.cliente_sel['id']
-            
-            if hasattr(self, 'filtro_venta_id') and self.filtro_venta_id:
-                ventas = [v for v in self.backend.obtener_ventas_maestro(None, None, None, None) 
-                          if v['id_venta'] == self.filtro_venta_id]
-                self.filtro_venta_id = None 
-            else:
-                ventas = self.backend.obtener_ventas_maestro(d_sql, h_sql, id_cli, id_vend)
+        
+        # 2. Hilo para busqueda larga
+        def _fetch():
+            try:
+                d_sql = self.fecha_desde_v.get_date_sql()
+                h_sql = self.fecha_hasta_v.get_date_sql()
+                id_vend = self.vendedor_sel['id']
+                id_cli = self.cliente_sel['id']
                 
-            for v in ventas:
+                ventas = self.backend.obtener_ventas_maestro(d_sql, h_sql, id_cli, id_vend)
+                # 3. Actualizar UI en hilo principal
+                self.win.after(0, lambda: self._update_tree_ventas(ventas))
+            except Exception as e:
+                self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+        
+        import threading
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _update_tree_ventas(self, ventas):
+        MAX_RANG_RENDER = 500
+        count = 0
+        for v in ventas:
+            if count >= MAX_RANG_RENDER:
                 self.tree_maestro_v.insert("", tk.END, values=[
-                    v.get('id_venta'), _formatear_fecha_para_ui(v.get('fecha')),
-                    v.get('cliente') or "Consumidor Final", v.get('vendedor'),
-                    _fmt_mon(v.get('total')), v.get('estado'), v.get('tipo_pago')
+                    "Aviso", "-", "Se han omitido los resultados excedentes visuales...", "-", "-", "-", "-"
                 ])
-        except Exception as e: messagebox.showerror("Error", str(e), parent=self.win)
+                break
+            self.tree_maestro_v.insert("", tk.END, values=[
+                v.get('id_venta'), _formatear_fecha_para_ui(v.get('fecha')),
+                v.get('cliente') or "Consumidor Final", v.get('vendedor'),
+                _fmt_mon(v.get('total')), v.get('estado'), v.get('tipo_pago')
+            ])
+            count += 1
 
     def mostrar_detalle_venta(self, event=None):
         for i in self.tree_detalle_v.get_children(): self.tree_detalle_v.delete(i)
@@ -438,115 +576,11 @@ class Historiales:
                 ])
         except Exception: pass
 
-    def _crear_tab_compras(self):
-        frm = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
-        frm.pack(fill="x", padx=10, pady=(2, 2))
-
-        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, sticky="e")
-        cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
-                                     command=lambda v: self._on_rango_change(v, self.fecha_desde_c, self.fecha_hasta_c),
-                                     width=140, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=5)
-
-        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2)
-        self.fecha_desde_c = SelectorFecha(frm)
-        self.fecha_desde_c.grid(row=0, column=3)
-        self.fecha_desde_c.widget_entrada.delete(0, tk.END)
-        self.fecha_desde_c.widget_entrada.insert(0, f"01/{date.today().month:02d}/{date.today().year}")
-
-        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4)
-        self.fecha_hasta_c = SelectorFecha(frm)
-        self.fecha_hasta_c.grid(row=0, column=5)
-        self.fecha_hasta_c.widget_entrada.delete(0, tk.END)
-        self.fecha_hasta_c.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
-        
-        # Eliminación de bind legacy de combobox
-
-        ctk.CTkLabel(frm, text="Proveedor:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=0, sticky="e", pady=5)
-        self.lbl_proveedor_c = ctk.CTkLabel(frm, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"))
-        self.lbl_proveedor_c.grid(row=1, column=1, padx=5, sticky="w")
-        ctk.CTkButton(frm, text="🔍", width=35, height=30, fg_color="#3b82f6", command=lambda: self._abrir_selector_entidad("Proveedor", self.proveedor_sel, self.proveedores_raw, self.lbl_proveedor_c)).grid(row=1, column=1, padx=(70, 0), sticky="w")
-
-        ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=2, sticky="e")
-        self.lbl_usuario_c = ctk.CTkLabel(frm, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"))
-        self.lbl_usuario_c.grid(row=1, column=3, padx=5, sticky="w")
-        ctk.CTkButton(frm, text="🔍", width=35, height=30, fg_color="#3b82f6", command=lambda: self._abrir_selector_entidad("Vendedor", self.usuario_c_sel, self.vendedores_raw, self.lbl_usuario_c)).grid(row=1, column=3, padx=(70, 0), sticky="w")
-
-        self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_compras, "#3b82f6", width=10).grid(row=1, column=5)
-        self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(1), "#10b981", width=10).grid(row=1, column=6, padx=5)
-
-        cols = ("ID", "Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Vendedor")
-        self.tree_maestro_c = ttk.Treeview(self.bg_compras, columns=cols, show="headings", height=5, style="Modern.Treeview")
-        self.tree_maestro_c.pack(fill="both", expand=True, padx=10, pady=5)
-        for c in cols: self.tree_maestro_c.heading(c, text=c)
-        self.tree_maestro_c.column("ID", width=0, stretch=False)
-        self.tree_maestro_c.configure(displaycolumns=("Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Vendedor"))
-        self.tree_maestro_c.column("Total", anchor="e")
-        self.tree_maestro_c.column("Estado", width=100, anchor="center")
-        self.tree_maestro_c.column("Pago", width=100, anchor="center")
-        self.tree_maestro_c.column("Empresa", width=160)
-        self.tree_maestro_c.column("CUIT", width=110, anchor="center")
-        self.tree_maestro_c.bind("<<TreeviewSelect>>", self.mostrar_detalle_compra)
-
-        cols_d = ("Prod", "Código", "Cant", "Costo", "Precio Venta Asignado", "Subtotal")
-        self.tree_detalle_c = ttk.Treeview(self.bg_compras, columns=cols_d, show="headings", height=8, style="Modern.Treeview")
-        self.tree_detalle_c.pack(fill="both", expand=True, padx=10, pady=(0,10))
-        for c in cols_d: self.tree_detalle_c.heading(c, text=c)
-        self.tree_detalle_c.column("Costo", anchor="e", width=100)
-        self.tree_detalle_c.column("Precio Venta Asignado", anchor="e", width=100)
-        self.tree_detalle_c.column("Subtotal", anchor="e", width=100)
-
-    def buscar_compras(self):
-        for i in self.tree_maestro_c.get_children(): self.tree_maestro_c.delete(i)
-        for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
-        try:
-            d_sql = self.fecha_desde_c.get_date_sql()
-            h_sql = self.fecha_hasta_c.get_date_sql()
-            if hasattr(self, 'filtro_compra_id') and self.filtro_compra_id:
-                compras = [c for c in self.backend.obtener_compras_maestro(None, None, None) 
-                             if c['id_compra'] == self.filtro_compra_id]
-                self.filtro_compra_id = None
-            else:
-                id_prov_filtro = self.proveedor_sel['id']
-                compras = self.backend.obtener_compras_maestro(d_sql, h_sql, id_prov_filtro)
-            
-            prov_map = self.proveedores_map_nombre
-
-            nombre_usuario_sel = self.usuario_c_sel['nombre']
-            if nombre_usuario_sel != "(Todos)":
-                compras = [c for c in compras if c.get('usuario') == nombre_usuario_sel]
-
-            for c in compras:
-                medio = c.get('medio_pago') or '-'
-                prov_data = prov_map.get(c.get('proveedor'), {})
-                
-                cuit_val = prov_data.get('cuit', '-')
-                empresa_val = prov_data.get('empresa') or c.get('proveedor') or '-'
-
-                self.tree_maestro_c.insert("", tk.END, values=[
-                    c.get('id_compra'), 
-                    _formatear_fecha_para_ui(c.get('fecha')),
-                    empresa_val, 
-                    cuit_val, 
-                    _fmt_mon(c.get('total')),
-                    c.get('estado'), 
-                    medio, 
-                    c.get('usuario')
-                ])
-        except Exception as e: logger.error(f"Error buscar compras: {e}")
-
     def mostrar_detalle_compra(self, event=None):
         for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
         sel = self.tree_maestro_c.selection()
         if not sel: return
-        
         id_c = self.tree_maestro_c.item(sel[0], "values")[0]
-        
-
-        if self.tree_maestro_c.item(sel[0], "values")[5] == "PAGO DEUDA":
-            return
-            
         try:
             dets = self.backend.obtener_compra_detalle(int(id_c))
             for d in dets:
@@ -561,138 +595,380 @@ class Historiales:
                     precio_venta_txt,
                     _fmt_mon(d.get('subtotal'))
                 ])
-        except Exception as e:
-            logger.error(f"Error al mostrar detalle compra: {e}")
-            pass
+        except Exception: pass
+
+
+    def _crear_tab_compras(self):
+        frm = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
+        frm.pack(fill="x", padx=10, pady=(2, 5))
+
+        # Asignar peso para que los buscadores absorban espacio restante de forma fluida
+        frm.grid_columnconfigure(7, weight=1)
+        frm.grid_columnconfigure(9, weight=1)
+
+        # 1. Filtro Rango
+        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
+        cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
+                                     command=lambda v: self._on_rango_change(v, self.fecha_desde_c, self.fecha_hasta_c),
+                                     width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
+        cb_rango.set("Personalizado")
+        cb_rango.grid(row=0, column=1, padx=3)
+
+        # 2. Fecha Desde
+        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
+        self.fecha_desde_c = SelectorFecha(frm)
+        self.fecha_desde_c.grid(row=0, column=3, padx=3)
+        self.fecha_desde_c.widget_entrada.delete(0, tk.END)
+        self.fecha_desde_c.widget_entrada.insert(0, f"01/{date.today().month:02d}/{date.today().year}")
+
+        # 3. Fecha Hasta
+        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4, padx=3, sticky="e")
+        self.fecha_hasta_c = SelectorFecha(frm)
+        self.fecha_hasta_c.grid(row=0, column=5, padx=3)
+        self.fecha_hasta_c.widget_entrada.delete(0, tk.END)
+        self.fecha_hasta_c.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
+
+        # 4. Buscador Proveedor (Encapsulado en sub-frame)
+        ctk.CTkLabel(frm, text="Proveedor:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=6, padx=(10, 3), sticky="e")
+        frm_proveedor = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_proveedor.grid(row=0, column=7, padx=3, sticky="w")
+        
+        self.lbl_proveedor_c = ctk.CTkLabel(frm_proveedor, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_proveedor_c.pack(side="left", padx=(0, 5))
+        
+        btn_proveedor = ctk.CTkButton(frm_proveedor, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                      command=lambda: self._abrir_selector_entidad("Proveedor", self.proveedor_sel, self.proveedores_raw, self.lbl_proveedor_c))
+        btn_proveedor.pack(side="left")
+
+        # 5. Buscador Vendedor (Encapsulado en sub-frame)
+        ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
+        frm_usuario_c = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_usuario_c.grid(row=0, column=9, padx=3, sticky="w")
+        
+        self.lbl_usuario_c = ctk.CTkLabel(frm_usuario_c, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_usuario_c.pack(side="left", padx=(0, 5))
+        
+        btn_usuario = ctk.CTkButton(frm_usuario_c, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                    command=lambda: self._abrir_selector_entidad("Vendedor", self.usuario_c_sel, self.vendedores_raw, self.lbl_usuario_c))
+        btn_usuario.pack(side="left")
+
+        # 6. Botones de Acción (Grupo alineado a la derecha)
+        frm_acciones = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_acciones.grid(row=0, column=10, padx=(15, 0), sticky="e")
+        
+        btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_compras, "#3b82f6", width=8)
+        btn_buscar.pack(side="left", padx=3)
+        
+        btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(1), "#10b981", width=8)
+        btn_exportar.pack(side="left", padx=3)
+
+        cols = ("ID", "Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Vendedor")
+        
+        # Frame contenedor para Compras Maestro + Scrollbar
+        frm_maestro_c_cont = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
+        frm_maestro_c_cont.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.tree_maestro_c = ttk.Treeview(frm_maestro_c_cont, columns=cols, show="headings", height=5, style="Modern.Treeview")
+        ys_maestro_c = ctk.CTkScrollbar(frm_maestro_c_cont, command=self.tree_maestro_c.yview)
+        ys_maestro_c.pack(side="right", fill="y")
+        try:
+            from app.frontend.componentes_ui import configurar_scrollbar_coherente
+            configurar_scrollbar_coherente(ys_maestro_c)
+        except: pass
+        
+        self.tree_maestro_c.configure(yscrollcommand=ys_maestro_c.set)
+        self.tree_maestro_c.pack(side="left", fill="both", expand=True)
+        
+        for c in cols: self.tree_maestro_c.heading(c, text=c)
+        self.tree_maestro_c.column("ID", width=0, stretch=False)
+        self.tree_maestro_c.configure(displaycolumns=("Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Vendedor"))
+        self.tree_maestro_c.column("Total", anchor="e")
+        self.tree_maestro_c.column("Estado", width=100, anchor="center")
+        self.tree_maestro_c.column("Pago", width=100, anchor="center")
+        self.tree_maestro_c.column("Empresa", width=160)
+        self.tree_maestro_c.column("CUIT", width=110, anchor="center")
+        self.tree_maestro_c.bind("<<TreeviewSelect>>", self.mostrar_detalle_compra)
+
+        cols_d = ("Prod", "Código", "Cant", "Costo", "Precio Venta Asignado", "Subtotal")
+        
+        # Frame contenedor para Compras Detalle + Scrollbar
+        frm_detalle_c_cont = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
+        frm_detalle_c_cont.pack(fill="both", expand=True, padx=10, pady=(0,10))
+        
+        self.tree_detalle_c = ttk.Treeview(frm_detalle_c_cont, columns=cols_d, show="headings", height=8, style="Modern.Treeview")
+        ys_detalle_c = ctk.CTkScrollbar(frm_detalle_c_cont, command=self.tree_detalle_c.yview)
+        ys_detalle_c.pack(side="right", fill="y")
+        try:
+            configurar_scrollbar_coherente(ys_detalle_c)
+        except: pass
+        
+        self.tree_detalle_c.configure(yscrollcommand=ys_detalle_c.set)
+        self.tree_detalle_c.pack(side="left", fill="both", expand=True)
+        
+        for c in cols_d: self.tree_detalle_c.heading(c, text=c)
+        self.tree_detalle_c.column("Costo", anchor="e", width=100)
+        self.tree_detalle_c.column("Precio Venta Asignado", anchor="e", width=100)
+        self.tree_detalle_c.column("Subtotal", anchor="e", width=100)
+
+    def buscar_compras(self):
+        # 1. Limpiar UI
+        for i in self.tree_maestro_c.get_children(): self.tree_maestro_c.delete(i)
+        for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
+        
+        # 2. Hilo para busqueda
+        def _fetch():
+            try:
+                d_sql = self.fecha_desde_c.get_date_sql()
+                h_sql = self.fecha_hasta_c.get_date_sql()
+                id_prov_filtro = self.proveedor_sel['id']
+                compras = self.backend.obtener_compras_maestro(d_sql, h_sql, id_prov_filtro)
+                nombre_usuario_sel = self.usuario_c_sel['nombre']
+                if nombre_usuario_sel != "(Todos)":
+                    compras = [c for c in compras if c.get('usuario') == nombre_usuario_sel]
+                    
+                # 3. Actualizar UI
+                self.win.after(0, lambda: self._update_tree_compras(compras))
+            except Exception as e:
+                self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+        
+        import threading
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _update_tree_compras(self, compras):
+        MAX_RANG_RENDER = 500
+        count = 0
+        prov_map = self.proveedores_map_nombre
+        for c in compras:
+            if count >= MAX_RANG_RENDER:
+                self.tree_maestro_c.insert("", tk.END, values=[
+                    "Aviso", "-", "Se han omitido los resultados excedentes visuales...", "-", "-", "-", "-", "-"
+                ])
+                break
+            medio = c.get('medio_pago') or '-'
+            prov_data = prov_map.get(c.get('proveedor'), {})
+            cuit_val = prov_data.get('cuit', '-')
+            empresa_val = prov_data.get('empresa') or c.get('proveedor') or '-'
+            self.tree_maestro_c.insert("", tk.END, values=[
+                c.get('id_compra'), _formatear_fecha_para_ui(c.get('fecha')),
+                empresa_val, cuit_val, _fmt_mon(c.get('total')),
+                c.get('estado'), medio, c.get('usuario')
+            ])
+            count += 1
 
     def _crear_tab_pagos(self):
         frm = ctk.CTkFrame(self.bg_pagos, fg_color="transparent")
-        frm.pack(fill="x", padx=10, pady=(2, 2))
+        frm.pack(fill="x", padx=10, pady=(2, 5))
 
-        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, sticky="e")
+        # Asignar peso para que los buscadores absorban espacio restante de forma fluida
+        frm.grid_columnconfigure(7, weight=1)
+        frm.grid_columnconfigure(9, weight=1)
+
+        # 1. Filtro Rango
+        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
         cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_p, self.fecha_hasta_p),
-                                     width=140, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
+                                     width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
         cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=5)
+        cb_rango.grid(row=0, column=1, padx=3)
 
-        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2)
+        # 2. Fecha Desde
+        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
         self.fecha_desde_p = SelectorFecha(frm)
-        self.fecha_desde_p.grid(row=0, column=3)
+        self.fecha_desde_p.grid(row=0, column=3, padx=3)
         self.fecha_desde_p.widget_entrada.delete(0, tk.END)
         self.fecha_desde_p.widget_entrada.insert(0, f"01/{date.today().month:02d}/{date.today().year}")
 
-        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4)
+        # 3. Fecha Hasta
+        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4, padx=3, sticky="e")
         self.fecha_hasta_p = SelectorFecha(frm)
-        self.fecha_hasta_p.grid(row=0, column=5)
+        self.fecha_hasta_p.grid(row=0, column=5, padx=3)
         self.fecha_hasta_p.widget_entrada.delete(0, tk.END)
         self.fecha_hasta_p.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
+
+        # 4. Buscador Cliente (Encapsulado en sub-frame)
+        ctk.CTkLabel(frm, text="Cliente:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=6, padx=(10, 3), sticky="e")
+        frm_cliente_p = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_cliente_p.grid(row=0, column=7, padx=3, sticky="w")
         
-        # Eliminación de bind legacy de combobox
+        self.lbl_cliente_p = ctk.CTkLabel(frm_cliente_p, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_cliente_p.pack(side="left", padx=(0, 5))
+        
+        btn_cliente = ctk.CTkButton(frm_cliente_p, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                    command=lambda: self._abrir_selector_entidad("Cliente", self.cliente_p_sel, self.clientes_raw, self.lbl_cliente_p))
+        btn_cliente.pack(side="left")
 
-        ctk.CTkLabel(frm, text="Cliente:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=0, sticky="e", pady=5)
-        self.lbl_cliente_p = ctk.CTkLabel(frm, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"))
-        self.lbl_cliente_p.grid(row=1, column=1, padx=5, sticky="w")
-        ctk.CTkButton(frm, text="🔍", width=35, height=30, fg_color="#3b82f6", command=lambda: self._abrir_selector_entidad("Cliente", self.cliente_p_sel, self.clientes_raw, self.lbl_cliente_p)).grid(row=1, column=1, padx=(70, 0), sticky="w")
+        # 5. Buscador Usuario (Encapsulado en sub-frame)
+        ctk.CTkLabel(frm, text="Usuario:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
+        frm_usuario_p = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_usuario_p.grid(row=0, column=9, padx=3, sticky="w")
+        
+        self.lbl_usuario_p = ctk.CTkLabel(frm_usuario_p, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_usuario_p.pack(side="left", padx=(0, 5))
+        
+        btn_usuario = ctk.CTkButton(frm_usuario_p, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                    command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_p_sel, self.vendedores_raw, self.lbl_usuario_p))
+        btn_usuario.pack(side="left")
 
-        ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=2, sticky="e")
-        self.lbl_usuario_p = ctk.CTkLabel(frm, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"))
-        self.lbl_usuario_p.grid(row=1, column=3, padx=5, sticky="w")
-        ctk.CTkButton(frm, text="🔍", width=35, height=30, fg_color="#3b82f6", command=lambda: self._abrir_selector_entidad("Vendedor", self.usuario_p_sel, self.vendedores_raw, self.lbl_usuario_p)).grid(row=1, column=3, padx=(70, 0), sticky="w")
+        # 6. Botones de Acción (Grupo alineado a la derecha)
+        frm_acciones = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_acciones.grid(row=0, column=10, padx=(15, 0), sticky="e")
+        
+        btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_pagos, "#3b82f6", width=8)
+        btn_buscar.pack(side="left", padx=3)
+        
+        btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(2), "#10b981", width=8)
+        btn_exportar.pack(side="left", padx=3)
 
-        self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_pagos, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
-        self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(2), "#10b981", width=10).grid(row=1, column=5, padx=5)
-
-        cols = ("Fecha", "Cliente", "Monto", "Método", "Vendedor")
-        self.tree_pagos = ttk.Treeview(self.bg_pagos, columns=cols, show="headings", height=8, style="Modern.Treeview")
-        self.tree_pagos.pack(fill="both", expand=True, padx=10, pady=10)
+        cols = ("Fecha", "Cliente", "Monto", "Método", "Usuario")
+        
+        # Frame contenedor para Pagos + Scrollbar
+        frm_pagos_cont = ctk.CTkFrame(self.bg_pagos, fg_color="transparent")
+        frm_pagos_cont.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.tree_pagos = ttk.Treeview(frm_pagos_cont, columns=cols, show="headings", height=15, style="Modern.Treeview")
+        ys_pagos = ctk.CTkScrollbar(frm_pagos_cont, command=self.tree_pagos.yview)
+        ys_pagos.pack(side="right", fill="y")
+        try:
+            from app.frontend.componentes_ui import configurar_scrollbar_coherente
+            configurar_scrollbar_coherente(ys_pagos)
+        except: pass
+        
+        self.tree_pagos.configure(yscrollcommand=ys_pagos.set)
+        self.tree_pagos.pack(side="left", fill="both", expand=True)
+        
         for c in cols: self.tree_pagos.heading(c, text=c)
-        # Aquí no hay ID en cols, así que no hace falta displaycolumns manual si no se incluyó.
-        self.tree_pagos.column("Monto", anchor="e")
+        self.tree_pagos.column("Fecha", width=150, anchor="center")
+        self.tree_pagos.column("Cliente", width=300, anchor="w")
+        self.tree_pagos.column("Monto", anchor="e", width=120)
+        self.tree_pagos.column("Método", width=150, anchor="center")
+        self.tree_pagos.column("Usuario", width=150, anchor="center")
 
     def buscar_pagos(self):
+        # 1. Limpiar UI
         for i in self.tree_pagos.get_children(): self.tree_pagos.delete(i)
-        try:
-            d_sql = self.fecha_desde_p.get_date_sql()
-            h_sql = self.fecha_hasta_p.get_date_sql()
-            
-            id_cli = self.cliente_p_sel['id']
-            id_usuario = self.usuario_p_sel['id']
-            
-            if hasattr(self, 'filtro_cliente_id') and self.filtro_cliente_id:
-                id_cli = self.filtro_cliente_id
-                self.filtro_cliente_id = None
-                try:
-                    cliente_data = next((c for c in self.clientes_raw if c['id_cliente'] == id_cli), None)
-                    if cliente_data:
-                        self.cliente_p_sel['id'] = id_cli
-                        self.cliente_p_sel['nombre'] = cliente_data['nombre']
-                        self.lbl_cliente_p.configure(text=cliente_data['nombre'], text_color=get_color("text_primary"), font=("Segoe UI", 12, "bold"))
-                except: pass
+        
+        # 2. Hilo para busqueda
+        def _fetch():
+            try:
+                d_sql = self.fecha_desde_p.get_date_sql()
+                h_sql = self.fecha_hasta_p.get_date_sql()
+                id_cli = self.cliente_p_sel['id']
+                id_usuario = self.usuario_p_sel['id']
+                
+                if hasattr(self, 'filtro_cliente_id') and self.filtro_cliente_id:
+                    id_cli = self.filtro_cliente_id
+                    self.filtro_cliente_id = None
+                
+                pagos = self.backend.obtener_pagos_maestro(d_sql, h_sql, id_cli, id_usuario)
+                
+                # 3. Actualizar UI
+                self.win.after(0, lambda: self._update_tree_pagos(pagos))
+            except Exception as e:
+                self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+        
+        import threading
+        threading.Thread(target=_fetch, daemon=True).start()
 
-            pagos = self.backend.obtener_pagos_maestro(d_sql, h_sql, id_cli, id_usuario)
-            for p in pagos:
-                self.tree_pagos.insert("", tk.END, values=[
-                    _formatear_fecha_para_ui(p.get('fecha')),
-                    p.get('cliente_nombre'), _fmt_mon(p.get('monto')),
-                    p.get('metodo'), p.get('usuario_nombre')
-                ])
-        except Exception as e: logger.error(f"Error pagos: {e}")
+
+    def _update_tree_pagos(self, pagos):
+        for p in pagos:
+            self.tree_pagos.insert("", tk.END, values=[
+                _formatear_fecha_para_ui(p.get('fecha')),
+                p.get('cliente_nombre'), _fmt_mon(p.get('monto')),
+                p.get('metodo'), p.get('usuario_nombre')
+            ])
 
     def _crear_tab_caja(self):
         frm = ctk.CTkFrame(self.bg_caja, fg_color="transparent")
-        frm.pack(fill="x", padx=10, pady=(2, 2))
+        frm.pack(fill="x", padx=10, pady=(2, 5))
         
-        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, sticky="e")
+        # Asignar peso para que los OptionMenus absorban espacio restante de forma fluida
+        frm.grid_columnconfigure(7, weight=1)
+        frm.grid_columnconfigure(9, weight=1)
+
+        # 1. Filtro Rango
+        ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
         cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_cj, self.fecha_hasta_cj),
-                                     width=140, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
+                                     width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
         cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=5)
+        cb_rango.grid(row=0, column=1, padx=3)
 
-        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2)
+        # 2. Fecha Desde
+        ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
         self.fecha_desde_cj = SelectorFecha(frm)
-        self.fecha_desde_cj.grid(row=0, column=3)
+        self.fecha_desde_cj.grid(row=0, column=3, padx=3)
         self.fecha_desde_cj.widget_entrada.delete(0, tk.END)
         self.fecha_desde_cj.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
 
-        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4)
+        # 3. Fecha Hasta
+        ctk.CTkLabel(frm, text="Hasta:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=4, padx=3, sticky="e")
         self.fecha_hasta_cj = SelectorFecha(frm)
-        self.fecha_hasta_cj.grid(row=0, column=5)
+        self.fecha_hasta_cj.grid(row=0, column=5, padx=3)
         self.fecha_hasta_cj.widget_entrada.delete(0, tk.END)
         self.fecha_hasta_cj.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
         
         cb_rango.bind("<<ComboboxSelected>>", lambda e: _aplicar_filtro_rapido_logic(cb_rango.get(), self.fecha_desde_cj.widget_entrada, self.fecha_hasta_cj.widget_entrada))
         
-        ctk.CTkLabel(frm, text="Mostrar:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=0, sticky="e", pady=5)
-        
+        # Definir diccionario de filtros de caja
         self.opciones_filtro_caja = {
             "(Todo)": (None, None),
             "🛒 Ventas": ('ingreso', "venta"),
             "💰 Cobros Cta. Cte.": ('ingreso', "cobro_cta_cte"),
-            "📦 Pagos a Prov.": ('egreso', "pago_proveedor"),
+            "📦 Compras": ('egreso', "compra_efectivo"),
+            "📦 Compras Cta. Cte.": ('egreso', "compra_cuenta_corriente"),
+            "🚚 Pagos a Prov.": ('egreso', "pago_proveedor"),
             "🟢 Aperturas": (None, "apertura_caja"),
             "🔒 Cierres": (None, "cierre_caja"),
-            "🔻 Retiros/Ajustes": ('egreso', "retiro_caja"), 
-            "💸 Gastos Varios": ('egreso', "gasto_vario")        }
-        
-        self.cb_filtro_rapido_cj = ctk.CTkOptionMenu(frm, values=list(self.opciones_filtro_caja.keys()), width=240,
+            "🔻 Retiros/Ajustes": ('egreso', ["retiro_caja", "ajuste_negativo"]),
+            "💸 Gastos Varios": ('egreso', "gasto_vario")
+        }
+
+        # 4. Selector Filtro Rápido (Mostrar)
+        ctk.CTkLabel(frm, text="Mostrar:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=6, padx=(10, 3), sticky="e")
+        self.cb_filtro_rapido_cj = ctk.CTkOptionMenu(frm, values=list(self.opciones_filtro_caja.keys()), width=180,
                                                     fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
         self.cb_filtro_rapido_cj.set("(Todo)")
-        self.cb_filtro_rapido_cj.grid(row=1, column=1, padx=5, sticky="w")
+        self.cb_filtro_rapido_cj.grid(row=0, column=7, padx=3, sticky="ew")
 
-        ctk.CTkLabel(frm, text="Usuario:", font=("Segoe UI", 13, "bold"), text_color=get_color("text_primary")).grid(row=1, column=2, sticky="e")
-        self.cb_usuario_caja = ctk.CTkOptionMenu(frm, values=self.vendedor_nombres, width=150,
-                                                 fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        self.cb_usuario_caja.set(self.vendedor_nombres[0])
-        self.cb_usuario_caja.grid(row=1, column=3, padx=5)
+        # 5. Selector Usuario (Refactored to Advanced Search with Lupa for consistency)
+        ctk.CTkLabel(frm, text="Usuario:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
+        frm_usuario_cj = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_usuario_cj.grid(row=0, column=9, padx=3, sticky="w")
         
-        self.crear_boton_accion(frm, "🔍 Buscar", self.buscar_caja, "#3b82f6", width=10).grid(row=1, column=4, padx=5)
-        self.crear_boton_accion(frm, "📊 Exportar", lambda: self.exportar_a_csv(3), "#10b981", width=10).grid(row=1, column=5, padx=5)
+        self.lbl_usuario_cj = ctk.CTkLabel(frm_usuario_cj, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_usuario_cj.pack(side="left", padx=(0, 5))
+        
+        self.btn_usuario_cj = ctk.CTkButton(frm_usuario_cj, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                            command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_caja_sel, self.vendedores_raw, self.lbl_usuario_cj))
+        self.btn_usuario_cj.pack(side="left")
+        
+        # 6. Botones de Acción
+        frm_acciones = ctk.CTkFrame(frm, fg_color="transparent")
+        frm_acciones.grid(row=0, column=10, padx=(15, 0), sticky="e")
+        
+        btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_caja, "#3b82f6", width=8)
+        btn_buscar.pack(side="left", padx=3)
+        
+        btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(3), "#10b981", width=8)
+        btn_exportar.pack(side="left", padx=3)
         
         cols = ("Fecha", "Usuario", "Tipo", "Motivo", "Monto", "Descripción")
-        self.tree_caja = ttk.Treeview(self.bg_caja, columns=cols, show="headings", height=10, style="Modern.Treeview")
-        self.tree_caja.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Frame contenedor para Caja + Scrollbar
+        frm_caja_cont = ctk.CTkFrame(self.bg_caja, fg_color="transparent")
+        frm_caja_cont.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.tree_caja = ttk.Treeview(frm_caja_cont, columns=cols, show="headings", height=10, style="Modern.Treeview")
+        ys_caja = ctk.CTkScrollbar(frm_caja_cont, command=self.tree_caja.yview)
+        ys_caja.pack(side="right", fill="y")
+        try:
+            from app.frontend.componentes_ui import configurar_scrollbar_coherente
+            configurar_scrollbar_coherente(ys_caja)
+        except: pass
+        
+        self.tree_caja.configure(yscrollcommand=ys_caja.set)
+        self.tree_caja.pack(side="left", fill="both", expand=True)
         
         for c in cols: self.tree_caja.heading(c, text=c)
         self.tree_caja.column("Fecha",       width=130, anchor="center")
@@ -709,131 +985,135 @@ class Historiales:
 
     def buscar_caja(self):
         for i in self.tree_caja.get_children(): self.tree_caja.delete(i)
-        try:
-            d_sql = self.fecha_desde_cj.get_date_sql()
-            h_sql = self.fecha_hasta_cj.get_date_sql()
-            
-            seleccion = self.cb_filtro_rapido_cj.get()
-            tipo_filtro, motivo_filtro = self.opciones_filtro_caja.get(seleccion, (None, None))
-            
-            db_tipo = tipo_filtro
-            db_motivo = motivo_filtro
-            
-            # Para filtros agrupados ("venta" y "cobro_cta_cte") pedimos solo por tipo al backend
-            # y filtramos por motivo acá para capturar todas las variantes
-            MOTIVOS_VENTA = {'venta_efectivo', 'venta_transferencia', 'venta_tarjeta', 'venta_cuenta_corriente', 'venta_debito', 'venta_qr'}
-            MOTIVOS_COBRO_CTA = {'pago_cuenta_corriente_efectivo', 'pago_cuenta_corriente_transferencia', 
-                                  'pago_cuenta_corriente_tarjeta', 'cobro_cuenta_corriente', 'cobro_cta_cte'}
-            
-            if motivo_filtro in ("venta", "cobro_cta_cte"):
-                db_motivo = None  # No filtrar por motivo en el backend
-            elif seleccion == "(Todo)":
-                db_tipo = None
-                db_motivo = None
-
-            id_usuario = None
+        
+        def _fetch_caja():
             try:
-                nombre_u = self.cb_usuario_caja.get()
-                if nombre_u != "(Todos)":
-                    id_usuario = self.vendedor_ids[self.vendedor_nombres.index(nombre_u)] 
-            except: pass
+                d_sql = self.fecha_desde_cj.get_date_sql()
+                h_sql = self.fecha_hasta_cj.get_date_sql()
+                
+                seleccion = self.cb_filtro_rapido_cj.get()
+                tipo_filtro, motivo_filtro = self.opciones_filtro_caja.get(seleccion, (None, None))
+                
+                db_tipo = tipo_filtro
+                db_motivo = motivo_filtro
+                
+                # Conjuntos para filtrado local post-consulta
+                MOTIVOS_VENTA = {'venta_efectivo', 'venta_transferencia', 'venta_tarjeta', 'venta_cuenta_corriente', 'venta_debito', 'venta_qr'}
+                MOTIVOS_COBRO_CTA = {'pago_cuenta_corriente_efectivo', 'pago_cuenta_corriente_transferencia', 
+                                      'pago_cuenta_corriente_tarjeta', 'cobro_cuenta_corriente', 'cobro_cta_cte'}
+                
+                # Para filtros agrupados ("venta" y "cobro_cta_cte") pedimos solo por tipo al backend
+                # y filtramos por motivo localmente para capturar todas las variantes
+                if motivo_filtro in ("venta", "cobro_cta_cte"):
+                    db_motivo = None  # No filtrar por motivo en el backend
+                elif seleccion == "(Todo)":
+                    db_tipo = None
+                    db_motivo = None
 
-            movimientos = self.backend.obtener_historial_movimientos_caja(
-                fecha_desde=d_sql,
-                fecha_hasta=h_sql,
-                tipo=db_tipo,
-                motivo=db_motivo,
-                id_usuario=id_usuario
-            )
-            
+                id_usuario = None
+                try:
+                    if self.usuario_caja_sel['id'] is not None and self.usuario_caja_sel['id'] != '-':
+                        id_usuario = int(self.usuario_caja_sel['id'])
+                except: pass
 
-            def _formatear_fecha(f):
-                if not f: return ""
-                try: return f.strftime("%d/%m/%Y %H:%M")
-                except: return str(f)
+                movimientos = self.backend.obtener_historial_movimientos_caja(
+                    fecha_desde=d_sql,
+                    fecha_hasta=h_sql,
+                    tipo=db_tipo,
+                    motivo=db_motivo,
+                    id_usuario=id_usuario
+                )
+                
+                def _update_ui():
+                    def _formatear_fecha(f):
+                        if not f: return ""
+                        try: return f.strftime("%d/%m/%Y %H:%M")
+                        except: return str(f)
 
-            for mov in movimientos:
+                    for mov in movimientos:
+                        motivo_raw = mov.get('motivo') or ''
+                        
+                        # Filtrado local para grupos de motivos
+                        if motivo_filtro == "venta" and motivo_raw not in MOTIVOS_VENTA and not motivo_raw.startswith('venta'):
+                            continue
+                        if motivo_filtro == "cobro_cta_cte" and motivo_raw not in MOTIVOS_COBRO_CTA and 'cuenta_corriente' not in motivo_raw and 'cta_cte' not in motivo_raw:
+                            continue
+                        # Para filtros específicos (no agrupados, no Todo), ocultar aperturas y cierres
+                        if motivo_filtro and motivo_filtro not in ("venta", "cobro_cta_cte", "apertura_caja", "cierre_caja") and motivo_raw in ('apertura_caja', 'cierre_caja'):
+                            if not isinstance(motivo_filtro, list) or motivo_raw not in motivo_filtro:
+                                continue
+                        
+                        es_cierre = (motivo_raw == 'cierre_caja')
+                        es_apertura = (motivo_raw == 'apertura_caja')
+                        es_ingreso = (mov.get('tipo') == 'ingreso')
+                        
+                        tag = 'ingreso' if es_ingreso else 'egreso'
+                        if es_cierre or es_apertura: tag = 'cierre' 
+                        
+                        if es_apertura:
+                            tipo_visual = "🟢 APERTURA"
+                        elif es_cierre:
+                            tipo_visual = "🔒 CIERRE"
+                        else:
+                            tipo_visual = "➕ INGRESO" if es_ingreso else "➖ EGRESO"
+                        
+                        mapeo_motivos = {
+                            'venta_efectivo': '🛒 Venta',
+                            'venta_transferencia': '🛒 Venta',
+                            'venta_tarjeta': '🛒 Venta',
+                            'venta_debito': '🛒 Venta',
+                            'venta_qr': '🛒 Venta',
+                            'venta_cuenta_corriente': '🛒 Venta',
+                            'apertura_caja': '🟢 Apertura de Caja',
+                            'cierre_caja': '🔒 Cierre de Caja',
+                            'pago_cuenta_corriente_efectivo': '💰 Cobro Cta. Cte.',
+                            'pago_cuenta_corriente_transferencia': '💰 Cobro Cta. Cte.',
+                            'pago_cuenta_corriente_tarjeta': '💰 Cobro Cta. Cte.',
+                            'cobro_cuenta_corriente': '💰 Cobro Cta. Cte.',
+                            'cobro_cta_cte': '💰 Cobro Cta. Cte.',
+                            'pago_proveedor': '📦 Pago a Proveedor',
+                            'compra_efectivo': '🛒 Compra',
+                            'compra_cuenta_corriente': '🛒 Compra Cta. Cte.',
+                            'gasto_vario': '💸 Gasto Vario',
+                            'retiro_caja': '🔻 Retiro/Ajuste',  
+                            'devolucion_efectivo': '↩️ Reembolso',
+                            'ajuste_positivo': '🔺 Ajuste (+)',
+                            'ajuste_negativo': '🔻 Ajuste (-)',
+                            'otro': '❓ Otro'
+                        }
+                        
+                        if motivo_raw and motivo_raw not in mapeo_motivos and motivo_raw.startswith('venta'):
+                            motivo_txt = '🛒 Venta'
+                        else:
+                            motivo_txt = mapeo_motivos.get(motivo_raw, motivo_raw.replace('_', ' ').title() if motivo_raw else '-')
+                        
+                        desc_val = mov.get('descripcion')
+                        descripcion = (desc_val if desc_val else '').strip() or '-'
+                        if es_cierre:
+                            obs_val = mov.get('observaciones_cierre')
+                            obs_manual = (obs_val if obs_val else '').strip()
+                            if obs_manual:
+                                # Se concatena el resumen del sistema con la observación del usuario
+                                descripcion = f"{descripcion} | Obs: {obs_manual}"
+                        
+                        self.tree_caja.insert("", tk.END, values=(
+                            _formatear_fecha(mov['fecha_hora']),
+                            mov['usuario_nombre'],
+                            tipo_visual,
+                            motivo_txt,
+                            _fmt_mon(mov['monto']),
+                            descripcion
+                        ), tags=(tag,))
                 
-                motivo_raw = mov.get('motivo') or ''
-                
-                # Filtro local para opciones agrupadas
-                if motivo_filtro == "venta":
-                    # Incluir todo motivo que empiece con "venta" o sea una venta
-                    if not (motivo_raw.startswith('venta') or motivo_raw in MOTIVOS_VENTA):
-                        continue
-                elif motivo_filtro == "cobro_cta_cte":
-                    if not (motivo_raw in MOTIVOS_COBRO_CTA or 
-                            'cuenta_corriente' in motivo_raw or 
-                            'cta_cte' in motivo_raw):
-                        continue
-                elif seleccion not in ("(Todo)", "🟢 Aperturas", "🔒 Cierres"):
-                    if motivo_raw in ['apertura_caja', 'cierre_caja']:
-                        continue
-                
-                es_cierre = (motivo_raw == 'cierre_caja')
-                es_apertura = (motivo_raw == 'apertura_caja')
-                es_ingreso = (mov.get('tipo') == 'ingreso')
-                
-                tag = 'ingreso' if es_ingreso else 'egreso'
-                if es_cierre or es_apertura: tag = 'cierre' 
-                
-                if es_apertura:
-                    tipo_visual = "🟢 APERTURA"
-                elif es_cierre:
-                    tipo_visual = "🔒 CIERRE"
-                else:
-                    tipo_visual = "➕ INGRESO" if es_ingreso else "➖ EGRESO"
-                
-                mapeo_motivos = {
-                    'venta_efectivo': '🛒 Venta',
-                    'venta_transferencia': '🛒 Venta',
-                    'venta_tarjeta': '🛒 Venta',
-                    'venta_debito': '🛒 Venta',
-                    'venta_qr': '🛒 Venta',
-                    'venta_cuenta_corriente': '🛒 Venta',
-                    'apertura_caja': '🟢 Apertura de Caja',
-                    'cierre_caja': '🔒 Cierre de Caja',
-                    'pago_cuenta_corriente_efectivo': '💰 Cobro Cta. Cte.',
-                    'pago_cuenta_corriente_transferencia': '💰 Cobro Cta. Cte.',
-                    'pago_cuenta_corriente_tarjeta': '💰 Cobro Cta. Cte.',
-                    'cobro_cuenta_corriente': '💰 Cobro Cta. Cte.',
-                    'cobro_cta_cte': '💰 Cobro Cta. Cte.',
-                    'pago_proveedor': '📦 Pago a Proveedor',
-                    'gasto_vario': '💸 Gasto Vario',
-                    'retiro_caja': '🔻 Retiro/Ajuste',  
-                    'devolucion_efectivo': '↩️ Reembolso',
-                    'ajuste_positivo': '🔺 Ajuste (+)',
-                    'ajuste_negativo': '🔻 Ajuste (-)',
-                    'otro': '❓ Otro'
-                }
-                # Si el motivo empieza con "venta" pero no está en el mapa, mostrar "Venta" igual
-                if motivo_raw and motivo_raw not in mapeo_motivos and motivo_raw.startswith('venta'):
-                    motivo_txt = '🛒 Venta'
-                else:
-                    motivo_txt = mapeo_motivos.get(motivo_raw, motivo_raw.replace('_', ' ').title() if motivo_raw else '-')
-                
-                # 🔥 CORRECCIÓN DESCRIPCIÓN: Priorizar observaciones del usuario para Cierres
-                desc_val = mov.get('descripcion')
-                descripcion = (desc_val if desc_val else '').strip() or '-'
-                if es_cierre:
-                    obs_val = mov.get('observaciones_cierre')
-                    obs_manual = (obs_val if obs_val else '').strip()
-                    if obs_manual:
-                        # Se concatena el resumen del sistema con la observación del usuario
-                        descripcion = f"{descripcion} | Obs: {obs_manual}"
-                
-                self.tree_caja.insert("", tk.END, values=(
-                    _formatear_fecha(mov['fecha_hora']),
-                    mov['usuario_nombre'],
-                    tipo_visual,
-                    motivo_txt,
-                    _fmt_mon(mov['monto']),
-                    descripcion
-                ), tags=(tag,))
-                
-        except Exception as e:
-            logger.error(f"Error cargando caja: {e}")
-            messagebox.showerror("Error", str(e))
+                if self.win.winfo_exists():
+                    self.win.after(0, _update_ui)
+            except Exception as e:
+                logger.error(f"Error cargando caja: {e}")
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+
+        import threading
+        threading.Thread(target=_fetch_caja, daemon=True).start()
         
     def _preguntar_tipo_exportacion(self) -> str | None:
         dialog = ctk.CTkToplevel(self.win)
@@ -876,8 +1156,16 @@ class Historiales:
                 w = csv.writer(f, delimiter=';')
                 w.writerow([tree.heading(c)['text'] for c in tree['columns']])
                 for item in tree.get_children(): w.writerow(tree.item(item, 'values'))
-            messagebox.showinfo("Éxito", "Archivo exportado.")
-        except Exception as e: messagebox.showerror("Error", str(e))
+            messagebox.showinfo("Éxito", "Archivo exportado correctamente.", parent=self.win)
+        except PermissionError:
+            messagebox.showerror(
+                "Archivo en Uso",
+                "No se pudo escribir en el archivo porque está siendo utilizado por otra aplicación (ej. Microsoft Excel).\n\nPor favor, cierra el archivo e intenta nuevamente.",
+                parent=self.win
+            )
+        except Exception as e:
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=self.win, contexto="exportación")
 
     def _guardar_csv_combinado(self, lista_datos_maestro, tree_maestro, tab_id, nombre_archivo, usar_detalle_visual=False):
         path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("Excel CSV", "*.csv")], initialfile=nombre_archivo, parent=self.win)
@@ -938,10 +1226,17 @@ class Historiales:
                     else:
                         w.writerow(clean_m + [""]*len(cols_d))
 
-            messagebox.showinfo("Éxito", "Reporte generado con contexto.")
+            messagebox.showinfo("Éxito", "Reporte generado con contexto correctamente.", parent=self.win)
+        except PermissionError:
+            messagebox.showerror(
+                "Archivo en Uso",
+                "No se pudo escribir en el archivo porque está siendo utilizado por otra aplicación (ej. Microsoft Excel).\n\nPor favor, cierra el archivo e intenta nuevamente.",
+                parent=self.win
+            )
         except Exception as e:
             logger.error(f"Error csv combinado: {e}")
-            messagebox.showerror("Error", f"Error: {e}")
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=self.win, contexto="exportación")
 
     def exportar_a_csv(self, tab_id):
         hoy = datetime.now().strftime("%d-%m-%Y")
@@ -964,7 +1259,7 @@ class Historiales:
 
         elif opcion == "detalle":
             if not tree_m.selection():
-                messagebox.showwarning("Atención", "Seleccione una fila primero para ver su detalle.", parent=self.win)
+                messagebox.showwarning("Selección Requerida", "Por favor, selecciona una transacción del listado primero para exportar su detalle.", parent=self.win)
                 return
             sel = tree_m.selection()
             datos_cabecera = tree_m.item(sel[0], 'values')

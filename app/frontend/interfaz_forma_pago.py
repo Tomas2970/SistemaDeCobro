@@ -11,6 +11,11 @@ except ImportError:
     def configurar_navegacion_ventana(win, confirmar_cierre=False):
         pass
 
+try:
+    from app.frontend.theme_config import preparar_ventana
+except ImportError:
+    def preparar_ventana(w): pass
+
 class VentanaPago:
     """Ventana para seleccionar forma de pago y calcular vuelto"""
 
@@ -28,10 +33,10 @@ class VentanaPago:
         self.resultado = None
 
         self.ventana = ctk.CTkToplevel(parent)
+        preparar_ventana(self.ventana)
         self.ventana.title("Método de Pago")
         self.ventana.resizable(False, False)
         self.ventana.transient(parent)
-        self.ventana.grab_set()
         
         self.col_bg = "#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#111827"
         self.col_card = "#ffffff" if ctk.get_appearance_mode()=="Light" else "#1f2937"
@@ -44,18 +49,18 @@ class VentanaPago:
 
         self.ventana.update_idletasks()
         req_w = 580
-        # ALTURA DINÁMICA BASADA EN REQHEIGHT PARA AJUSTARSE PERFECTO:
         req_h = min(self.ventana.winfo_reqheight() + 40, 700) 
         sw = self.ventana.winfo_screenwidth()
         sh = self.ventana.winfo_screenheight()
         x = (sw - req_w) // 2
         y = (sh - req_h) // 2
         
-        # Permitir redimensionar si la pantalla es muy chica
         if req_h >= sh - 50:
             self.ventana.resizable(True, True)
         
         self.ventana.geometry(f"{req_w}x{req_h}+{x}+{y}")
+        self.ventana.deiconify()
+        self.ventana.grab_set()
         
         configurar_navegacion_ventana(self.ventana)
         self.ventana.after(50, lambda: self.entry_paga.focus_set())
@@ -111,8 +116,6 @@ class VentanaPago:
             return True
 
         self.entry_paga = ctk.CTkEntry(self.frame_efectivo, font=("Segoe UI", 18, "bold"), width=180, height=50, justify="center")
-        vc_paga = (self.register(validar_decimal), '%P')
-        self.entry_paga.configure(validate="key", validatecommand=vc_paga)
         self.entry_paga.grid(row=0, column=1, padx=10, pady=(20, 10), sticky="w")
         
         def _on_key_paga(event=None):

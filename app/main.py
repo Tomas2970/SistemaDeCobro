@@ -17,7 +17,6 @@ MODO_SEED = len(sys.argv) > 1 and sys.argv[1] == '--seed-data'
 if not MODO_SEED:
     # Solo importar tkinter si NO es modo seed
     import tkinter as tk
-    import tkinter.messagebox
 
 # =========================================================
 # --- BLOQUE DE "ENGANCHE" PARA PYINSTALLER ---
@@ -59,6 +58,18 @@ os.chdir(application_path)
 app_path = os.path.join(application_path, 'app')
 if os.path.exists(app_path) and app_path not in sys.path:
     sys.path.insert(0, app_path)
+
+# =========================================================
+# 🔥 PARCHE DE DIÁLOGOS MODERNOS UNIFICADOS
+# =========================================================
+if not MODO_SEED:
+    import sys
+    from app.frontend import custom_dialogs
+    
+    # Parchear dinámicamente sys.modules y el namespace de tkinter para redirigir
+    # todas las llamadas de messagebox nativos a nuestra implementación moderna y unificada.
+    sys.modules['tkinter.messagebox'] = custom_dialogs
+    tk.messagebox = custom_dialogs
 
 # --- Carga de Logs ---
 try:

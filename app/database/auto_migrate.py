@@ -287,6 +287,12 @@ def ejecutar_migraciones():
             ('Kiosco', 40.0, 0, 1)
             """)
 
+        # 9. ÍNDICES DE RENDIMIENTO PARA HISTORIALES (NUEVO)
+        logger.info("🔧 Migrando: Creando índices de rendimiento si no existen")
+        _ejecutar_paso(cursor, "crear idx_mov_fecha_hora", "CREATE INDEX idx_mov_fecha_hora ON caja_movimiento (fecha_hora)")
+        _ejecutar_paso(cursor, "crear idx_pagoprov_fecha", "CREATE INDEX idx_pagoprov_fecha ON PagoProveedor (fecha)")
+        _ejecutar_paso(cursor, "crear idx_session_fecha_cierre", "CREATE INDEX idx_session_fecha_cierre ON caja_session (fecha_cierre)")
+
         conn.commit()
         logger.info("✅ Auto-migración completada exitosamente.")
 

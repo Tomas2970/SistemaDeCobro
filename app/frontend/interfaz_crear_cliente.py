@@ -64,13 +64,13 @@ def validar_y_colorear(entry, tipo_validacion, label_feedback=None):
             except: valido, mensaje = False, "❌ Número inválido"
 
     # Color entry
-    frm_border = entry.master
-    # Obtener el color desde el CTkFrame padre o hardcodear si es necesario
-    col_input = "#f9fafb" if ctk.get_appearance_mode() == "Light" else "#374151"
     if valor == "": 
-        frm_border.configure(border_width=0, fg_color=col_input)
+        if valido:
+            entry.configure(border_width=1, border_color="#9ca3af" if ctk.get_appearance_mode() == "Light" else "#4b5563")
+        else:
+            entry.configure(border_width=2, border_color="#ef4444")
     else: 
-        frm_border.configure(border_width=2, border_color="#10b981" if valido else "#ef4444", fg_color=col_input)
+        entry.configure(border_width=2, border_color="#10b981" if valido else "#ef4444")
     
     # Color label feedback CTk
     if label_feedback:
@@ -80,8 +80,10 @@ def validar_y_colorear(entry, tipo_validacion, label_feedback=None):
             color = "#10b981" if valido else "#ef4444"
         label_feedback.configure(text=mensaje, text_color=color)
 
-def ui_crear_cliente(parent, backend, id_cliente_a_editar=None):
+def ui_crear_cliente(parent, backend, id_cliente_a_editar=None, callback_on_save=None):
     win = ctk.CTkToplevel(parent)
+    from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+    preparar_ventana(win)
     win.title("Editar Cliente" if id_cliente_a_editar else "Nuevo Cliente")
     win.geometry("720x620") 
     col_bg = "#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#111827"
@@ -179,13 +181,18 @@ def ui_crear_cliente(parent, backend, id_cliente_a_editar=None):
         try:
             limite = float(limite_str.replace(',', '.'))
             if id_cliente_a_editar:
-                ok = backend.actualizar_cliente(id_cliente_a_editar, nom, dni, dni, var_dir.get(), var_tel.get(), var_email.get(), limite)
+                ok = backend.actualizar_cliente(id_cliente_a_editar, nom, dni, "", var_dir.get(), var_tel.get(), var_email.get(), limite)
             else:
-                ok = backend.crear_cliente(nom, dni, dni, var_dir.get(), var_tel.get(), var_email.get(), limite)
+                ok = backend.crear_cliente(nom, dni, "", var_dir.get(), var_tel.get(), var_email.get(), limite)
             
             if ok:
                 messagebox.showinfo("Éxito", "Guardado correctamente", parent=win)
                 win.destroy()
+                if callback_on_save:
+                    try:
+                        callback_on_save(ok if not id_cliente_a_editar else id_cliente_a_editar)
+                    except TypeError:
+                        callback_on_save()
         except Exception as e:
             messagebox.showerror("Error", f"Error: {e}", parent=win)
 
@@ -196,5 +203,6 @@ def ui_crear_cliente(parent, backend, id_cliente_a_editar=None):
     ctk.CTkButton(btn_frm, text="💾 Guardar Cliente", command=guardar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 18, "bold"), width=250, height=55).pack(side="right")
 
     configurar_navegacion_ventana(win)
+    centrar_y_mostrar_ventana(win)
     win.grab_set()
     return win

@@ -51,7 +51,10 @@ def configurar_navegacion_ventana(win: tk.Toplevel, confirmar_cierre: bool = Fal
 
     # --- Bloquear flechas para que no lleguen al menú de atrás ---
     def bloquear_flechas(event):
-        # El widget ya procesó la flecha, solo evitamos que siga
+        # Permitir flechas dentro de campos de entrada de texto
+        widget = win.focus_get()
+        if widget and widget.winfo_class() in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox"):
+            return  # Dejar que el widget procese la flecha normalmente
         return "break"
 
     for tecla in ("<Up>", "<Down>", "<Left>", "<Right>"):
@@ -59,13 +62,22 @@ def configurar_navegacion_ventana(win: tk.Toplevel, confirmar_cierre: bool = Fal
 
     # --- Asegurar que los widgets importantes acepten TAB ---
     def habilitar_tab_en_hijos(widget):
+        # Clases que SÍ deben recibir foco con Tab (whitelist)
+        CLASES_FOCUSABLES = (
+            "Entry", "TEntry", "Text",
+            "TCombobox", "Combobox",
+            "Button", "TButton",
+            "Checkbutton", "TCheckbutton",
+            "Radiobutton", "TRadiobutton",
+            "Spinbox", "TSpinbox",
+        )
         for child in widget.winfo_children():
             try:
                 clase = child.winfo_class()
-                # Labels, Frames y Canvas (usado por ctk para dibujar) no deben robar foco
-                if clase not in ("TLabel", "Label", "Frame", "Canvas"):
+                if clase in CLASES_FOCUSABLES:
                     child.configure(takefocus=True)
-                elif clase == "Canvas":
+                else:
+                    # Todo lo demás (frames, labels, scrollbars, CTk wrappers) NO recibe foco
                     child.configure(takefocus=False)
             except Exception:
                 pass

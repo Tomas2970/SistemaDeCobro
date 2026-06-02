@@ -102,9 +102,43 @@ class SelectorFecha(ctk.CTkFrame):
             except: return None
 
 class Card(ctk.CTkFrame):
-    def __init__(self, parent, bg_color, corner_radius=10, **kwargs):
+    def __init__(self, parent, bg_color=None, corner_radius=10, **kwargs):
+        if bg_color is None:
+            from app.frontend.theme_config import obtener_paleta_activa
+            bg_color = obtener_paleta_activa()["bg_surface"]
         super().__init__(parent, fg_color=bg_color, corner_radius=corner_radius, **kwargs)
 
 class ModernButton(ctk.CTkButton):
-    def __init__(self, parent, text, command, bg, hover_bg, fg="white", font=None, **kwargs):
-        super().__init__(parent, text=text, command=command, fg_color=bg, hover_color=hover_bg, text_color=fg, font=font, **kwargs)
+    def __init__(self, parent, text, command, bg=None, hover_bg=None, fg="white", font=None, style_type=None, **kwargs):
+        from app.frontend.theme_config import obtener_paleta_activa
+        paleta = obtener_paleta_activa()
+        
+        # Si se especifica style_type o no se pasan colores específicos, usar el diseño estandarizado
+        if style_type is not None or (bg is None and hover_bg is None):
+            tipo = style_type or "primary"
+            estilos = {
+                "primary": (paleta["accent"], paleta["accent_hover"], "#ffffff"),
+                "secondary": (paleta["button_secondary"], paleta["button_secondary_hover"], paleta["text_primary"]),
+                "success": (paleta["button_success"], paleta["button_success_hover"], "#ffffff"),
+                "danger": (paleta["button_danger"], paleta["button_danger_hover"], "#ffffff"),
+                "warning": (paleta["button_warning"], paleta["button_warning_hover"], "#ffffff")
+            }
+            bg_col, hov_col, txt_col = estilos.get(tipo, estilos["primary"])
+        else:
+            # Mantener compatibilidad con firmas antiguas
+            bg_col = bg
+            hov_col = hover_bg
+            txt_col = fg
+            
+        diseno_font = font or ("Segoe UI", 12, "bold")
+        super().__init__(parent, text=text, command=command, fg_color=bg_col, hover_color=hov_col, text_color=txt_col, font=diseno_font, **kwargs)
+
+def configurar_scrollbar_coherente(scrollbar):
+    """Estiliza la barra de desplazamiento según el modo activo para dar una apariencia premium."""
+    from app.frontend.theme_config import obtener_paleta_activa
+    paleta = obtener_paleta_activa()
+    scrollbar.configure(
+        fg_color="transparent",
+        button_color=paleta["border_color"],
+        button_hover_color=paleta["accent"]
+    )
