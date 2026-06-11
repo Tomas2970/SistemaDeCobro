@@ -1,6 +1,6 @@
 # app/frontend/interfaz_crear_cliente.py
 import tkinter as tk
-from tkinter import messagebox
+from app.frontend import custom_dialogs as messagebox
 import customtkinter as ctk
 
 try:

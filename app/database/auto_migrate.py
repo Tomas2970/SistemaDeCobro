@@ -90,6 +90,7 @@ def ejecutar_migraciones():
                     diferencia DECIMAL(10,2) NULL,
                     observaciones_cierre TEXT NULL,
                     estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
+                    tipo_caja ENUM('ventas', 'tesoreria') DEFAULT 'ventas',
                     FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
                     FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
                     INDEX idx_caja_estado (estado),
@@ -114,7 +115,9 @@ def ejecutar_migraciones():
                         'pago_cuenta_corriente_efectivo', 'pago_cuenta_corriente_transferencia',
                         'pago_cuenta_corriente_tarjeta', 'cobro_cuenta_corriente',
                         'pago_proveedor', 'gasto_vario', 'retiro_caja',
-                        'devolucion_efectivo', 'ajuste_positivo', 'ajuste_negativo', 'otro'
+                        'devolucion_efectivo', 'ajuste_positivo', 'ajuste_negativo',
+                        'transferencia_tesoreria_salida', 'transferencia_tesoreria_entrada',
+                        'ingreso_extraordinario', 'otro'
                     ) NOT NULL,
                     id_usuario INT NOT NULL,
                     fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -272,6 +275,31 @@ def ejecutar_migraciones():
         except Exception:
             pass  # Tabla recién creada, ya tiene id_session
 
+        # 7. TESORERIA (tipo_caja y nuevos motivos)
+        try:
+            cursor.execute("DESCRIBE caja_session")
+            cols_session = [row[0] for row in cursor.fetchall()]
+            if "tipo_caja" not in cols_session:
+                logger.info("🔧 Migrando: Agregando tipo_caja a caja_session")
+                _ejecutar_paso(cursor, "session.tipo_caja", "ALTER TABLE caja_session ADD COLUMN tipo_caja ENUM('ventas', 'tesoreria') DEFAULT 'ventas'")
+                
+            # Para modificar ENUM de forma segura en MySQL
+            logger.info("🔧 Migrando: Ampliando motivos de caja_movimiento para Tesorería")
+            _ejecutar_paso(cursor, "mov.motivo_enum", """
+                ALTER TABLE caja_movimiento MODIFY COLUMN motivo ENUM(
+                    'apertura_caja', 'venta_efectivo', 'venta_tarjeta',
+                    'venta_transferencia', 'venta_cuenta_corriente',
+                    'pago_cuenta_corriente_efectivo', 'pago_cuenta_corriente_transferencia',
+                    'pago_cuenta_corriente_tarjeta', 'cobro_cuenta_corriente',
+                    'pago_proveedor', 'gasto_vario', 'retiro_caja',
+                    'devolucion_efectivo', 'ajuste_positivo', 'ajuste_negativo',
+                    'transferencia_tesoreria_salida', 'transferencia_tesoreria_entrada',
+                    'ingreso_extraordinario', 'otro'
+                ) NOT NULL
+            """)
+        except Exception as e:
+            logger.error(f"Error en migración de Tesorería: {e}")
+
         # 8. SEMILLA DE CATEGORÍAS
         cursor.execute("SELECT COUNT(*) FROM Categoria")
         if cursor.fetchone()[0] == 0:
@@ -292,6 +320,13 @@ def ejecutar_migraciones():
         _ejecutar_paso(cursor, "crear idx_mov_fecha_hora", "CREATE INDEX idx_mov_fecha_hora ON caja_movimiento (fecha_hora)")
         _ejecutar_paso(cursor, "crear idx_pagoprov_fecha", "CREATE INDEX idx_pagoprov_fecha ON PagoProveedor (fecha)")
         _ejecutar_paso(cursor, "crear idx_session_fecha_cierre", "CREATE INDEX idx_session_fecha_cierre ON caja_session (fecha_cierre)")
+
+        # 10. USUARIO (codigo_barras)
+        cursor.execute("DESCRIBE Usuario")
+        cols_usuario = [row[0] for row in cursor.fetchall()]
+        if "codigo_barras" not in cols_usuario:
+            logger.info("🔧 Migrando: Agregando codigo_barras a Usuario")
+            _ejecutar_paso(cursor, "usuario.codigo_barras", "ALTER TABLE Usuario ADD COLUMN codigo_barras VARCHAR(100) UNIQUE NULL")
 
         conn.commit()
         logger.info("✅ Auto-migración completada exitosamente.")

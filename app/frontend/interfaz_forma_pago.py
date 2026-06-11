@@ -1,7 +1,8 @@
 # app/frontend/interfaz_forma_pago.py
 # 🎨 ACTUALIZADO: Estilo de botones unificado
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
+from app.frontend import custom_dialogs as messagebox
 from typing import Any, Optional
 import re
 

@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel
+from tkinter import ttk, Toplevel
+from app.frontend import custom_dialogs as messagebox
 from app.frontend.interfaz_crear_usuario import ui_crear_usuario
 
 try:
@@ -93,10 +94,17 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
                 dt = datetime.strptime(fecha_str[:19], "%Y-%m-%d %H:%M:%S")
             return dt.strftime("%d/%m/%Y %H:%M")
         except:
-            return str(fecha_obj)[:16]
+            texto = str(fecha_obj)[:16]
+            if len(texto) >= 10 and "-" in texto[:10]:
+                partes = texto[:10].split("-")
+                if len(partes) == 3:
+                    return f"{partes[2]}/{partes[1]}/{partes[0]}" + texto[10:]
+            return texto
 
     def cargar_datos():
         nonlocal todos_usuarios
+        if not win.winfo_exists():
+            return
         for i in tree.get_children(): 
             tree.delete(i)
         
@@ -134,6 +142,8 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
 
     # LÓGICA DE FILTRADO (La que tenías vos)
     def filtrar_lista(*args):
+        if not win.winfo_exists():
+            return
         query = var_busqueda.get().lower().strip()
         for i in tree.get_children(): tree.delete(i)
         for u in todos_usuarios:
@@ -153,7 +163,7 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
         win.after(100, cargar_datos)
         
     def accion_nuevo():
-        ui_crear_usuario(win, backend, callback_on_save=recargar_lista_callback)
+        ui_crear_usuario(win, backend, usuario_actual=usuario_actual, callback_on_save=recargar_lista_callback)
 
     def abrir_editar():
         sel = tree.selection()
@@ -161,7 +171,7 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
             messagebox.showwarning("Atención", "Seleccione un usuario.", parent=win)
             return
         item = tree.item(sel[0], "values")
-        ui_crear_usuario(win, backend, id_usuario_a_editar=int(item[0]), callback_on_save=recargar_lista_callback)
+        ui_crear_usuario(win, backend, id_usuario_a_editar=int(item[0]), usuario_actual=usuario_actual, callback_on_save=recargar_lista_callback)
 
     # 🔥 RECUPERADO: TU FUNCIÓN DE DOBLE CLIC
     tree.bind("<Double-1>", lambda e: abrir_editar())
@@ -178,7 +188,8 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
         item = tree.item(sel[0], "values")
         if messagebox.askyesno("Confirmar", f"¿Desactivar al usuario {item[1]}?", parent=win):
             try:
-                if backend.desactivar_usuario(int(item[0])):
+                id_admin = usuario_actual.get('id_usuario') if usuario_actual else None
+                if backend.desactivar_usuario(int(item[0]), id_usuario_admin=id_admin):
                     cargar_datos()
             except Exception as e:
                 messagebox.showerror("Error", str(e), parent=win)
@@ -187,6 +198,14 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
     
     # CHECKBOX Y CERRAR
     ctk.CTkCheckBox(frame_botones, text="Inactivos", variable=var_mostrar_inactivos, font=("Segoe UI", 11), command=cargar_datos, width=100).pack(side=tk.LEFT, padx=10)
+    
+    def limpiar_filtros():
+        var_busqueda.set('')
+        if var_mostrar_inactivos.get():
+            var_mostrar_inactivos.set(False)
+        cargar_datos()
+
+    ctk.CTkButton(frame_botones, text="🧹 Limpiar", command=limpiar_filtros, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 11, "bold"), width=100, height=45).pack(side=tk.LEFT, padx=10)
     
     ctk.CTkButton(frame_botones, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 12, "bold"), width=100, height=45).pack(side=tk.RIGHT, padx=10)
 

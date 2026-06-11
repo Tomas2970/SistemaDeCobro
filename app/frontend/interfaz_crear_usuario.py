@@ -2,7 +2,8 @@
 # 🎯 ACTUALIZADO: Estética moderna unificada
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk
+from app.frontend import custom_dialogs as messagebox
 from typing import Optional, Any
 import logging 
 
@@ -17,11 +18,12 @@ from app.frontend.theme_config import get_color, aplicar_tema_ventana, preparar_
 logger = logging.getLogger(__name__)
 
 class CrearEditarUsuario:
-    def __init__(self, parent: tk.Misc, backend, usuario_existente: Optional[dict] = None, callback_on_save: Optional[callable] = None):
+    def __init__(self, parent: tk.Misc, backend, usuario_existente: Optional[dict] = None, usuario_actual: Optional[dict] = None, callback_on_save: Optional[callable] = None):
         
         self.parent = parent
         self.backend = backend
         self.usuario_existente = usuario_existente
+        self.usuario_actual = usuario_actual
         self.callback_on_save = callback_on_save
         
         # 🔥 COLORES GLOBALES
@@ -83,6 +85,14 @@ class CrearEditarUsuario:
         self.combo_rol.grid(row=row, column=1, sticky="w", pady=15)
         row += 1
         
+        # CAMPO CODIGO BARRAS
+        ctk.CTkLabel(self.main_frame, text="💳 Código de Barras / Tarjeta:", font=("Segoe UI", 13, "bold"), text_color=self.col_text).grid(row=row, column=0, sticky="e", pady=15, padx=(20, 15))
+        
+        self.var_codigo_barras = tk.StringVar()
+        self.entry_codigo_barras = ctk.CTkEntry(self.main_frame, textvariable=self.var_codigo_barras, font=("Segoe UI", 12), width=250, height=40, placeholder_text="Escanee aquí...")
+        self.entry_codigo_barras.grid(row=row, column=1, sticky="w", pady=15)
+        row += 1
+        
         if self.usuario_existente:
             # MODO EDICIÓN: Botón resetear contraseña
             self.btn_reset_pass = ctk.CTkButton(self.main_frame, text="🔑 Resetear Contraseña", command=self.resetear_password_moderno, fg_color="#f59e0b", hover_color="#d97706", font=("Segoe UI", 12, "bold"), height=40)
@@ -141,6 +151,7 @@ class CrearEditarUsuario:
             
         if self.usuario_existente:
             self.var_nombre.set(self.usuario_existente.get('nombre', ''))
+            self.var_codigo_barras.set(self.usuario_existente.get('codigo_barras') or '')
             rol_nombre_actual = self.usuario_existente.get('rol_nombre', '')
             if rol_nombre_actual in self.roles_map:
                 self.combo_rol.set(rol_nombre_actual)
@@ -151,6 +162,7 @@ class CrearEditarUsuario:
     def guardar(self):
         nombre = self.var_nombre.get().strip()
         rol_nombre = self.combo_rol.get()
+        codigo_barras = self.var_codigo_barras.get().strip() or None
         
         if not nombre or not rol_nombre:
             messagebox.showwarning("Campos Obligatorios", "Por favor, completa los campos de Nombre del Usuario y Rol del Sistema.", parent=self.win)
@@ -165,7 +177,8 @@ class CrearEditarUsuario:
                 ok_rol_nombre = self.backend.actualizar_rol_usuario(
                     id_usuario, 
                     id_rol, 
-                    nuevo_nombre=nombre
+                    nuevo_nombre=nombre,
+                    codigo_barras=codigo_barras
                 )
                 
                 if ok_rol_nombre:
@@ -187,7 +200,8 @@ class CrearEditarUsuario:
                     messagebox.showwarning("Contraseñas no Coincidentes", "Las contraseñas ingresadas no coinciden. Por favor, verifícalas.", parent=self.win)
                     return
                 
-                nuevo_id = self.backend.crear_usuario(nombre, pass1, id_rol)
+                id_admin = self.usuario_actual.get('id_usuario') if self.usuario_actual else None
+                nuevo_id = self.backend.crear_usuario(nombre, pass1, id_rol, codigo_barras=codigo_barras, id_usuario_admin=id_admin)
                 if nuevo_id:
                     messagebox.showinfo("Éxito", f"Usuario '{nombre}' creado correctamente.", parent=self.win)
                     if self.callback_on_save: 
@@ -230,7 +244,8 @@ class CrearEditarUsuario:
                 messagebox.showwarning("Contraseña Requerida", "Por favor, ingresa una nueva contraseña para continuar.", parent=popup)
                 return
             try:
-                if self.backend.resetear_password_usuario(id_usuario, p):
+                id_admin = self.usuario_actual.get('id_usuario') if self.usuario_actual else None
+                if self.backend.resetear_password_usuario(id_usuario, p, id_usuario_admin=id_admin):
                     messagebox.showinfo("Éxito", "Contraseña restablecida correctamente.", parent=popup)
                     popup.destroy()
                 else:
@@ -251,10 +266,10 @@ class CrearEditarUsuario:
         centrar_y_mostrar_ventana(popup)
         popup.grab_set()
 
-def ui_crear_usuario(parent: tk.Misc, backend, id_usuario_a_editar=None, callback_on_save=None):
+def ui_crear_usuario(parent: tk.Misc, backend, id_usuario_a_editar=None, usuario_actual=None, callback_on_save=None):
     usuario_existente = None
     if id_usuario_a_editar:
         users = backend.obtener_usuarios_con_rol()
         usuario_existente = next((u for u in users if u['id_usuario'] == id_usuario_a_editar), None)
     
-    CrearEditarUsuario(parent, backend, usuario_existente, callback_on_save=callback_on_save)
+    CrearEditarUsuario(parent, backend, usuario_existente, usuario_actual=usuario_actual, callback_on_save=callback_on_save)

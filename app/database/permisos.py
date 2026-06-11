@@ -28,7 +28,7 @@ PERMISOS = {
         'ver_stock_bajo',
         
         # Ventas
-        'realizar_ventas',
+        # NO realiza ventas operativas
         'ver_ventas',
         'cancelar_ventas',
         'procesar_devoluciones',
@@ -50,8 +50,11 @@ PERMISOS = {
         'ver_estadisticas',
         'ver_auditoria',
         
-        # CAJA (Sistema Individual)
-        'abrir_caja',
+        # CAJA Y SUPERVISIÓN GLOBAL
+        'ver_todas_las_cajas',
+        'cerrar_caja_ajena',
+        'broadcast_mensaje',
+        'bloqueo_emergencia',
         'cerrar_caja',
         'movimientos_caja_manuales',
         'ver_caja_todos',
@@ -60,9 +63,15 @@ PERMISOS = {
         # Configuración
         'configurar_sistema',
         'ver_logs',
+        
+        # TESORERÍA
+        'abrir_tesoreria',
+        'cerrar_tesoreria',
+        'ingreso_extraordinario',
+        'transferencia_tesoreria',
     ],
     
-    # SUPERVISOR: Puede gestionar inventario y ver reportes
+    # SUPERVISOR: Encargado de Turno
     'supervisor': [
         # Productos
         'ver_productos',
@@ -76,7 +85,7 @@ PERMISOS = {
         'ver_stock_bajo',
         
         # Ventas
-        'realizar_ventas',
+        # NO realiza ventas directamente
         'ver_ventas',
         'procesar_devoluciones',
         
@@ -96,12 +105,16 @@ PERMISOS = {
         'ver_reportes',
         'ver_estadisticas',
         
-        # CAJA
-        'abrir_caja',
-        'cerrar_caja',
+        # CAJA Y AUTORIZACIÓN (Encargado de Turno)
+        'ver_cajas_activas_turno',
+        'cerrar_caja_ajena',
+        'autorizar_operaciones',
         'movimientos_caja_manuales',
         'ver_caja_todos',
         'ver_historial_movimientos',
+        
+        # TESORERÍA
+        'transferencia_tesoreria',
     ],
     
     # VENDEDOR: Solo Ventas y Consultas (MUY RESTRINGIDO)
@@ -200,6 +213,7 @@ def obtener_menu_items(usuario):
     """Genera items de menú según permisos del usuario"""
     return {
         'dashboard': True,
+        'panel_control': tiene_permiso(usuario, 'ver_todas_las_cajas'),
         
         'ventas': {
             'habilitado': True,
@@ -260,6 +274,13 @@ def obtener_menu_items(usuario):
         
         'configuracion': {
             'habilitado': tiene_permiso(usuario, 'configurar_sistema'),
+        },
+        
+        'tesoreria': {
+            'habilitado': tiene_permiso(usuario, 'transferencia_tesoreria'),
+            'abrir': tiene_permiso(usuario, 'abrir_tesoreria'),
+            'cerrar': tiene_permiso(usuario, 'cerrar_tesoreria'),
+            'ingreso_extraordinario': tiene_permiso(usuario, 'ingreso_extraordinario'),
         }
     }
 
@@ -267,27 +288,31 @@ def describir_rol(nombre_rol):
     """Devuelve una descripción de lo que puede hacer cada rol"""
     descripciones = {
         'admin': """
-ADMINISTRADOR - Acceso Total
+ADMINISTRADOR - Control y supervisión global del sistema
+• Observador con poder de intervención en tiempo real
+• Monitorear estado de todas las cajas simultáneamente
+• Enviar mensajes a vendedores y bloqueo de emergencia
 • Gestionar usuarios, productos y configuración
 • Modificar precios y ajustar stock manualmente
-• Crear y editar clientes con cuenta corriente
-• Eliminar clientes (único rol con este permiso)
-• Abrir y cerrar caja con movimientos manuales
+• Crear, editar y eliminar clientes
+• Forzar cierre de cajas ajenas (no opera caja propia)
 • Procesar devoluciones y cancelar ventas
 • Ver todos los reportes y auditoría
-• Acceso completo al sistema
+• Control total sobre la Tesorería (Apertura, Cierre, Aportes)
         """,
         
         'supervisor': """
-SUPERVISOR - Gestión Operativa
-• Realizar ventas y gestionar clientes
-• Crear y editar clientes con cuenta corriente
+ENCARGADO DE TURNO - Supervisión Operativa
+• NO realiza ventas ni opera como cajero
+• Autoriza operaciones restringidas (retiros, devoluciones)
+• Monitorea todas las cajas activas del turno
+• Puede forzar el cierre de cajas de otros usuarios
 • Administrar inventario y productos (con precios)
-• Procesar devoluciones y registrar compras
-• Abrir y cerrar caja con movimientos manuales
-• Ver reportes y estadísticas
-• NO puede eliminar clientes
-• NO puede gestionar usuarios
+• Gestionar clientes y proveedores
+• Procesar devoluciones
+• Ver reportes y estadísticas del turno
+• NO puede eliminar clientes ni gestionar usuarios
+• Operar Tesorería (Transferencias y cobros), pero NO abrir/cerrar.
         """,
         
         'vendedor': """

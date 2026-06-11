@@ -4,7 +4,8 @@
 # ============================================
 from __future__ import annotations
 import tkinter as tk
-from tkinter import messagebox, Toplevel, ttk, Listbox, SINGLE
+from tkinter import Toplevel, ttk, Listbox, SINGLE
+from app.frontend import custom_dialogs as messagebox
 from typing import Any
 import re
 
@@ -65,6 +66,7 @@ except ImportError:
 
 from app.frontend.autorizacion import solicitar_autorizacion_supervisor
 
+from app.frontend.broadcast_manager import ToastBroadcast
 
 def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     import customtkinter as ctk
@@ -74,6 +76,21 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             w.lift()
             w.focus_force()
             return
+
+    # 🔥 VALIDACIÓN DE CAJA ABIERTA
+    try:
+        session_actual = backend.obtener_session_activa()
+    except Exception:
+        session_actual = None
+        
+    if not session_actual:
+        messagebox.showerror(
+            "⚠️ Caja Cerrada",
+            "No se puede abrir el punto de venta porque la caja está cerrada.\n\n"
+            "Por favor, abra la caja antes de iniciar una venta.",
+            parent=parent.winfo_toplevel()
+        )
+        return
 
     win = ctk.CTkToplevel(parent)
     from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
@@ -90,6 +107,42 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     font_big = ("Segoe UI", 24, "bold")
     
     win.configure(fg_color=col_bg)
+    # 🔥 POLLING DE CAJA CERRADA REMOTAMENTE (cada 10s)
+    caja_cerrada_remotamente = False
+    
+    def polling_estado_caja():
+        nonlocal caja_cerrada_remotamente
+        if not win.winfo_exists() or caja_cerrada_remotamente: return
+        
+        try:
+            session = backend.obtener_session_activa()
+            if not session:
+                caja_cerrada_remotamente = True
+                verificar_expulsion()
+        except Exception:
+            pass
+        
+        if not caja_cerrada_remotamente:
+            win.after(10000, polling_estado_caja)
+            
+    def verificar_expulsion():
+        """Expulsa al usuario si la caja se cerró, SALVO que esté en medio de una venta."""
+        if caja_cerrada_remotamente:
+            if not items:
+                # No hay venta activa, expulsar inmediatamente
+                messagebox.showerror(
+                    "⛔ Caja Cerrada Remotamente", 
+                    "Su sesión de caja ha sido cerrada de forma forzada por el Encargado de Turno.\n\n"
+                    "El sistema lo redirigirá al menú principal.", 
+                    parent=win
+                )
+                win.destroy()
+            else:
+                # Mostrar un Toast discreto para avisar que es su última venta
+                ToastBroadcast(win, "⚠️ SU CAJA FUE CERRADA. Por favor, finalice este ticket actual. No podrá realizar nuevas ventas.")
+
+    # Iniciar ciclo de polling de caja
+    win.after(10000, polling_estado_caja)
 
     # VALIDADORES
     def validar_len_30(t): return len(t) <= 30
@@ -360,7 +413,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         def _ejecutar_busqueda():
             nonlocal _debounce_id
             _debounce_id = None
-            _buscar_y_mostrar_sugerencias(token)
+            if win.winfo_exists():
+                _buscar_y_mostrar_sugerencias(token)
         
         _debounce_id = win.after(180, _ejecutar_busqueda)
     
@@ -454,16 +508,15 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         if idx < len(sugerencias_activas):
             prod = sugerencias_activas[idx]
             
-            # Llenar el Entry con el código o ID del producto
+            # Mostrar el nombre del producto en el Entry (no el ID interno)
             entry_producto.delete(0, tk.END)
-            codigo = prod.get('codigo_barras') or str(prod.get('id_producto'))
-            entry_producto.insert(0, codigo)
+            entry_producto.insert(0, prod.get('nombre', ''))
             
             # Ocultar sugerencias
             ocultar_sugerencias()
             
-            # Agregar directamente
-            agregar_producto()
+            # Agregar directamente pasando el producto ya resuelto
+            agregar_producto(prod_preseleccionado=prod)
     
     def navegar_sugerencias(event):
         """Permite navegar con flechas arriba/abajo en el popup."""
@@ -520,7 +573,12 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
 
     def _refrescar_lista() -> None:
         nonlocal total_venta
-        for i in tree.get_children(): tree.delete(i)
+        if not win.winfo_exists():
+            return
+        try:
+            for i in tree.get_children(): tree.delete(i)
+        except tk.TclError:
+            return
         
         total_venta = 0.0 
         for pid, nombre, cant, precio, _ in items:
@@ -611,15 +669,19 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     
     entry_cantidad.bind("<KeyRelease>", _redirigir_escaneo_desde_cantidad)
     
-    def agregar_producto():
+    def agregar_producto(prod_preseleccionado=None):
+        if caja_cerrada_remotamente and not items:
+            verificar_expulsion()
+            return
+            
         token = entry_producto.get().strip()
-        if not token:
+        if not token and not prod_preseleccionado:
             messagebox.showwarning("Atención", "Ingrese un código.", parent=win); return
         
         # 🔥 Ocultar sugerencias antes de agregar
         ocultar_sugerencias()
         
-        prod = _resolver_producto(token)
+        prod = prod_preseleccionado or _resolver_producto(token)
         if not prod:
             messagebox.showwarning("No encontrado", "No se encontró el producto.", parent=win); return
 
@@ -756,14 +818,22 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
                 f"Venta #{id_venta} registrada con éxito.\nTotal: ${total_venta:,.2f}\n\n¿Desea imprimir el ticket?",
                 parent=win
             )
-            if imprimir:
+        except Exception as e:
+            print(f"Error en diálogo de confirmación: {e}")
+            imprimir = False
+
+        if imprimir in (True, 'yes', 'True', '1'):
+            try:
                 imprimir_ticket(id_venta=id_venta, items_de_la_venta=items, nombre_vendedor=usuario.get("nombre", "Vendedor"), 
                                 metodo_pago=info_pago['tipo_pago'], monto_entregado=info_pago.get('monto_pagado', 0.0), 
                                 vuelto=info_pago.get('vuelto', 0.0), cliente=cliente_sel.get('nombre', 'Consumidor Final') if cliente_sel else 'Consumidor Final')
-        except Exception as e:
-            messagebox.showerror("Error", f"Error Impresión: {e}", parent=win)
+            except Exception as e:
+                messagebox.showerror("Error", f"Error Impresión: {e}", parent=win)
+
         _reiniciar_venta_completa()
-        win.after(100, lambda: stock_events.notificar_cambio_stock())
+        if win.winfo_exists():
+            win.after(100, lambda: stock_events.notificar_cambio_stock())
+            win.after(200, verificar_expulsion)
 
     def cancelar_venta():
         if items:

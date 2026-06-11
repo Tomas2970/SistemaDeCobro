@@ -66,25 +66,49 @@ class BackendAdapter:
         return DB.verificar_contraseña(usuario, contraseña)
 
     # ---------- Clientes (Firmas Actualizadas con CUIT) ----------
-    def insertar_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
+    def insertar_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
         try:
             limite_valido = float(limite_credito)
         except (ValueError, TypeError):
             limite_valido = 50000.00
         # Incluye CUIT
-        return DB.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        nuevo_id = DB.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        if nuevo_id:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="CREAR_CLIENTE",
+                tabla_afectada="Cliente",
+                id_registro=nuevo_id,
+                datos_nuevos={"nombre": nombre, "limite_credito": limite_valido}
+            )
+        return nuevo_id
     
-    def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00) -> int | None:
+    def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
         """Alias usado por la interfaz de registro de clientes."""
-        return self.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_credito)
+        return self.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_credito, id_usuario_admin=id_usuario_admin)
 
-    def actualizar_cliente(self, id_cliente: int, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float) -> bool:
+    def actualizar_cliente(self, id_cliente: int, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float, id_usuario_admin: int | None = None) -> bool:
         try:
             limite_valido = float(limite_credito)
         except (ValueError, TypeError):
             limite_valido = 0.00
+            
+        cliente_anterior = self.obtener_cliente_para_editar(id_cliente)
+        
         # Incluye CUIT
-        return DB.actualizar_cliente_completo(id_cliente, nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        resultado = DB.actualizar_cliente_completo(id_cliente, nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        if resultado and cliente_anterior:
+            limite_anterior = cliente_anterior.get("limite_credito", 0.0)
+            if float(limite_anterior) != limite_valido:
+                self._registrar_auditoria(
+                    id_usuario=id_usuario_admin,
+                    accion="MODIFICAR_LIMITE_CREDITO_CLIENTE",
+                    tabla_afectada="Cliente",
+                    id_registro=id_cliente,
+                    datos_anteriores={"limite_credito": float(limite_anterior)},
+                    datos_nuevos={"limite_credito": limite_valido}
+                )
+        return resultado
         
     def listar_clientes(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_clientes", None)
@@ -106,12 +130,33 @@ class BackendAdapter:
         fn = getattr(DB, "buscar_cliente_por_dni", None)
         return fn(dni) if callable(fn) else None
 
-    def eliminar_cliente_logico(self, id_cliente: int) -> bool:
+    def eliminar_cliente_logico(self, id_cliente: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "eliminar_cliente_logico", None)
-        return bool(fn(id_cliente)) if callable(fn) else False
-    def activar_cliente_logico(self, id_cliente: int) -> bool:
+        resultado = bool(fn(id_cliente)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="DESACTIVAR_CLIENTE",
+                tabla_afectada="Cliente",
+                id_registro=id_cliente,
+                datos_anteriores={"activo": True},
+                datos_nuevos={"activo": False}
+            )
+        return resultado
+        
+    def activar_cliente_logico(self, id_cliente: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "activar_cliente_logico", None)
-        return bool(fn(id_cliente)) if callable(fn) else False
+        resultado = bool(fn(id_cliente)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="REACTIVAR_CLIENTE",
+                tabla_afectada="Cliente",
+                id_registro=id_cliente,
+                datos_anteriores={"activo": False},
+                datos_nuevos={"activo": True}
+            )
+        return resultado
 
     # ---------- Ventas ----------
     def insertar_venta(self, id_usuario: int, id_cliente: int | None = None) -> int | None:
@@ -421,11 +466,11 @@ class BackendAdapter:
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
 
     # EN app/database/backend_adapter.py (Línea ~312)
-    def insertar_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str) -> int | None:
+    def insertar_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str, id_usuario_admin: int | None = None) -> int | None:
         fn = getattr(DB, "insertar_proveedor", None)
         if not callable(fn):
             return None
-        return fn(
+        nuevo_id = fn(
             nombre=nombre,
             empresa=empresa,
             cuit_empresa=cuit_empresa, # ¡Asegúrate de que este cuit sea el nuevo nombre!
@@ -434,6 +479,15 @@ class BackendAdapter:
             email=email,
             direccion=direccion
         )
+        if nuevo_id:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="CREAR_PROVEEDOR",
+                tabla_afectada="Proveedor",
+                id_registro=nuevo_id,
+                datos_nuevos={"empresa": empresa, "cuit_empresa": cuit_empresa}
+            )
+        return nuevo_id
 
     # EN app/database/backend_adapter.py (Línea ~324)
     def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str) -> bool:
@@ -459,13 +513,33 @@ class BackendAdapter:
         fn = getattr(DB, "obtener_proveedor_completo", None)
         return fn(id_proveedor) if callable(fn) else None
 
-    def eliminar_proveedor_logico(self, id_proveedor: int) -> bool:
+    def eliminar_proveedor_logico(self, id_proveedor: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "eliminar_proveedor_logico", None)
-        return bool(fn(id_proveedor)) if callable(fn) else False
+        resultado = bool(fn(id_proveedor)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="DESACTIVAR_PROVEEDOR",
+                tabla_afectada="Proveedor",
+                id_registro=id_proveedor,
+                datos_anteriores={"activo": True},
+                datos_nuevos={"activo": False}
+            )
+        return resultado
 
-    def activar_proveedor_logico(self, id_proveedor: int) -> bool:
+    def activar_proveedor_logico(self, id_proveedor: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "activar_proveedor_logico", None)
-        return bool(fn(id_proveedor)) if callable(fn) else False
+        resultado = bool(fn(id_proveedor)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="REACTIVAR_PROVEEDOR",
+                tabla_afectada="Proveedor",
+                id_registro=id_proveedor,
+                datos_anteriores={"activo": False},
+                datos_nuevos={"activo": True}
+            )
+        return resultado
 
     def obtener_productos_por_proveedor(self, id_proveedor: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_productos_por_proveedor", None)
@@ -564,12 +638,21 @@ class BackendAdapter:
     def obtener_roles(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_roles", None)
         return list(fn() or []) if callable(fn) else []
-    def crear_usuario(self, nombre: str, password_plana: str, id_rol: int) -> int | None:
+    def crear_usuario(self, nombre: str, password_plana: str, id_rol: int, codigo_barras: Optional[str] = None, id_usuario_admin: int | None = None) -> int | None:
         fn = getattr(DB, "crear_usuario", None)
-        return fn(nombre, password_plana, id_rol) if callable(fn) else None
+        nuevo_id = fn(nombre, password_plana, id_rol, codigo_barras=codigo_barras) if callable(fn) else None
+        if nuevo_id:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="CREAR_USUARIO",
+                tabla_afectada="Usuario",
+                id_registro=nuevo_id,
+                datos_nuevos={"nombre": nombre, "id_rol": id_rol, "codigo_barras": codigo_barras}
+            )
+        return nuevo_id
 # EN app/database/backend_adapter.py (Línea ~432)
 
-    def actualizar_rol_usuario(self, id_usuario: int, id_rol_nuevo: int, nuevo_nombre: Optional[str] = None) -> bool:
+    def actualizar_rol_usuario(self, id_usuario: int, id_rol_nuevo: int, nuevo_nombre: Optional[str] = None, codigo_barras: Optional[str] = None) -> bool:
         
         # 1. Obtener datos anteriores para comparar y auditar si es necesario
         usuarios = DB.obtener_usuarios_con_rol()
@@ -581,16 +664,19 @@ class BackendAdapter:
 
         rol_anterior = usuario_anterior.get('id_rol')
         nombre_anterior = usuario_anterior.get('nombre')
+        codigo_barras_anterior = usuario_anterior.get('codigo_barras')
         
         # Bandera de éxito combinada
         exito_rol = True
         exito_nombre = True
 
-        # 2. Actualizar Rol si es diferente
-        if id_rol_nuevo != rol_anterior:
+        # 2. Actualizar Rol si es diferente (o si hay codigo de barras)
+        if id_rol_nuevo != rol_anterior or codigo_barras != codigo_barras_anterior:
             fn_rol = getattr(DB, "actualizar_rol_usuario", None)
             if callable(fn_rol):
-                exito_rol = fn_rol(id_usuario, id_rol_nuevo)
+                # La función en DB.py acepta nuevo_nombre y codigo_barras. 
+                # Solo le pasamos codigo_barras aquí, ya que el nombre se maneja abajo.
+                exito_rol = fn_rol(id_usuario, id_rol_nuevo, codigo_barras=codigo_barras)
             else:
                 exito_rol = False # Fallo si la función no existe
 
@@ -611,12 +697,14 @@ class BackendAdapter:
             # Recargar datos nuevos para auditoría
             usuario_nuevo = next((u for u in DB.obtener_usuarios_con_rol() if u.get('id_usuario') == id_usuario), {})
             
-            datos_anteriores = {'nombre': nombre_anterior, 'id_rol': rol_anterior}
+            datos_anteriores = {'nombre': nombre_anterior, 'id_rol': rol_anterior, 'codigo_barras': codigo_barras_anterior}
             datos_nuevos = {}
             if nuevo_nombre is not None and nuevo_nombre != nombre_anterior:
                 datos_nuevos['nombre'] = nuevo_nombre
             if id_rol_nuevo != rol_anterior:
                 datos_nuevos['id_rol'] = id_rol_nuevo
+            if codigo_barras != codigo_barras_anterior:
+                datos_nuevos['codigo_barras'] = codigo_barras
 
             if datos_nuevos: # Solo auditar si hubo cambios reales
                 self._registrar_auditoria(
@@ -630,15 +718,46 @@ class BackendAdapter:
         
         return exito_rol and exito_nombre
 
-    def resetear_password_usuario(self, id_usuario: int, password_plana_nueva: str) -> bool:
+    def resetear_password_usuario(self, id_usuario: int, password_plana_nueva: str, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "resetear_password_usuario", None)
-        return bool(fn(id_usuario, password_plana_nueva)) if callable(fn) else False
-    def desactivar_usuario(self, id_usuario: int) -> bool:
+        resultado = bool(fn(id_usuario, password_plana_nueva)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="RESETEAR_PASSWORD",
+                tabla_afectada="Usuario",
+                id_registro=id_usuario,
+                datos_nuevos={"password_reseteada": True}
+            )
+        return resultado
+
+    def desactivar_usuario(self, id_usuario: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "desactivar_usuario", None)
-        return bool(fn(id_usuario)) if callable(fn) else False
-    def activar_usuario(self, id_usuario: int) -> bool:
+        resultado = bool(fn(id_usuario)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="DESACTIVAR_USUARIO",
+                tabla_afectada="Usuario",
+                id_registro=id_usuario,
+                datos_anteriores={"activo": True},
+                datos_nuevos={"activo": False}
+            )
+        return resultado
+
+    def activar_usuario(self, id_usuario: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "activar_usuario", None)
-        return bool(fn(id_usuario)) if callable(fn) else False
+        resultado = bool(fn(id_usuario)) if callable(fn) else False
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="REACTIVAR_USUARIO",
+                tabla_afectada="Usuario",
+                id_registro=id_usuario,
+                datos_anteriores={"activo": False},
+                datos_nuevos={"activo": True}
+            )
+        return resultado
         
     def actualizar_nombre_usuario(self, id_usuario: int, nuevo_nombre: str) -> bool:
         fn = getattr(DB, "actualizar_nombre_usuario", None)
@@ -681,19 +800,28 @@ class BackendAdapter:
         if callable(fn_alt):
             return fn_alt(None)  # Sin filtro de usuario
         return None
+
+    def obtener_tesoreria_activa(self) -> dict | None:
+        """Obtiene la sesión de Tesorería activa (única)."""
+        fn = getattr(DB, "obtener_tesoreria_activa", None)
+        return fn() if callable(fn) else None
     
-    def abrir_caja_session(self, id_usuario: int, monto_inicial: float) -> bool:
+    def abrir_caja_session(self, id_usuario: int, monto_inicial: float, tipo_caja: str = 'ventas') -> bool:
         fn = getattr(DB, "abrir_caja_session", None)
         if not callable(fn): return False
         try:
-            return bool(fn(id_usuario, monto_inicial))
+            return bool(fn(id_usuario, monto_inicial, tipo_caja))
         except ValueError as e:
-            # Re-lanzar errores de validación (ej: "Usuario ya tiene caja abierta")
+            # Re-lanzar errores de validación (ej: "Usuario ya tiene caja abierta" o "Tesorería ya abierta")
             raise
     
     def registrar_movimiento_manual(self, id_session: int, tipo: str, monto: float, motivo: str, descripcion: str, id_usuario: int) -> bool:
         fn = getattr(DB, "registrar_movimiento_manual", None)
         return bool(fn(id_session, tipo, monto, motivo, descripcion, id_usuario)) if callable(fn) else False
+    
+    def transferir_entre_cajas(self, origen: int, destino: int, monto: float, id_usuario: int, motivo_salida: str, motivo_entrada: str, obs: str) -> bool:
+        fn = getattr(DB, "transferir_entre_cajas", None)
+        return bool(fn(origen, destino, monto, id_usuario, motivo_salida, motivo_entrada, obs)) if callable(fn) else False
     
     def obtener_resumen_cierre(self, id_session: int) -> dict:
         fn = getattr(DB, "obtener_resumen_cierre", None)
@@ -702,6 +830,15 @@ class BackendAdapter:
     def cerrar_caja_session(self, id_session: int, id_usuario_cierre: int, efectivo_esperado: float, efectivo_contado: float, diferencia: float, obs: str) -> bool:
         fn = getattr(DB, "cerrar_caja_session", None)
         return bool(fn(id_session, id_usuario_cierre, efectivo_esperado, efectivo_contado, diferencia, obs)) if callable(fn) else False
+
+    def cerrar_caja_por_supervisor(self, id_session: int, id_supervisor: int, obs: str = "Cierre Forzado por Supervisor") -> bool:
+        fn = getattr(DB, "cerrar_caja_por_supervisor", None)
+        return bool(fn(id_session, id_supervisor, obs)) if callable(fn) else False
+
+    # ---------- Auditoría (Bitácora) ----------
+    def obtener_bitacora_acciones(self, fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None, id_usuario: Optional[int] = None, accion: Optional[str] = None) -> list[dict]:
+        fn = getattr(DB, "obtener_bitacora_acciones", None)
+        return list(fn(fecha_desde, fecha_hasta, id_usuario, accion) or []) if callable(fn) else []
     
     # --- REPORTES DE CAJA ---
     def obtener_resumen_diario(self, fecha: str | None = None) -> dict:
@@ -718,10 +855,31 @@ class BackendAdapter:
         fecha_hasta: str | None = None,
         tipo: str | None = None,
         motivo: str | None = None,
-        id_usuario: int | None = None
+        id_usuario: int | None = None,
+        id_session: int | None = None
     ) -> list[dict]:
         """
         Obtiene historial de movimientos de caja con filtros.
         """
         fn = getattr(DB, "obtener_historial_movimientos_caja", None)
-        return list(fn(fecha_desde, fecha_hasta, tipo, motivo, id_usuario) or []) if callable(fn) else []
+        return list(fn(fecha_desde, fecha_hasta, tipo, motivo, id_usuario, id_session) or []) if callable(fn) else []
+
+    def obtener_sesiones_abiertas_con_totales(self) -> list[dict[str, Any]]:
+        """Retorna todas las sesiones de caja abiertas con sus totales acumulados."""
+        fn = getattr(DB, "obtener_sesiones_abiertas_con_totales", None)
+        return list(fn() or []) if callable(fn) else []
+
+    def obtener_kpis_admin(self) -> dict[str, Any]:
+        """Obtiene los KPIs globales del día para el dashboard del administrador."""
+        fn = getattr(DB, "obtener_kpis_admin", None)
+        return fn() if callable(fn) else {'ventas_dia': 0.0, 'tickets': 0, 'efectivo_total': 0.0}
+
+    def obtener_feed_eventos(self, limit: int = 30, id_usuario: int | None = None) -> list[dict]:
+        """Obtiene el log de eventos para el Live Feed del dashboard admin."""
+        fn = getattr(DB, "obtener_feed_eventos", None)
+        return list(fn(limit, id_usuario) or []) if callable(fn) else []
+
+    def obtener_usuarios_actividad_hoy(self) -> list[dict]:
+        """Obtiene la lista de usuarios con actividad el día de hoy para el filtro del Live Feed."""
+        fn = getattr(DB, "obtener_usuarios_actividad_hoy", None)
+        return list(fn() or []) if callable(fn) else []

@@ -1,7 +1,8 @@
 # app/frontend/interfaz_crear_proveedor.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
+from app.frontend import custom_dialogs as messagebox
 from typing import Optional
 import re
 import customtkinter as ctk

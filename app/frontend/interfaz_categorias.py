@@ -2,7 +2,8 @@
 # 🎨 ACTUALIZADO: Estilo de botones unificado
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel
+from tkinter import ttk, Toplevel
+from app.frontend import custom_dialogs as messagebox
 from typing import Any
 import logging
 

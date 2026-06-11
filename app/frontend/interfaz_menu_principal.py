@@ -1,10 +1,11 @@
 # app/frontend/interfaz_menu_principal.py
 import customtkinter as ctk
-from tkinter import messagebox
+from app.frontend import custom_dialogs as messagebox
 from app.frontend.custom_dialogs import mostrar_confirmacion, mostrar_advertencia, mostrar_error, mostrar_info
 import logging
 from app.database.permisos import tiene_permiso
 from app.frontend.stock_event_manager import stock_events
+from app.frontend.broadcast_manager import iniciar_polling_broadcast
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +28,58 @@ ui_historiales       = _safe_import("app.frontend.interfaz_historiales", "ui_his
 ui_gestion_usuarios  = _safe_import("app.frontend.interfaz_gestion_usuarios", "ui_gestion_usuarios")
 ui_categorias        = _safe_import("app.frontend.interfaz_categorias", "ui_categorias")
 ui_gestion_proveedores = _safe_import("app.frontend.interfaz_gestion_proveedores", "ui_gestion_proveedores")
+ui_dashboard_admin   = _safe_import("app.frontend.interfaz_dashboard_admin", "ui_dashboard_admin")
 
 def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     if not callable(fn):
         mostrar_info("No disponible", f"La pantalla '{nombre}' no está integrada.", parent=root)
         return
+        
+    if not hasattr(root, '_ventanas_modulos'):
+        root._ventanas_modulos = {}
+        
+    ventana_existente = root._ventanas_modulos.get(nombre)
+    if ventana_existente and ventana_existente.winfo_exists():
+        ventana_existente.lift()
+        try: ventana_existente.focus_force()
+        except Exception: pass
+        return
+        
+    hijos_antes = set(root.winfo_children())
+
     try:
         try: fn(root, backend, usuario, **kwargs)
         except TypeError: fn(root, backend)
     except Exception as e:
         logger.exception(f"Error abriendo {nombre}")
         mostrar_error("Error", f"Error al abrir {nombre}:\n{e}", parent=root)
+        return
+
+    import tkinter as tk
+    import customtkinter as ctk
+    hijos_despues = set(root.winfo_children())
+    for hijo in (hijos_despues - hijos_antes):
+        if isinstance(hijo, (tk.Toplevel, ctk.CTkToplevel)):
+            root._ventanas_modulos[nombre] = hijo
+            break
 
 def ui_menu_principal(parent, backend, usuario):
+    # Iniciar polling global de broadcasts (corre independientemente del módulo abierto)
+    iniciar_polling_broadcast(parent, usuario)
+
+    id_rol = usuario.get('id_rol')
+    
+    if id_rol == 3:
+        ui_dashboard_supervisor = _safe_import("app.frontend.interfaz_dashboard_supervisor", "ui_dashboard_supervisor")
+        if ui_dashboard_supervisor:
+            ui_dashboard_supervisor(parent, backend, usuario)
+            return
+    elif id_rol == 1:
+        ui_dashboard_admin = _safe_import("app.frontend.interfaz_dashboard_admin", "ui_dashboard_admin")
+        if ui_dashboard_admin:
+            ui_dashboard_admin(parent, backend, usuario)
+            return
+
     win = parent
     win.title(f"🛒 Sistema de Cobros - Don Atilio")
     
@@ -70,7 +110,7 @@ def ui_menu_principal(parent, backend, usuario):
 
     ctk.CTkLabel(sidebar, text="🛒", font=("Segoe UI", 72), text_color="white").pack(pady=(40, 5))
     ctk.CTkLabel(sidebar, text="Sistema de Cobros", font=("Segoe UI", 18, "bold"), text_color="white").pack()
-    ctk.CTkLabel(sidebar, text="Don Atilio", font=("Segoe UI", 14), text_color="#bfdbfe").pack(pady=(0, 40))
+    ctk.CTkLabel(sidebar, text="Don Atilio", font=("Segoe UI", 14), text_color="#bfdbfe").pack(pady=(0, 20))
 
     # Perfil
     rol_text = {1: 'Admin', 2: 'Vendedor', 3: 'Supervisor'}.get(usuario.get('id_rol'), 'Usuario')
@@ -81,11 +121,24 @@ def ui_menu_principal(parent, backend, usuario):
     ctk.CTkLabel(user_frame, text=rol_text, font=("Segoe UI", 12), text_color="#dbeafe").pack(pady=(0, 12))
 
     # Alerta de Stock (Tarjeta Roja Gigante)
-    alert_frame = ctk.CTkFrame(sidebar, fg_color="#ef4444", corner_radius=8)
-    ctk.CTkLabel(alert_frame, text="⚠️ ALERTA STOCK", font=("Segoe UI", 14, "bold"), text_color="white").pack(pady=(15, 5))
-    lbl_alerta_txt = ctk.CTkLabel(alert_frame, text="", font=("Segoe UI", 36, "bold"), text_color="white")
+    alert_frame = ctk.CTkFrame(sidebar, fg_color="#ef4444", corner_radius=8, cursor="hand2")
+    lbl_alerta_titulo = ctk.CTkLabel(alert_frame, text="⚠️ ALERTA STOCK", font=("Segoe UI", 14, "bold"), text_color="white", cursor="hand2")
+    lbl_alerta_titulo.pack(pady=(15, 5))
+    lbl_alerta_txt = ctk.CTkLabel(alert_frame, text="", font=("Segoe UI", 36, "bold"), text_color="white", cursor="hand2")
     lbl_alerta_txt.pack(pady=(0, 0))
-    ctk.CTkLabel(alert_frame, text="productos críticos", font=("Segoe UI", 13), text_color="#fecaca").pack(pady=(0, 15))
+    lbl_alerta_desc = ctk.CTkLabel(alert_frame, text="productos críticos", font=("Segoe UI", 13), text_color="#fecaca", cursor="hand2")
+    lbl_alerta_desc.pack(pady=(0, 15))
+    
+    def on_alerta_doble_clic(event):
+        if not tiene_permiso(usuario, 'ver_inventario'):
+            mostrar_advertencia("Acceso Denegado", "No tienes permisos para ver el inventario.", parent=win)
+            return
+        _abrir_seguro(win, backend, usuario, ui_inventario, "Inventario", filtro_stock_bajo=True)
+
+    alert_frame.bind("<Double-1>", on_alerta_doble_clic)
+    lbl_alerta_titulo.bind("<Double-1>", on_alerta_doble_clic)
+    lbl_alerta_txt.bind("<Double-1>", on_alerta_doble_clic)
+    lbl_alerta_desc.bind("<Double-1>", on_alerta_doble_clic)
     
     def check_stock():
         try:
@@ -122,22 +175,6 @@ def ui_menu_principal(parent, backend, usuario):
     main_area = ctk.CTkFrame(win, fg_color="transparent")
     main_area.pack(side="right", fill="both", expand=True)
     
-    # Título del panel
-    encabezado = ctk.CTkFrame(main_area, fg_color="transparent", height=80)
-    encabezado.pack(fill="x", padx=50, pady=(40, 10))
-    ctk.CTkLabel(encabezado, text="Panel de Control General", font=("Segoe UI", 28, "bold"), text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left")
-
-    # Contenedor Blanco Estilo Tarjeta donde viven los botones
-    card_container = ctk.CTkFrame(main_area, fg_color=color_cards, corner_radius=15, border_width=1, border_color="#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#374151")
-    card_container.pack(fill="both", expand=True, padx=50, pady=(0, 40))
-
-    # Grid de 3 columnas
-    grid_frame = ctk.CTkFrame(card_container, fg_color="transparent")
-    grid_frame.pack(fill="both", expand=True, padx=40, pady=40)
-    
-    for i in range(3): grid_frame.grid_columnconfigure(i, weight=1)
-
-    # ORDENAMIENTO JERÁRQUICO SOLICITADO:
     # Venta > Caja > Compras > Cta Cte > Inventario > Proveedores > Clientes > Categorías > Reportes > Historiales > Usuarios
     todos_botones = [
         ("💵 POS Venta", "realizar_ventas", ui_venta, {}, True),
@@ -156,10 +193,27 @@ def ui_menu_principal(parent, backend, usuario):
         ("⚙️ Usuarios", 'ver_usuarios', ui_gestion_usuarios, {}, False)
     ]
 
+    # ==========================================
+    # MODO VENDEDOR / OTROS (Botones en Grid)
+    # ==========================================
+    # Título del panel
+    encabezado = ctk.CTkFrame(main_area, fg_color="transparent", height=80)
+    encabezado.pack(fill="x", padx=50, pady=(40, 10))
+    ctk.CTkLabel(encabezado, text="Panel de Control General", font=("Segoe UI", 28, "bold"), text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left")
+
+    # Contenedor Blanco Estilo Tarjeta donde viven los botones
+    card_container = ctk.CTkFrame(main_area, fg_color=color_cards, corner_radius=15, border_width=1, border_color="#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#374151")
+    card_container.pack(fill="both", expand=True, padx=50, pady=(0, 40))
+
+    # Grid de 3 columnas
+    grid_frame = ctk.CTkFrame(card_container, fg_color="transparent")
+    grid_frame.pack(fill="both", expand=True, padx=40, pady=40)
+    
+    for i in range(3): grid_frame.grid_columnconfigure(i, weight=1)
+
     r, c = 0, 0
     for texto, permiso, funcion, kwargs, action_hero in todos_botones:
-        if not tiene_permiso(usuario, permiso):
-            continue
+        if not tiene_permiso(usuario, permiso): continue
         
         if action_hero:
             btn_color = "#10b981" # Verde
@@ -181,6 +235,33 @@ def ui_menu_principal(parent, backend, usuario):
         if c >= 3:
             c = 0
             r += 1
+
+    def verificar_estado_usuario():
+        if not win.winfo_exists():
+            return
+        try:
+            if hasattr(backend, "obtener_usuario_por_id"):
+                user_db = backend.obtener_usuario_por_id(usuario['id_usuario'])
+                if user_db:
+                    rol_modificado = user_db.get('id_rol') != usuario.get('id_rol')
+                    cuenta_desactivada = user_db.get('activo', 1) == 0
+                    
+                    if rol_modificado or cuenta_desactivada:
+                        stock_events.desuscribir(check_stock)
+                        mostrar_advertencia(
+                            "Sesión Expirada", 
+                            "Tus permisos han sido modificados o tu cuenta fue desactivada.\nPor seguridad, debes iniciar sesión nuevamente.",
+                            parent=win
+                        )
+                        win.quit()
+                        return
+        except Exception as e:
+            logger.error(f"Error al verificar estado del usuario: {e}")
+            
+        win.after(5000, verificar_estado_usuario)
+
+    # Iniciar ciclo de verificación
+    win.after(5000, verificar_estado_usuario)
 
     win.protocol("WM_DELETE_WINDOW", cerrar_sesion)
     win.deiconify()

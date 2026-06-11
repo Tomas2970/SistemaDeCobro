@@ -1,7 +1,8 @@
 # app/frontend/interfaz_cuenta_corriente.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
+from app.frontend import custom_dialogs as messagebox
 from typing import Optional, Any
 import logging
 import customtkinter as ctk
@@ -78,6 +79,12 @@ class CuentaCorriente:
         
         self.entry_busqueda = ctk.CTkEntry(frm_header, textvariable=self.var_busqueda_ppal, font=("Segoe UI", 13), width=350, height=40, placeholder_text="Nombre, DNI o ID...")
         self.entry_busqueda.pack(side="left", padx=15)
+        
+        def limpiar_filtros_cc():
+            self.var_busqueda_ppal.set("")
+            self.entry_busqueda.focus_set()
+            
+        ctk.CTkButton(frm_header, text="🧹 Limpiar", command=limpiar_filtros_cc, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 12, "bold"), width=100, height=35).pack(side="left", padx=(0, 15))
         
         self.var_busqueda_ppal.trace_add("write", self.filtrar_lista_principal)
         

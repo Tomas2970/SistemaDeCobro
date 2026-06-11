@@ -1,6 +1,6 @@
 # app/frontend/manejador_errores.py
 # 🎯 SISTEMA CENTRALIZADO DE MANEJO DE ERRORES ESPECÍFICOS
-from tkinter import messagebox
+from app.frontend import custom_dialogs as messagebox
 import mysql.connector
 from typing import Optional, Tuple
 

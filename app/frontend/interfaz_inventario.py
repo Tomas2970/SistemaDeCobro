@@ -1,7 +1,8 @@
 # app/frontend/interfaz_inventario.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel, filedialog
+from tkinter import ttk, Toplevel, filedialog
+from app.frontend import custom_dialogs as messagebox
 from typing import List, Dict, Any, Optional
 import logging
 import csv
@@ -56,7 +57,7 @@ def _fmt_porc(val: Any) -> str:
 
 # --- Lógica de la interfaz ---
 class UIInventario:
-    def __init__(self, parent: tk.Misc, backend, usuario: dict):
+    def __init__(self, parent: tk.Misc, backend, usuario: dict, filtro_stock_bajo: bool = False):
         import customtkinter as ctk
         self.backend = backend
         self.usuario = usuario
@@ -70,7 +71,7 @@ class UIInventario:
         
         self.productos_cache = []
         self.cat_map = {}
-        self.var_filtrar_stock_bajo = tk.BooleanVar(value=False)
+        self.var_filtrar_stock_bajo = tk.BooleanVar(value=filtro_stock_bajo)
 
         self._crear_widgets()
         self._cargar_categorias_para_filtro()
@@ -101,24 +102,33 @@ class UIInventario:
         frm_header = ctk.CTkFrame(self.win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
         frm_header.pack(fill="x", padx=25, pady=(25, 10))
         
-        ctk.CTkLabel(frm_header, text="🔍 Buscar Producto:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(20, 10), pady=20)
+        # --- BOTONES DE ACCIÓN (A la derecha, empaquetados primero para garantizar espacio) ---
+        frm_acciones = ctk.CTkFrame(frm_header, fg_color="transparent")
+        frm_acciones.pack(side="right", padx=10)
+        
+        ctk.CTkButton(frm_acciones, text="🧹 Limpiar", font=("Segoe UI", 13, "bold"), fg_color="#6b7280", hover_color="#4b5563", width=100, height=40, command=self._limpiar_filtros).pack(side="left", padx=5)
+        ctk.CTkButton(frm_acciones, text="📊 Exportar CSV", font=("Segoe UI", 13, "bold"), fg_color="#f59e0b", hover_color="#d97706", width=140, height=40, command=self._exportar_csv).pack(side="left", padx=5)
+
+        # --- FILTROS (A la izquierda) ---
+        frm_filtros = ctk.CTkFrame(frm_header, fg_color="transparent")
+        frm_filtros.pack(side="left", fill="x", expand=True)
+        
+        ctk.CTkLabel(frm_filtros, text="🔍 Buscar:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(10, 5), pady=15)
         self.var_busqueda = tk.StringVar()
         
-        self.entry_busqueda = ctk.CTkEntry(frm_header, textvariable=self.var_busqueda, font=font_normal, height=45, width=300)
-        self.entry_busqueda.pack(side="left", padx=15)
+        self.entry_busqueda = ctk.CTkEntry(frm_filtros, textvariable=self.var_busqueda, font=font_normal, height=40, width=220)
+        self.entry_busqueda.pack(side="left", padx=5)
         self.var_busqueda.trace_add("write", self._filtrar_lista) 
         
-        ctk.CTkLabel(frm_header, text="Categoría:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(30, 10))
+        ctk.CTkLabel(frm_filtros, text="Categoría:", font=font_title, text_color="#374151" if ctk.get_appearance_mode()=="Light" else "white").pack(side="left", padx=(15, 5))
         col_opt_bg = "#f3f4f6" if ctk.get_appearance_mode()=="Light" else "#374151"
         col_opt_btn = "#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#4b5563"
         col_opt_hover = "#d1d5db" if ctk.get_appearance_mode()=="Light" else "#6b7280"
         col_opt_text = "#1f2937" if ctk.get_appearance_mode()=="Light" else "#f9fafb"
-        self.cb_categoria = ctk.CTkOptionMenu(frm_header, font=font_normal, fg_color=col_opt_bg, button_color=col_opt_btn, button_hover_color=col_opt_hover, text_color=col_opt_text, command=self._filtrar_lista, width=200, height=45)
+        self.cb_categoria = ctk.CTkOptionMenu(frm_filtros, font=font_normal, fg_color=col_opt_bg, button_color=col_opt_btn, button_hover_color=col_opt_hover, text_color=col_opt_text, command=self._filtrar_lista, width=160, height=40)
         self.cb_categoria.pack(side="left", padx=5)
         
-        ctk.CTkSwitch(frm_header, text="Stock Bajo / Crítico", variable=self.var_filtrar_stock_bajo, command=self._filtrar_lista, font=font_title, progress_color="#ef4444").pack(side="left", padx=40)
-        
-        ctk.CTkButton(frm_header, text="📊 Exportar CSV", font=("Segoe UI", 14, "bold"), fg_color="#f59e0b", hover_color="#d97706", width=160, height=45, command=self._exportar_csv).pack(side="right", padx=20)
+        ctk.CTkSwitch(frm_filtros, text="Stock Bajo", variable=self.var_filtrar_stock_bajo, command=self._filtrar_lista, font=font_title, progress_color="#ef4444").pack(side="left", padx=(20, 5))
         
         # 3. Footer (Empacado antes para anclar al fondo)
         frm_footer = ctk.CTkFrame(self.win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
@@ -162,13 +172,25 @@ class UIInventario:
         except Exception as e:
             pass
 
+    def _limpiar_filtros(self):
+        self.var_busqueda.set("")
+        self.var_filtrar_stock_bajo.set(False)
+        if self.cb_categoria.cget("values"):
+            self.cb_categoria.set(self.cb_categoria.cget("values")[0])
+        self._filtrar_lista()
+
     def cargar_todo(self):
+        if not self.win.winfo_exists():
+            return
         try:
             self.productos_cache = self.backend.obtener_productos_full()
             self._filtrar_lista()
+        except tk.TclError:
+            pass  # Widget destruido durante la operación
         except Exception as e:
             logger.error(f"Error cargando inventario: {e}")
-            messagebox.showerror("Error", f"Error cargando inventario: {e}")
+            if self.win.winfo_exists():
+                messagebox.showerror("Error", f"Error cargando inventario: {e}")
 
     def _resolver_busqueda(self, q: str) -> List[Dict[str, Any]]:
         q = q.strip()
@@ -186,7 +208,12 @@ class UIInventario:
         return [p for p in self.productos_cache if q_lower in p.get('nombre', '').lower()]
 
     def _filtrar_lista(self, *args):
-        for i in self.tree.get_children(): self.tree.delete(i)
+        if not self.win.winfo_exists():
+            return
+        try:
+            for i in self.tree.get_children(): self.tree.delete(i)
+        except tk.TclError:
+            return
         
         query = self.var_busqueda.get()
         cat_sel_nombre = self.cb_categoria.get()
@@ -221,6 +248,13 @@ class UIInventario:
                 _fmt_mon(p.get('precio')),
                 # Quitamos Margen y Pesable de los values
             ], tags=(tag,))
+
+    def _limpiar_filtros(self):
+        """Resetea todos los filtros a sus valores por defecto y recarga la lista."""
+        self.var_busqueda.set('')
+        self.cb_categoria.set('(Todas)')
+        self.var_filtrar_stock_bajo.set(False)
+        self._filtrar_lista()
 
     def _abrir_abm_productos(self, id_prod: Optional[int]):
         """Función helper para abrir el ABM de producto"""
@@ -312,5 +346,5 @@ class UIInventario:
                 parent=self.win,
             )
 
-def ui_inventario(parent: tk.Misc, backend, usuario: dict):
-    UIInventario(parent, backend, usuario)
+def ui_inventario(parent: tk.Misc, backend, usuario: dict, filtro_stock_bajo: bool = False):
+    UIInventario(parent, backend, usuario, filtro_stock_bajo)

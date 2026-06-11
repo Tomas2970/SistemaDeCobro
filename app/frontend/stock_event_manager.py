@@ -40,9 +40,16 @@ class StockEventManager:
         - Modificar un producto (ABM)
         - Actualizar stock desde inventario
         """
-        for callback in self._callbacks:
+        import tkinter as tk
+        for callback in self._callbacks[:]:  # Iterar sobre copia para permitir desuscripción durante iteración
             try:
                 callback()
+            except tk.TclError:
+                # Widget destruido: desuscribir automáticamente
+                try:
+                    self._callbacks.remove(callback)
+                except ValueError:
+                    pass
             except Exception as e:
                 print(f"Error ejecutando callback de stock: {e}")
     

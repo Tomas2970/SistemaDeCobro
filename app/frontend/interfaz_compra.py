@@ -1,7 +1,8 @@
 # app/frontend/interfaz_compra.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel
+from tkinter import ttk, Toplevel
+from app.frontend import custom_dialogs as messagebox
 from typing import Any
 import customtkinter as ctk
 
@@ -185,7 +186,12 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     lbl_total.pack(side="right")
 
     def repintar_tabla():
-        for i in tree.get_children(): tree.delete(i)
+        if not win.winfo_exists():
+            return
+        try:
+            for i in tree.get_children(): tree.delete(i)
+        except tk.TclError:
+            return
         total_gral = 0.0
         for idx, item in enumerate(carrito):
             subtotal = item['cant'] * item['costo']
@@ -237,9 +243,11 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                 try:
                     curr_idx = orden.index(col_id)
                     if curr_idx < len(orden) - 1:
-                        win.after(10, lambda: editar_celda(row_id, orden[curr_idx + 1]))
+                        if win.winfo_exists():
+                            win.after(10, lambda: editar_celda(row_id, orden[curr_idx + 1]))
                     elif int(row_id) + 1 < len(carrito):
-                        win.after(10, lambda: editar_celda(str(int(row_id) + 1), '#2'))
+                        if win.winfo_exists():
+                            win.after(10, lambda: editar_celda(str(int(row_id) + 1), '#2'))
                 except: pass
             except:
                 entry.focus_set()
@@ -286,7 +294,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
             margen = obtener_margen(id_cat)
             carrito.append({'id': pid, 'nombre': prod_full['nombre'], 'cant': 1.0, 'costo': 1.0, 'margen': margen, 'precio_venta': 1.0 * (1 + margen/100)})
             repintar_tabla(); popup.destroy()
-            win.after(100, lambda: editar_celda(str(len(carrito)-1), '#2'))
+            if win.winfo_exists():
+                win.after(100, lambda: editar_celda(str(len(carrito)-1), '#2'))
 
         ctk.CTkButton(fr_btns, text="Cancelar", command=popup.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
         ctk.CTkButton(fr_btns, text="+ Agregar al Carrito", command=agregar_al_carrito, fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 15, "bold"), width=250, height=45).pack(side="right", padx=10)

@@ -390,3 +390,56 @@ def askyesnocancel(title=None, message=None, **options):
     else:
         dialog.wait_window(dialog)
     return dialog.resultado
+
+# ============================================================================
+# Toast Flotante (Notificaciones No Bloqueantes)
+# ============================================================================
+
+_toast_activo = None
+
+def mostrar_toast_centrado(parent, mensaje, duracion_ms=2500, bg_color="#10b981", fg_color="white"):
+    """
+    Muestra un Toast flotante centrado en relación a la ventana padre.
+    Se autodestruye después de `duracion_ms`.
+    Si aparece uno nuevo, reemplaza al anterior.
+    """
+    global _toast_activo
+    
+    if _toast_activo and _toast_activo.winfo_exists():
+        _toast_activo.destroy()
+        
+    toast = tk.Toplevel(parent)
+    _toast_activo = toast
+    
+    toast.overrideredirect(True)
+    toast.attributes("-topmost", True)
+    
+    paleta = obtener_paleta_activa()
+    toast.configure(bg=paleta["border_color"]) 
+    
+    frame = ctk.CTkFrame(toast, fg_color=bg_color, corner_radius=8)
+    frame.pack(fill="both", expand=True, padx=1, pady=1)
+    
+    lbl = ctk.CTkLabel(frame, text=mensaje, font=("Segoe UI", 16, "bold"), text_color=fg_color)
+    lbl.pack(padx=25, pady=15)
+    
+    toast.update_idletasks()
+    w = toast.winfo_reqwidth()
+    h = toast.winfo_reqheight()
+    
+    if parent and parent.winfo_exists() and parent.winfo_viewable():
+        p_width = parent.winfo_width()
+        p_height = parent.winfo_height()
+        p_x = parent.winfo_rootx()
+        p_y = parent.winfo_rooty()
+        
+        x = p_x + (p_width - w) // 2
+        y = p_y + (p_height - h) // 2
+    else:
+        x = (toast.winfo_screenwidth() - w) // 2
+        y = (toast.winfo_screenheight() - h) // 2
+        
+    toast.geometry(f"{w}x{h}+{x}+{y}")
+    
+    # Desvanecer o simplemente destruir
+    toast.after(duracion_ms, lambda: toast.destroy() if toast.winfo_exists() else None)

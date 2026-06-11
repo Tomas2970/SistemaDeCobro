@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import messagebox
+from app.frontend import custom_dialogs as messagebox
 from app.frontend.custom_dialogs import mostrar_confirmacion, mostrar_advertencia, mostrar_error
 import logging
 from app.frontend.navegacion_teclado_comun import configurar_navegacion_teclado

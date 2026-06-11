@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS Usuario (
     nombre VARCHAR(50) NOT NULL UNIQUE,
     contraseña VARCHAR(255) NOT NULL,
     id_rol INT NOT NULL,
+    codigo_barras VARCHAR(100) UNIQUE NULL,
     activo BOOLEAN DEFAULT TRUE,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     ultimo_acceso TIMESTAMP NULL,
@@ -242,10 +243,12 @@ CREATE TABLE IF NOT EXISTS caja_session (
     diferencia DECIMAL(10,2) NULL,
     observaciones_cierre TEXT NULL,
     estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
+    tipo_caja ENUM('ventas', 'tesoreria') DEFAULT 'ventas',
     FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
     FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
     INDEX idx_caja_estado (estado),
-    INDEX idx_caja_fecha (fecha_apertura)
+    INDEX idx_caja_fecha (fecha_apertura),
+    INDEX idx_caja_tipo (tipo_caja)
 ) ENGINE=InnoDB;
 
 -- =========================================================
@@ -325,6 +328,9 @@ CREATE TABLE IF NOT EXISTS caja_movimiento (
         'devolucion_efectivo',
         'ajuste_positivo',
         'ajuste_negativo',
+        'transferencia_tesoreria_salida',
+        'transferencia_tesoreria_entrada',
+        'ingreso_extraordinario',
         'otro'
     ) NOT NULL,
     id_usuario INT NOT NULL,
@@ -415,6 +421,19 @@ BEGIN
         SELECT cantidad INTO v_cant_anterior FROM Inventario WHERE id_producto = NEW.id_producto;
         INSERT INTO AuditoriaInventario (id_producto, cantidad_anterior, cantidad_nueva, tipo_movimiento, id_referencia)
         VALUES (NEW.id_producto, v_cant_anterior, GREATEST(v_cant_anterior - NEW.cantidad, 0), 'venta', NEW.id_venta);
+    END IF;
+END $$
+
+DROP TRIGGER IF EXISTS trg_auditoria_compra_inventario $$
+CREATE TRIGGER trg_auditoria_compra_inventario
+AFTER INSERT ON DetalleCompra
+FOR EACH ROW
+BEGIN
+    DECLARE v_cant_anterior DECIMAL(10, 3) DEFAULT 0.000;
+    IF NEW.id_producto IS NOT NULL THEN
+        SELECT cantidad INTO v_cant_anterior FROM Inventario WHERE id_producto = NEW.id_producto;
+        INSERT INTO AuditoriaInventario (id_producto, cantidad_anterior, cantidad_nueva, tipo_movimiento, id_referencia)
+        VALUES (NEW.id_producto, v_cant_anterior, v_cant_anterior + NEW.cantidad, 'compra', NEW.id_compra);
     END IF;
 END $$
 

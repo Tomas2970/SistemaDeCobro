@@ -1,7 +1,8 @@
 from __future__ import annotations
 import tkinter as tk
 import customtkinter as ctk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, filedialog
+from app.frontend import custom_dialogs as messagebox
 from app.frontend.theme_config import THEME_COLORS, get_color, aplicar_tema_ventana, configurar_estilo_notebook, configurar_estilo_treeview, preparar_ventana, centrar_y_mostrar_ventana
 from typing import Optional, Any
 from datetime import date, datetime, timedelta
@@ -66,7 +67,12 @@ def _formatear_fecha_para_ui(fecha_sql: Any) -> str:
         fecha_obj = datetime.fromisoformat(str(fecha_sql))
         return fecha_obj.strftime("%d/%m/%Y %H:%M")
     except Exception:
-        return str(fecha_sql)
+        texto = str(fecha_sql)
+        if len(texto) >= 10 and "-" in texto[:10]:
+            partes = texto[:10].split("-")
+            if len(partes) == 3:
+                return f"{partes[2]}/{partes[1]}/{partes[0]}" + texto[10:]
+        return texto
 
 def _fmt_mon(val: Any) -> str:
     try: return f"$ {float(val):,.2f}"
@@ -413,11 +419,19 @@ class Historiales:
         frm_vendedor = ctk.CTkFrame(frm, fg_color="transparent")
         frm_vendedor.grid(row=0, column=7, padx=3, sticky="w")
         
-        self.lbl_vendedor_v = ctk.CTkLabel(frm_vendedor, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        es_vendedor = self.usuario.get('id_rol') == 2
+        texto_vendedor = self.usuario.get('nombre') if es_vendedor else "(Todos)"
+        
+        self.lbl_vendedor_v = ctk.CTkLabel(frm_vendedor, text=texto_vendedor, font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
         self.lbl_vendedor_v.pack(side="left", padx=(0, 5))
         
-        btn_vendedor = ctk.CTkButton(frm_vendedor, text="🔍", width=35, height=30, fg_color="#3b82f6", 
-                                     command=lambda: self._abrir_selector_entidad("Vendedor", self.vendedor_sel, self.vendedores_raw, self.lbl_vendedor_v))
+        if es_vendedor:
+            self.vendedor_sel['id'] = self.usuario.get('id_usuario')
+            self.vendedor_sel['nombre'] = texto_vendedor
+            btn_vendedor = ctk.CTkButton(frm_vendedor, text="🔍", width=35, height=30, fg_color="gray", state="disabled")
+        else:
+            btn_vendedor = ctk.CTkButton(frm_vendedor, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                         command=lambda: self._abrir_selector_entidad("Vendedor", self.vendedor_sel, self.vendedores_raw, self.lbl_vendedor_v))
         btn_vendedor.pack(side="left")
 
         # 5. Buscador Cliente (Encapsulado en sub-frame)
@@ -438,6 +452,9 @@ class Historiales:
         
         btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_ventas, "#3b82f6", width=8)
         btn_buscar.pack(side="left", padx=3)
+        
+        btn_limpiar = self.crear_boton_accion(frm_acciones, "🧹 Limpiar", self._limpiar_filtros_ventas, "#6b7280", width=8)
+        btn_limpiar.pack(side="left", padx=3)
         
         btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(0), "#10b981", width=8)
         btn_exportar.pack(side="left", padx=3)
@@ -525,6 +542,8 @@ class Historiales:
 
     def buscar_ventas(self):
         # 1. Limpiar UI
+        if not self.win.winfo_exists():
+            return
         for i in self.tree_maestro_v.get_children(): self.tree_maestro_v.delete(i)
         for i in self.tree_detalle_v.get_children(): self.tree_detalle_v.delete(i)
         
@@ -533,33 +552,41 @@ class Historiales:
             try:
                 d_sql = self.fecha_desde_v.get_date_sql()
                 h_sql = self.fecha_hasta_v.get_date_sql()
-                id_vend = self.vendedor_sel['id']
+                es_vendedor = self.usuario.get('id_rol') == 2
+                id_vend = self.usuario.get('id_usuario') if es_vendedor else self.vendedor_sel['id']
                 id_cli = self.cliente_sel['id']
                 
                 ventas = self.backend.obtener_ventas_maestro(d_sql, h_sql, id_cli, id_vend)
                 # 3. Actualizar UI en hilo principal
-                self.win.after(0, lambda: self._update_tree_ventas(ventas))
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: self._update_tree_ventas(ventas))
             except Exception as e:
-                self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
         
         import threading
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _update_tree_ventas(self, ventas):
-        MAX_RANG_RENDER = 500
-        count = 0
-        for v in ventas:
-            if count >= MAX_RANG_RENDER:
+        if not self.win.winfo_exists():
+            return
+        try:
+            MAX_RANG_RENDER = 500
+            count = 0
+            for v in ventas:
+                if count >= MAX_RANG_RENDER:
+                    self.tree_maestro_v.insert("", tk.END, values=[
+                        "Aviso", "-", "Se han omitido los resultados excedentes visuales...", "-", "-", "-", "-"
+                    ])
+                    break
                 self.tree_maestro_v.insert("", tk.END, values=[
-                    "Aviso", "-", "Se han omitido los resultados excedentes visuales...", "-", "-", "-", "-"
+                    v.get('id_venta'), _formatear_fecha_para_ui(v.get('fecha')),
+                    v.get('cliente') or "Consumidor Final", v.get('vendedor'),
+                    _fmt_mon(v.get('total')), v.get('estado'), v.get('tipo_pago')
                 ])
-                break
-            self.tree_maestro_v.insert("", tk.END, values=[
-                v.get('id_venta'), _formatear_fecha_para_ui(v.get('fecha')),
-                v.get('cliente') or "Consumidor Final", v.get('vendedor'),
-                _fmt_mon(v.get('total')), v.get('estado'), v.get('tipo_pago')
-            ])
-            count += 1
+                count += 1
+        except tk.TclError:
+            pass
 
     def mostrar_detalle_venta(self, event=None):
         for i in self.tree_detalle_v.get_children(): self.tree_detalle_v.delete(i)
@@ -575,6 +602,27 @@ class Historiales:
                     _fmt_mon(d.get('subtotal'))
                 ])
         except Exception: pass
+
+    def _limpiar_filtros_ventas(self):
+        hoy = date.today()
+        self.fecha_desde_v.widget_entrada.delete(0, tk.END)
+        self.fecha_desde_v.widget_entrada.insert(0, f"01/{hoy.month:02d}/{hoy.year}")
+        self.fecha_hasta_v.widget_entrada.delete(0, tk.END)
+        self.fecha_hasta_v.widget_entrada.insert(0, hoy.strftime("%d/%m/%Y"))
+        
+        es_vendedor = self.usuario.get('id_rol') == 2
+        if not es_vendedor:
+            self.vendedor_sel['id'] = None
+            self.vendedor_sel['nombre'] = "(Todos)"
+            if hasattr(self, 'lbl_vendedor_v'):
+                self.lbl_vendedor_v.configure(text="(Todos)")
+                
+        self.cliente_sel['id'] = None
+        self.cliente_sel['nombre'] = "(Todos)"
+        if hasattr(self, 'lbl_cliente_v'):
+            self.lbl_cliente_v.configure(text="(Todos)")
+            
+        self.buscar_ventas()
 
     def mostrar_detalle_compra(self, event=None):
         for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
@@ -645,11 +693,19 @@ class Historiales:
         frm_usuario_c = ctk.CTkFrame(frm, fg_color="transparent")
         frm_usuario_c.grid(row=0, column=9, padx=3, sticky="w")
         
-        self.lbl_usuario_c = ctk.CTkLabel(frm_usuario_c, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        es_vendedor = self.usuario.get('id_rol') == 2
+        texto_usuario_c = self.usuario.get('nombre') if es_vendedor else "(Todos)"
+        
+        self.lbl_usuario_c = ctk.CTkLabel(frm_usuario_c, text=texto_usuario_c, font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
         self.lbl_usuario_c.pack(side="left", padx=(0, 5))
         
-        btn_usuario = ctk.CTkButton(frm_usuario_c, text="🔍", width=35, height=30, fg_color="#3b82f6", 
-                                    command=lambda: self._abrir_selector_entidad("Vendedor", self.usuario_c_sel, self.vendedores_raw, self.lbl_usuario_c))
+        if es_vendedor:
+            self.usuario_c_sel['id'] = self.usuario.get('id_usuario')
+            self.usuario_c_sel['nombre'] = texto_usuario_c
+            btn_usuario = ctk.CTkButton(frm_usuario_c, text="🔍", width=35, height=30, fg_color="gray", state="disabled")
+        else:
+            btn_usuario = ctk.CTkButton(frm_usuario_c, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                        command=lambda: self._abrir_selector_entidad("Vendedor", self.usuario_c_sel, self.vendedores_raw, self.lbl_usuario_c))
         btn_usuario.pack(side="left")
 
         # 6. Botones de Acción (Grupo alineado a la derecha)
@@ -658,6 +714,9 @@ class Historiales:
         
         btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_compras, "#3b82f6", width=8)
         btn_buscar.pack(side="left", padx=3)
+        
+        btn_limpiar = self.crear_boton_accion(frm_acciones, "🧹 Limpiar", self._limpiar_filtros_compras, "#6b7280", width=8)
+        btn_limpiar.pack(side="left", padx=3)
         
         btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(1), "#10b981", width=8)
         btn_exportar.pack(side="left", padx=3)
@@ -712,6 +771,8 @@ class Historiales:
 
     def buscar_compras(self):
         # 1. Limpiar UI
+        if not self.win.winfo_exists():
+            return
         for i in self.tree_maestro_c.get_children(): self.tree_maestro_c.delete(i)
         for i in self.tree_detalle_c.get_children(): self.tree_detalle_c.delete(i)
         
@@ -722,38 +783,67 @@ class Historiales:
                 h_sql = self.fecha_hasta_c.get_date_sql()
                 id_prov_filtro = self.proveedor_sel['id']
                 compras = self.backend.obtener_compras_maestro(d_sql, h_sql, id_prov_filtro)
-                nombre_usuario_sel = self.usuario_c_sel['nombre']
+                es_vendedor = self.usuario.get('id_rol') == 2
+                nombre_usuario_sel = self.usuario.get('nombre') if es_vendedor else self.usuario_c_sel['nombre']
                 if nombre_usuario_sel != "(Todos)":
                     compras = [c for c in compras if c.get('usuario') == nombre_usuario_sel]
                     
                 # 3. Actualizar UI
-                self.win.after(0, lambda: self._update_tree_compras(compras))
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: self._update_tree_compras(compras))
             except Exception as e:
-                self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
         
         import threading
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _update_tree_compras(self, compras):
-        MAX_RANG_RENDER = 500
-        count = 0
-        prov_map = self.proveedores_map_nombre
-        for c in compras:
-            if count >= MAX_RANG_RENDER:
+        if not self.win.winfo_exists():
+            return
+        try:
+            MAX_RANG_RENDER = 500
+            count = 0
+            prov_map = self.proveedores_map_nombre
+            for c in compras:
+                if count >= MAX_RANG_RENDER:
+                    self.tree_maestro_c.insert("", tk.END, values=[
+                        "Aviso", "-", "Se han omitido los resultados excedentes visuales...", "-", "-", "-", "-", "-"
+                    ])
+                    break
+                medio = c.get('medio_pago') or '-'
+                prov_data = prov_map.get(c.get('proveedor'), {})
+                cuit_val = prov_data.get('cuit', '-')
+                empresa_val = prov_data.get('empresa') or c.get('proveedor') or '-'
                 self.tree_maestro_c.insert("", tk.END, values=[
-                    "Aviso", "-", "Se han omitido los resultados excedentes visuales...", "-", "-", "-", "-", "-"
+                    c.get('id_compra'), _formatear_fecha_para_ui(c.get('fecha')),
+                    empresa_val, cuit_val, _fmt_mon(c.get('total')),
+                    c.get('estado'), medio, c.get('usuario')
                 ])
-                break
-            medio = c.get('medio_pago') or '-'
-            prov_data = prov_map.get(c.get('proveedor'), {})
-            cuit_val = prov_data.get('cuit', '-')
-            empresa_val = prov_data.get('empresa') or c.get('proveedor') or '-'
-            self.tree_maestro_c.insert("", tk.END, values=[
-                c.get('id_compra'), _formatear_fecha_para_ui(c.get('fecha')),
-                empresa_val, cuit_val, _fmt_mon(c.get('total')),
-                c.get('estado'), medio, c.get('usuario')
-            ])
-            count += 1
+                count += 1
+        except tk.TclError:
+            pass
+
+    def _limpiar_filtros_compras(self):
+        hoy = date.today()
+        self.fecha_desde_c.widget_entrada.delete(0, tk.END)
+        self.fecha_desde_c.widget_entrada.insert(0, f"01/{hoy.month:02d}/{hoy.year}")
+        self.fecha_hasta_c.widget_entrada.delete(0, tk.END)
+        self.fecha_hasta_c.widget_entrada.insert(0, hoy.strftime("%d/%m/%Y"))
+        
+        self.proveedor_sel['id'] = None
+        self.proveedor_sel['nombre'] = "(Todos)"
+        if hasattr(self, 'lbl_proveedor_c'):
+            self.lbl_proveedor_c.configure(text="(Todos)")
+            
+        es_vendedor = self.usuario.get('id_rol') == 2
+        if not es_vendedor:
+            self.usuario_c_sel['id'] = None
+            self.usuario_c_sel['nombre'] = "(Todos)"
+            if hasattr(self, 'lbl_usuario_c'):
+                self.lbl_usuario_c.configure(text="(Todos)")
+                
+        self.buscar_compras()
 
     def _crear_tab_pagos(self):
         frm = ctk.CTkFrame(self.bg_pagos, fg_color="transparent")
@@ -816,6 +906,9 @@ class Historiales:
         btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_pagos, "#3b82f6", width=8)
         btn_buscar.pack(side="left", padx=3)
         
+        btn_limpiar = self.crear_boton_accion(frm_acciones, "🧹 Limpiar", self._limpiar_filtros_pagos, "#6b7280", width=8)
+        btn_limpiar.pack(side="left", padx=3)
+        
         btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(2), "#10b981", width=8)
         btn_exportar.pack(side="left", padx=3)
 
@@ -845,6 +938,8 @@ class Historiales:
 
     def buscar_pagos(self):
         # 1. Limpiar UI
+        if not self.win.winfo_exists():
+            return
         for i in self.tree_pagos.get_children(): self.tree_pagos.delete(i)
         
         # 2. Hilo para busqueda
@@ -862,21 +957,47 @@ class Historiales:
                 pagos = self.backend.obtener_pagos_maestro(d_sql, h_sql, id_cli, id_usuario)
                 
                 # 3. Actualizar UI
-                self.win.after(0, lambda: self._update_tree_pagos(pagos))
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: self._update_tree_pagos(pagos))
             except Exception as e:
-                self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: messagebox.showerror("Error", str(e)))
         
         import threading
         threading.Thread(target=_fetch, daemon=True).start()
 
 
     def _update_tree_pagos(self, pagos):
-        for p in pagos:
-            self.tree_pagos.insert("", tk.END, values=[
-                _formatear_fecha_para_ui(p.get('fecha')),
-                p.get('cliente_nombre'), _fmt_mon(p.get('monto')),
-                p.get('metodo'), p.get('usuario_nombre')
-            ])
+        if not self.win.winfo_exists():
+            return
+        try:
+            for p in pagos:
+                self.tree_pagos.insert("", tk.END, values=[
+                    _formatear_fecha_para_ui(p.get('fecha')),
+                    p.get('cliente_nombre'), _fmt_mon(p.get('monto')),
+                    p.get('metodo'), p.get('usuario_nombre')
+                ])
+        except tk.TclError:
+            pass
+
+    def _limpiar_filtros_pagos(self):
+        hoy = date.today()
+        self.fecha_desde_p.widget_entrada.delete(0, tk.END)
+        self.fecha_desde_p.widget_entrada.insert(0, f"01/{hoy.month:02d}/{hoy.year}")
+        self.fecha_hasta_p.widget_entrada.delete(0, tk.END)
+        self.fecha_hasta_p.widget_entrada.insert(0, hoy.strftime("%d/%m/%Y"))
+        
+        self.cliente_p_sel['id'] = None
+        self.cliente_p_sel['nombre'] = "(Todos)"
+        if hasattr(self, 'lbl_cliente_p'):
+            self.lbl_cliente_p.configure(text="(Todos)")
+            
+        self.usuario_p_sel['id'] = None
+        self.usuario_p_sel['nombre'] = "(Todos)"
+        if hasattr(self, 'lbl_usuario_p'):
+            self.lbl_usuario_p.configure(text="(Todos)")
+            
+        self.buscar_pagos()
 
     def _crear_tab_caja(self):
         frm = ctk.CTkFrame(self.bg_caja, fg_color="transparent")
@@ -936,11 +1057,19 @@ class Historiales:
         frm_usuario_cj = ctk.CTkFrame(frm, fg_color="transparent")
         frm_usuario_cj.grid(row=0, column=9, padx=3, sticky="w")
         
-        self.lbl_usuario_cj = ctk.CTkLabel(frm_usuario_cj, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        es_vendedor = self.usuario.get('id_rol') == 2
+        texto_usuario_cj = self.usuario.get('nombre') if es_vendedor else "(Todos)"
+        
+        self.lbl_usuario_cj = ctk.CTkLabel(frm_usuario_cj, text=texto_usuario_cj, font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
         self.lbl_usuario_cj.pack(side="left", padx=(0, 5))
         
-        self.btn_usuario_cj = ctk.CTkButton(frm_usuario_cj, text="🔍", width=35, height=30, fg_color="#3b82f6", 
-                                            command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_caja_sel, self.vendedores_raw, self.lbl_usuario_cj))
+        if es_vendedor:
+            self.usuario_caja_sel['id'] = self.usuario.get('id_usuario')
+            self.usuario_caja_sel['nombre'] = texto_usuario_cj
+            self.btn_usuario_cj = ctk.CTkButton(frm_usuario_cj, text="🔍", width=35, height=30, fg_color="gray", state="disabled")
+        else:
+            self.btn_usuario_cj = ctk.CTkButton(frm_usuario_cj, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                                command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_caja_sel, self.vendedores_raw, self.lbl_usuario_cj))
         self.btn_usuario_cj.pack(side="left")
         
         # 6. Botones de Acción
@@ -949,6 +1078,9 @@ class Historiales:
         
         btn_buscar = self.crear_boton_accion(frm_acciones, "🔍 Buscar", self.buscar_caja, "#3b82f6", width=8)
         btn_buscar.pack(side="left", padx=3)
+        
+        btn_limpiar = self.crear_boton_accion(frm_acciones, "🧹 Limpiar", self._limpiar_filtros_caja, "#6b7280", width=8)
+        btn_limpiar.pack(side="left", padx=3)
         
         btn_exportar = self.crear_boton_accion(frm_acciones, "📊 Exportar", lambda: self.exportar_a_csv(3), "#10b981", width=8)
         btn_exportar.pack(side="left", padx=3)
@@ -984,6 +1116,8 @@ class Historiales:
         self.tree_caja.tag_configure('cierre', background='#334155', foreground='#ffffff') # Gris oscuro con blanco
 
     def buscar_caja(self):
+        if not self.win.winfo_exists():
+            return
         for i in self.tree_caja.get_children(): self.tree_caja.delete(i)
         
         def _fetch_caja():
@@ -1010,11 +1144,15 @@ class Historiales:
                     db_tipo = None
                     db_motivo = None
 
+                es_vendedor = self.usuario.get('id_rol') == 2
                 id_usuario = None
-                try:
-                    if self.usuario_caja_sel['id'] is not None and self.usuario_caja_sel['id'] != '-':
-                        id_usuario = int(self.usuario_caja_sel['id'])
-                except: pass
+                if es_vendedor:
+                    id_usuario = self.usuario.get('id_usuario')
+                else:
+                    try:
+                        if self.usuario_caja_sel['id'] is not None and self.usuario_caja_sel['id'] != '-':
+                            id_usuario = int(self.usuario_caja_sel['id'])
+                    except: pass
 
                 movimientos = self.backend.obtener_historial_movimientos_caja(
                     fecha_desde=d_sql,
@@ -1025,10 +1163,18 @@ class Historiales:
                 )
                 
                 def _update_ui():
+                    if not self.win.winfo_exists():
+                        return
                     def _formatear_fecha(f):
                         if not f: return ""
                         try: return f.strftime("%d/%m/%Y %H:%M")
-                        except: return str(f)
+                        except:
+                            texto = str(f)
+                            if len(texto) >= 10 and "-" in texto[:10]:
+                                partes = texto[:10].split("-")
+                                if len(partes) == 3:
+                                    return f"{partes[2]}/{partes[1]}/{partes[0]}" + texto[10:]
+                            return texto
 
                     for mov in movimientos:
                         motivo_raw = mov.get('motivo') or ''
@@ -1096,6 +1242,9 @@ class Historiales:
                                 # Se concatena el resumen del sistema con la observación del usuario
                                 descripcion = f"{descripcion} | Obs: {obs_manual}"
                         
+                        if len(descripcion) > 50:
+                            descripcion = descripcion[:47] + "..."
+                        
                         self.tree_caja.insert("", tk.END, values=(
                             _formatear_fecha(mov['fecha_hora']),
                             mov['usuario_nombre'],
@@ -1115,6 +1264,24 @@ class Historiales:
         import threading
         threading.Thread(target=_fetch_caja, daemon=True).start()
         
+    def _limpiar_filtros_caja(self):
+        hoy = date.today()
+        self.fecha_desde_cj.widget_entrada.delete(0, tk.END)
+        self.fecha_desde_cj.widget_entrada.insert(0, hoy.strftime("%d/%m/%Y"))
+        self.fecha_hasta_cj.widget_entrada.delete(0, tk.END)
+        self.fecha_hasta_cj.widget_entrada.insert(0, hoy.strftime("%d/%m/%Y"))
+        
+        self.cb_filtro_rapido_cj.set("(Todo)")
+        
+        es_vendedor = self.usuario.get('id_rol') == 2
+        if not es_vendedor:
+            self.usuario_caja_sel['id'] = None
+            self.usuario_caja_sel['nombre'] = "(Todos)"
+            if hasattr(self, 'lbl_usuario_cj'):
+                self.lbl_usuario_cj.configure(text="(Todos)")
+                
+        self.buscar_caja()
+        
     def _preguntar_tipo_exportacion(self) -> str | None:
         dialog = ctk.CTkToplevel(self.win)
         dialog.title("Exportar a Excel")
@@ -1130,15 +1297,15 @@ class Historiales:
             dialog.destroy()
         ctk.CTkLabel(dialog, text="Seleccione el tipo de reporte:", font=("Segoe UI", 14, "bold"), text_color=get_color("text_primary")).pack(pady=20)
 
-        b1 = ctk.CTkButton(dialog, text="📄 Listado General (Resumen)", command=lambda: set_sel("maestro"), height=40)
+        b1 = ctk.CTkButton(dialog, text="📄 Exportar Resumen de Ventas", command=lambda: set_sel("maestro"), height=40)
         b1.pack(fill="x", padx=30, pady=(5, 0))
         ctk.CTkLabel(dialog, text="1 renglón por operación. Ideal para ver totales.", text_color="gray", font=("Arial", 11)).pack(pady=(0, 10))
 
-        b2 = ctk.CTkButton(dialog, text="🔍 Detalle de la Selección", command=lambda: set_sel("detalle"), height=40)
+        b2 = ctk.CTkButton(dialog, text="🔍 Exportar Venta Seleccionada", command=lambda: set_sel("detalle"), height=40)
         b2.pack(fill="x", padx=30, pady=(5, 0))
         ctk.CTkLabel(dialog, text="Lista de productos de la fila seleccionada.", text_color="gray", font=("Arial", 11)).pack(pady=(0, 10))
 
-        b3 = ctk.CTkButton(dialog, text="📑 Reporte Completo (Todo)", command=lambda: set_sel("ambos"), height=40)
+        b3 = ctk.CTkButton(dialog, text="📑 Exportar Todas las Ventas con Detalles", command=lambda: set_sel("ambos"), height=40)
         b3.pack(fill="x", padx=30, pady=(10, 5))
         ctk.CTkLabel(dialog, text="Sábana de datos completa con todos los productos.", text_color="gray", font=("Arial", 11)).pack(pady=(0, 20))
 

@@ -1,7 +1,8 @@
 # app/frontend/interfaz_gestion_clientes.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
+from app.frontend import custom_dialogs as messagebox
 from app.frontend.interfaz_crear_cliente import ui_crear_cliente
 from app.frontend.autorizacion import solicitar_autorizacion_supervisor
 
@@ -82,6 +83,8 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
 
     def cargar_datos():
         nonlocal todos_clientes
+        if not win.winfo_exists():
+            return
         try:
             incluir = var_mostrar_inactivos.get()
             todos_clientes = backend.listar_clientes_con_saldos(incluir_inactivos=incluir)
@@ -98,6 +101,8 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
             messagebox.showerror("Error", f"Error cargando: {e}", parent=win)
 
     def filtrar_lista(*args):
+        if not win.winfo_exists():
+            return
         query = var_busqueda.get().lower().strip()
         for i in tree.get_children(): tree.delete(i)
         
@@ -250,6 +255,19 @@ def ui_gestion_clientes(parent: tk.Misc, backend, usuario_actual: dict = None):
         font=("Segoe UI", 11), command=toggle_mostrar_inactivos,
         fg_color=get_color("accent_primary"), hover_color=get_color("accent_hover")
     ).pack(side=tk.LEFT)
+
+    def limpiar_filtros():
+        var_busqueda.set('')
+        if var_mostrar_inactivos.get():
+            var_mostrar_inactivos.set(False)
+            btn_activar.pack_forget()
+        cargar_datos()
+
+    ctk.CTkButton(
+        frame_filtros, text="🧹 Limpiar", command=limpiar_filtros,
+        fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 11, "bold"),
+        width=100, height=35
+    ).pack(side=tk.LEFT, padx=10)
 
     ctk.CTkButton(
         frame_botones, text="Cerrar", command=win.destroy, 

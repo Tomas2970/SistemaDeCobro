@@ -2,7 +2,8 @@
 # 🎨 ACTUALIZADO: Estilo de botones unificado
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel
+from tkinter import ttk, Toplevel
+from app.frontend import custom_dialogs as messagebox
 
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
@@ -40,6 +41,12 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     
     ent_buscar = ctk.CTkEntry(frame_top, textvariable=var_buscar, font=("Segoe UI", 12), width=300, height=38, placeholder_text="Buscar producto...")
     ent_buscar.pack(side="left", padx=15)
+    
+    def limpiar_filtros_asignar():
+        var_buscar.set("")
+        ent_buscar.focus_set()
+        
+    ctk.CTkButton(frame_top, text="🧹 Limpiar", command=limpiar_filtros_asignar, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 12, "bold"), width=100, height=35).pack(side="left", padx=(0, 10))
     
     ctk.CTkLabel(frame_top, text="(Espacio p/ marcar)", font=("Segoe UI", 11), text_color="#9ca3af").pack(side="left", padx=10)
 

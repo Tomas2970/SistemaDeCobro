@@ -1,6 +1,7 @@
 # app/frontend/navegacion_teclado_comun.py
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
+from app.frontend import custom_dialogs as messagebox
 
 def configurar_navegacion_ventana(win: tk.Toplevel, confirmar_cierre: bool = False):
     """

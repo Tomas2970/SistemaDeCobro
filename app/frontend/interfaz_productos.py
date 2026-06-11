@@ -1,7 +1,7 @@
 # app/frontend/interfaz_productos.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import messagebox
+from app.frontend import custom_dialogs as messagebox
 import re
 import customtkinter as ctk
 import tkinter.ttk as ttk
@@ -16,6 +16,13 @@ try:
 except ImportError:
     def preparar_ventana(w): pass
     def centrar_y_mostrar_ventana(w): pass
+
+try:
+    from app.frontend.custom_dialogs import mostrar_toast_centrado
+except ImportError:
+    def mostrar_toast_centrado(parent, mensaje, **kwargs):
+        messagebox.showinfo("Notificación", mensaje, parent=parent)
+
 
 from app.frontend.stock_event_manager import stock_events
 
@@ -317,7 +324,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
                 messagebox.showerror("Error", "No se pudo guardar el producto.", parent=win)
                 return
 
-            messagebox.showinfo("Éxito", "Producto guardado correctamente.", parent=win)
+            mostrar_toast_centrado(win, f"✅ Producto '{nombre}' guardado correctamente.")
             stock_events.notificar_cambio_stock()
             if res_id and var_asignar_prov.get(): abrir_popup_asignacion(res_id, nombre)
             if es_creacion: limpiar()

@@ -1,7 +1,8 @@
 # app/frontend/interfaz_gestion_proveedores.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel
+from tkinter import ttk, Toplevel
+from app.frontend import custom_dialogs as messagebox
 from app.frontend.interfaz_crear_proveedor import ui_crear_proveedor
 
 try:
@@ -93,6 +94,8 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
 
     def cargar_datos():
         nonlocal todos_proveedores
+        if not win.winfo_exists():
+            return
         try:
             incluir_inactivos = var_mostrar_inactivos.get()
             todos_proveedores = backend.obtener_proveedores(incluir_inactivos=incluir_inactivos)
@@ -102,6 +105,8 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             messagebox.showerror("Error", f"Error cargando: {e}", parent=win)
             
     def filtrar_lista(*args):
+        if not win.winfo_exists():
+            return
         query = var_busqueda.get().lower().strip()
         for i in tree.get_children(): tree.delete(i)
         
@@ -245,8 +250,16 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     ctk.CTkButton(frame_botones, text="💳 PAGAR", command=abrir_pagar_deuda, fg_color="#0ea5e9", hover_color="#0284c7", font=("Segoe UI", 13, "bold"), width=120, height=45).pack(side=tk.LEFT, padx=5)
     ctk.CTkButton(frame_botones, text="📦 Productos", command=abrir_asignar_productos, fg_color="#7c3aed", hover_color="#6d28d9", font=("Segoe UI", 13), width=120, height=45).pack(side=tk.LEFT, padx=5)
     
-    # CHECKBOX Y CERRAR
+    # CHECKBOX, LIMPIAR Y CERRAR
     ctk.CTkCheckBox(frame_botones, text="Ver Inactivas", variable=var_mostrar_inactivos, font=("Segoe UI", 12), command=cargar_datos).pack(side=tk.LEFT, padx=15)
+
+    def limpiar_filtros():
+        var_busqueda.set('')
+        if var_mostrar_inactivos.get():
+            var_mostrar_inactivos.set(False)
+        cargar_datos()
+
+    ctk.CTkButton(frame_botones, text="🧹 Limpiar", command=limpiar_filtros, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 11, "bold"), width=100, height=35).pack(side=tk.LEFT, padx=10)
     
     ctk.CTkButton(frame_botones, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 13, "bold"), width=110, height=45).pack(side=tk.RIGHT, padx=10)
 
