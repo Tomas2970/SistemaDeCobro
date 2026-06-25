@@ -1,4 +1,4 @@
-# app/frontend/interfaz_reportes.py
+# app/frontend/interfaz_caja_operativa.py
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, Toplevel, Listbox, SINGLE
@@ -61,7 +61,7 @@ def _darken_color(hex_color):
     }
     return colors.get(hex_color, hex_color)
 
-def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja'):
+def ui_caja_operativa(parent: tk.Misc, backend, usuario: dict):
     win = ctk.CTkToplevel(parent)
     
     preparar_ventana(win)
@@ -82,110 +82,16 @@ def ui_reportes(parent: tk.Misc, backend, usuario: dict, modo_vista: str = 'caja
     win.col_border = "#2d3748"  # Definido para evitar crash en paneles internos
 
     win.var_vendedor_sel = {"id": None, "nombre": "(Todos)"}
-    win.vendedores_full_list = backend.obtener_vendedores() 
+    win.vendedores_full_list = backend.obtener_vendedores()
 
-    if modo_vista == 'caja':
-        if usuario.get('id_rol') == 1:
-            win.title("👑 Panel de Control - Administración")
-            win.geometry("1100x700")
-            _construir_panel_admin_caja(win, backend, usuario)
-        else:
-            win.title("📦 Control de Caja")
-            win.geometry("900x650")
-            _construir_panel_caja(win, backend, usuario)
-    else:
-        win.title("📊 Reportes de Ventas")
-        win.geometry("1150x700")
-        _construir_panel_reportes(win, backend, usuario)
+    win.title("📦 Control de Caja Operativa")
+    win.geometry("900x650")
+    _construir_panel_caja(win, backend, usuario)
 
     configurar_navegacion_ventana(win)
     centrar_y_mostrar_ventana(win)
     win.grab_set()
 
-def _crear_selector_entidad_reportes(win: tk.Toplevel, tipo: str, var_seleccion: dict, lista_datos: list):
-    popup = ctk.CTkToplevel(win)
-    preparar_ventana(popup)
-    popup.title(f"Seleccionar {tipo}")
-    popup.geometry("500x480")
-    
-    configurar_navegacion_ventana(popup)
-
-    var_pat = tk.StringVar()
-    ctk.CTkLabel(popup, text=f"Buscar {tipo} (ID/Nombre):", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(pady=(15,5), padx=15, anchor="w")
-    ent = ctk.CTkEntry(popup, textvariable=var_pat, font=("Segoe UI", 13), height=40, placeholder_text="Buscar por ID o Nombre...")
-    ent.pack(fill="x", padx=15, pady=5)
-    
-    frame_list = ctk.CTkFrame(popup, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
-    frame_list.pack(expand=True, fill="both", padx=15, pady=10)
-    
-    cols = ("ID", "Nombre")
-    tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
-    
-    sc = ctk.CTkScrollbar(frame_list, command=tree_sel.yview)
-    sc.pack(side="right", fill="y", padx=(0, 5), pady=5)
-    tree_sel.configure(yscrollcommand=sc.set)
-    tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-    
-    tree_sel.column("ID", width=60, anchor="center")
-    tree_sel.column("Nombre", width=350, anchor="w")
-    tree_sel.heading("ID", text="ID")
-    tree_sel.heading("Nombre", text="Nombre")
-    
-    tree_sel.insert("", "end", iid="opt_all", values=["-", "(Todos)"])
-
-    def render(filas):
-        for i in tree_sel.get_children(): 
-            if i != "opt_all": tree_sel.delete(i)
-        for c in filas:
-            id_val = c.get('id_usuario')
-            nombre_val = c.get('nombre')
-            tree_sel.insert("", "end", values=[id_val, nombre_val])
-
-    render(lista_datos)
-    
-    def filtrar(*_):
-        q = var_pat.get().strip().lower()
-        if not q:
-            render(lista_datos)
-            return
-        filas_filtradas = [d for d in lista_datos 
-                           if str(d.get('id_usuario', '')).startswith(q) or q in d.get('nombre', '').lower()]
-        render(filas_filtradas)
-
-    var_pat.trace_add("write", filtrar)
-
-    def tomar(event=None): 
-        sel_id = tree_sel.focus()
-        if not sel_id: return 
-        if sel_id == "opt_all":
-            var_seleccion["id"] = None
-            var_seleccion["nombre"] = "(Todos)"
-        else:
-            vals = tree_sel.item(sel_id, "values")
-            if not vals: return
-            try: id_val = int(vals[0])
-            except: id_val = None
-            var_seleccion["id"] = id_val
-            var_seleccion["nombre"] = vals[1]
-        popup.destroy()
-        if hasattr(win, 'lbl_vend_sel'):
-             win.lbl_vend_sel.configure(text=win.var_vendedor_sel['nombre'])
-
-    tree_sel.bind("<Double-1>", tomar)
-    tree_sel.bind("<Return>", tomar)
-
-    btn_frm = ctk.CTkFrame(popup, fg_color="transparent")
-    btn_frm.pack(fill="x", side="bottom", padx=15, pady=(5, 15))
-    
-    ctk.CTkButton(btn_frm, text="Cancelar", command=popup.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
-    ctk.CTkButton(btn_frm, text="✓ Seleccionar", command=tomar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), width=180, height=45).pack(side="right", padx=10)
-    popup.after(100, lambda: ent.focus_set())
-    centrar_y_mostrar_ventana(popup)
-    popup.grab_set()
-    popup.transient(win)
-    win.wait_window(popup)
-
-# --- PANEL DE CAJA ---
 def _construir_panel_caja(win, backend, usuario):
     body = ctk.CTkFrame(win, fg_color="transparent")
     body.pack(fill="both", expand=True, padx=20, pady=20)
@@ -732,235 +638,6 @@ def _construir_panel_caja(win, backend, usuario):
     verificar_estado()
 
 # --- PANEL DE REPORTES ---
-def _construir_panel_reportes(win, backend, usuario):
-    body = ctk.CTkFrame(win, fg_color="transparent")
-    body.pack(fill="both", expand=True, padx=20, pady=(10, 5))
-
-    # Configurar grid layout en body para garantizar un reparto 50/50 exacto de altura
-    body.grid_rowconfigure(0, weight=1)
-    body.grid_rowconfigure(1, weight=1)
-    body.grid_rowconfigure(2, weight=0)
-    body.grid_columnconfigure(0, weight=1)
-
-    def aplicar_filtro_rapido(nuevo_val, cb_obj, entry_desde, entry_hasta):
-        seleccion = nuevo_val
-        hoy = date.today()
-        f_ini, f_fin = None, None
-        if seleccion == "Hoy": f_ini, f_fin = hoy, hoy
-        elif seleccion == "Ayer": f_ini = f_fin = hoy - timedelta(days=1)
-        elif seleccion == "Esta Semana": f_ini = hoy - timedelta(days=hoy.weekday()); f_fin = hoy
-        elif seleccion == "Mes Pasado":
-            primero = hoy.replace(day=1); ultimo_mes = primero - timedelta(days=1)
-            f_ini = ultimo_mes.replace(day=1); f_fin = ultimo_mes
-        if f_ini:
-            entry_desde.delete(0, tk.END); entry_desde.insert(0, f_ini.strftime("%d/%m/%Y"))
-            entry_hasta.delete(0, tk.END); entry_hasta.insert(0, f_fin.strftime("%d/%m/%Y"))
-
-    # ====== VENTAS POR VENDEDOR ======
-    frm_vend = ctk.CTkFrame(body, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
-    frm_vend.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
-    
-    frm_vend_header = ctk.CTkFrame(frm_vend, fg_color="transparent")
-    frm_vend_header.pack(fill="x", padx=15, pady=(8, 2))
-    ctk.CTkLabel(frm_vend_header, text="📈 Ventas por Vendedor", font=("Segoe UI", 15, "bold"), text_color=win.col_text).pack(side="left")
-
-    frm_f1 = ctk.CTkFrame(frm_vend, fg_color="transparent")
-    frm_f1.pack(fill="x", padx=15, pady=2)
-    
-    ctk.CTkLabel(frm_f1, text="Rango:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
-    
-    cb_rango_v = ctk.CTkOptionMenu(frm_f1, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Mes Pasado"], font=("Segoe UI", 12), width=130, fg_color=win.col_input_bg, text_color=win.col_input_fg, button_color="#4b5563")
-    cb_rango_v.set("Personalizado")
-    cb_rango_v.pack(side="left", padx=(0,15))
-    
-    ctk.CTkLabel(frm_f1, text="Desde:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
-    fd_v = SelectorFecha(frm_f1)
-    fd_v.pack(side="left", padx=(0,15))
-    fd_v.widget_entrada.delete(0, tk.END)
-    fd_v.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
-    
-    ctk.CTkLabel(frm_f1, text="Hasta:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
-    fh_v = SelectorFecha(frm_f1)
-    fh_v.pack(side="left", padx=(0,15))
-    fh_v.widget_entrada.delete(0, tk.END)
-    fh_v.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
-
-    cb_rango_v.configure(command=lambda val: aplicar_filtro_rapido(val, cb_rango_v, fd_v.widget_entrada, fh_v.widget_entrada))
-    
-    ctk.CTkLabel(frm_f1, text="Vendedor:", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(side="left", padx=(10, 5))
-    
-    frm_vend_sel_cont = ctk.CTkFrame(frm_f1, fg_color="transparent")
-    frm_vend_sel_cont.pack(side="left", padx=(0, 15))
-    
-    win.lbl_vend_sel = ctk.CTkLabel(frm_vend_sel_cont, text=win.var_vendedor_sel['nombre'], font=("Segoe UI", 12), text_color="#6b7280" if ctk.get_appearance_mode()=="Light" else "#9ca3af")
-    win.lbl_vend_sel.pack(side="left", padx=(0, 5))
-    
-    btn_vend = ctk.CTkButton(frm_vend_sel_cont, text="🔍", width=30, height=28, fg_color="#3b82f6", 
-                            command=lambda: _crear_selector_entidad_reportes(win, "Vendedor", win.var_vendedor_sel, win.vendedores_full_list))
-    btn_vend.pack(side="left")
-    
-    def limpiar_filtros_vend():
-        from datetime import date
-        cb_rango_v.set("Personalizado")
-        fd_v.widget_entrada.delete(0, tk.END)
-        fd_v.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
-        fh_v.widget_entrada.delete(0, tk.END)
-        fh_v.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
-        win.var_vendedor_sel.update({"id": None, "nombre": "(Todos)"})
-        if hasattr(win, 'lbl_vend_sel'):
-            win.lbl_vend_sel.configure(text="(Todos)")
-        for i in tree_v.get_children(): tree_v.delete(i)
-
-    ctk.CTkButton(frm_f1, text="Generar Reporte", command=lambda: buscar_vend(), fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 12, "bold"), width=120, height=35).pack(side="right")
-    ctk.CTkButton(frm_f1, text="🧹 Limpiar", command=limpiar_filtros_vend, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 12, "bold"), width=100, height=35).pack(side="right", padx=(0, 5))
-    
-    frm_tree_1 = ctk.CTkFrame(frm_vend, fg_color="transparent")
-    frm_tree_1.pack(fill="both", expand=True, padx=15, pady=(2, 8))
-
-    tree_v = ttk.Treeview(frm_tree_1, columns=("Vend", "Ventas", "Monto"), show="headings", height=6, style="Modern.Treeview")
-    
-    sc_v = ctk.CTkScrollbar(frm_tree_1, command=tree_v.yview)
-    sc_v.pack(side="right", fill="y", padx=(0, 5), pady=5)
-    tree_v.configure(yscrollcommand=sc_v.set)
-    tree_v.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-    
-    tree_v.column("Vend", width=400)
-    tree_v.column("Ventas", width=150, anchor="center")
-    tree_v.column("Monto", width=250, anchor="e")
-    tree_v.heading("Vend", text="Vendedor"); tree_v.heading("Ventas", text="Cant."); tree_v.heading("Monto", text="Total Facturado")
-    
-    def buscar_vend():
-        for i in tree_v.get_children(): tree_v.delete(i)
-        try:
-            d_sql = datetime.strptime(fd_v.get_date_str() or fd_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fd_v.get_date_str() else datetime.strptime(fd_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
-            h_sql = datetime.strptime(fh_v.get_date_str() or fh_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fh_v.get_date_str() else datetime.strptime(fh_v.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
-        except:
-            d_sql = fd_v.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
-            h_sql = fh_v.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
-            
-        try:
-            data = backend.reporte_ventas_por_vendedor(d_sql, h_sql, win.var_vendedor_sel['id'])
-            for r in data: tree_v.insert("", "end", values=(r['vendedor'], r['total_ventas'], _fmt(r['monto_total'])))
-        except Exception as e:
-            pass
-
-    def on_doble_click_vend(event):
-        sel = tree_v.selection()
-        if not sel: return
-        vals = tree_v.item(sel[0], "values")
-        if not vals: return
-        vendedor_nombre = vals[0]
-        id_vend = None
-        for v in win.vendedores_full_list:
-            if v.get('nombre') == vendedor_nombre:
-                id_vend = v.get('id_usuario')
-                break
-        desde_ui = fd_v.widget_entrada.get()
-        hasta_ui = fh_v.widget_entrada.get()
-        if Historiales:
-            Historiales(
-                win, backend, usuario,
-                tab_inicial=0,
-                filtro_fecha_desde_default=desde_ui,
-                filtro_fecha_hasta_default=hasta_ui,
-                filtro_vendedor_id=id_vend
-            )
-    tree_v.bind("<Double-1>", on_doble_click_vend)
-
-
-    # ====== VENTAS DIARIAS ======
-    frm_dia = ctk.CTkFrame(body, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
-    frm_dia.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
-    
-    frm_dia_header = ctk.CTkFrame(frm_dia, fg_color="transparent")
-    frm_dia_header.pack(fill="x", padx=15, pady=(8, 2))
-    ctk.CTkLabel(frm_dia_header, text="📅 Ventas Diarias", font=("Segoe UI", 15, "bold"), text_color=win.col_text).pack(side="left")
-
-    frm_f2 = ctk.CTkFrame(frm_dia, fg_color="transparent")
-    frm_f2.pack(fill="x", padx=15, pady=2)
-    
-    ctk.CTkLabel(frm_f2, text="Rango:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
-    
-    cb_rango_d = ctk.CTkOptionMenu(frm_f2, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Mes Pasado"], font=("Segoe UI", 12), width=130, fg_color=win.col_input_bg, text_color=win.col_input_fg, button_color="#4b5563")
-    cb_rango_d.set("Mes Pasado")
-    cb_rango_d.pack(side="left", padx=(0,15))
-
-    ctk.CTkLabel(frm_f2, text="Desde:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
-    fd_d = SelectorFecha(frm_f2)
-    fd_d.pack(side="left", padx=(0,15))
-    fd_d.widget_entrada.delete(0, tk.END)
-    fd_d.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
-    
-    ctk.CTkLabel(frm_f2, text="Hasta:", font=("Segoe UI", 12), text_color=win.col_text).pack(side="left", padx=(0,5))
-    fh_d = SelectorFecha(frm_f2)
-    fh_d.pack(side="left", padx=(0,15))
-    fh_d.widget_entrada.delete(0, tk.END)
-    fh_d.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
-
-    cb_rango_d.configure(command=lambda val: aplicar_filtro_rapido(val, cb_rango_d, fd_d.widget_entrada, fh_d.widget_entrada))
-    
-    def limpiar_filtros_dia():
-        from datetime import date
-        cb_rango_d.set("Mes Pasado")
-        fd_d.widget_entrada.delete(0, tk.END)
-        fd_d.widget_entrada.insert(0, date.today().replace(day=1).strftime("%d/%m/%Y"))
-        fh_d.widget_entrada.delete(0, tk.END)
-        fh_d.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
-        for i in tree_d.get_children(): tree_d.delete(i)
-
-    ctk.CTkButton(frm_f2, text="Generar Reporte", command=lambda: buscar_dia(), fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 12, "bold"), width=120, height=35).pack(side="right")
-    ctk.CTkButton(frm_f2, text="🧹 Limpiar", command=limpiar_filtros_dia, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 12, "bold"), width=100, height=35).pack(side="right", padx=(0, 5))
-    
-    frm_tree_2 = ctk.CTkFrame(frm_dia, fg_color="transparent")
-    frm_tree_2.pack(fill="both", expand=True, padx=15, pady=(2, 8))
-
-    tree_d = ttk.Treeview(frm_tree_2, columns=("Fecha", "Ventas", "Monto"), show="headings", height=6, style="Modern.Treeview")
-    
-    sc_d = ctk.CTkScrollbar(frm_tree_2, command=tree_d.yview)
-    sc_d.pack(side="right", fill="y", padx=(0, 5), pady=5)
-    tree_d.configure(yscrollcommand=sc_d.set)
-    tree_d.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-    tree_d.heading("Fecha", text="Fecha"); tree_d.heading("Ventas", text="Cant."); tree_d.heading("Monto", text="Total Diario")
-    tree_d.column("Fecha", width=150, anchor="center")
-    tree_d.column("Ventas", width=150, anchor="center")
-    tree_d.column("Monto", width=250, anchor="e")
-    
-    def buscar_dia():
-        for i in tree_d.get_children(): tree_d.delete(i)
-        try:
-            d_sql = datetime.strptime(fd_d.get_date_str() or fd_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fd_d.get_date_str() else datetime.strptime(fd_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
-            h_sql = datetime.strptime(fh_d.get_date_str() or fh_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d") if fh_d.get_date_str() else datetime.strptime(fh_d.widget_entrada.get(), "%d/%m/%Y").strftime("%Y-%m-%d")
-        except:
-            d_sql = fd_d.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
-            h_sql = fh_d.get_date_sql() or datetime.today().strftime("%Y-%m-%d")
-            
-        try:
-            data = backend.obtener_ventas_diarias(d_sql, h_sql)
-            for r in data: 
-                f_str = datetime.strptime(str(r['fecha']), "%Y-%m-%d").strftime("%d/%m/%Y")
-                tree_d.insert("", "end", values=(f_str, r['total_ventas'], _fmt(r['monto_total'])))
-        except Exception as e: pass
-    
-    def on_doble_click_dia(event):
-        sel = tree_d.selection()
-        if not sel: return
-        vals = tree_d.item(sel[0], "values")
-        if not vals: return
-        fecha_ui = vals[0]
-        if Historiales:
-            Historiales(
-                win, backend, usuario,
-                tab_inicial=0,
-                filtro_fecha=fecha_ui,
-                filtro_fecha_desde_default=fecha_ui,
-                filtro_fecha_hasta_default=fecha_ui
-            )
-    tree_d.bind("<Double-1>", on_doble_click_dia)
-
-    frm_footer = ctk.CTkFrame(body, fg_color="transparent")
-    frm_footer.grid(row=2, column=0, sticky="ew", pady=(5, 0))
-    ctk.CTkButton(frm_footer, text="Cerrar", command=win.destroy, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 14, "bold"), width=150, height=45).pack(side="right")
-
 def _construir_panel_admin_caja(win, backend, usuario):
     body = ctk.CTkFrame(win, fg_color="transparent")
     body.pack(fill="both", expand=True, padx=20, pady=20)

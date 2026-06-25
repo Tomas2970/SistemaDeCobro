@@ -61,8 +61,10 @@ class CrearEditarUsuario:
         self.main_frame.pack(padx=30, pady=10, fill="both", expand=True)
         self.main_frame.columnconfigure(1, weight=1)
 
-        # Validación: Límite 20 chars
-        def check_user(t): return len(t) <= 20
+        # Validación: Límite 20 chars y alfanumérico
+        def check_user(t): 
+            from app.frontend.validaciones_ui import ValidadoresTeclado
+            return len(t) <= 20 and ValidadoresTeclado.letras_y_numeros(t)
         vc_user = (self.win.register(check_user), '%P')
 
         row = 0
@@ -164,8 +166,14 @@ class CrearEditarUsuario:
         rol_nombre = self.combo_rol.get()
         codigo_barras = self.var_codigo_barras.get().strip() or None
         
-        if not nombre or not rol_nombre:
-            messagebox.showwarning("Campos Obligatorios", "Por favor, completa los campos de Nombre del Usuario y Rol del Sistema.", parent=self.win)
+        from app.frontend.validaciones_ui import ValidadorFormulario
+        ok, msg = ValidadorFormulario.validar_campos({'Nombre del Usuario': (nombre, 'nombre', True)})
+        if not ok:
+            messagebox.showwarning("Campo Inválido", msg, parent=self.win)
+            return
+            
+        if not rol_nombre:
+            messagebox.showwarning("Campos Obligatorios", "Por favor, selecciona el Rol del Sistema.", parent=self.win)
             return
             
         id_rol = self.roles_map.get(rol_nombre)
@@ -198,6 +206,9 @@ class CrearEditarUsuario:
                     return
                 if pass1 != pass2:
                     messagebox.showwarning("Contraseñas no Coincidentes", "Las contraseñas ingresadas no coinciden. Por favor, verifícalas.", parent=self.win)
+                    return
+                if len(pass1) < 6:
+                    messagebox.showwarning("Contraseña Débil", "La contraseña debe tener al menos 6 caracteres.", parent=self.win)
                     return
                 
                 id_admin = self.usuario_actual.get('id_usuario') if self.usuario_actual else None
@@ -242,6 +253,9 @@ class CrearEditarUsuario:
             p = var_new_pass.get().strip()
             if not p:
                 messagebox.showwarning("Contraseña Requerida", "Por favor, ingresa una nueva contraseña para continuar.", parent=popup)
+                return
+            if len(p) < 6:
+                messagebox.showwarning("Contraseña Débil", "La nueva contraseña debe tener al menos 6 caracteres.", parent=popup)
                 return
             try:
                 id_admin = self.usuario_actual.get('id_usuario') if self.usuario_actual else None

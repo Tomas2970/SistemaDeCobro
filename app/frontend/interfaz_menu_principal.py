@@ -5,7 +5,7 @@ from app.frontend.custom_dialogs import mostrar_confirmacion, mostrar_advertenci
 import logging
 from app.database.permisos import tiene_permiso
 from app.frontend.stock_event_manager import stock_events
-from app.frontend.broadcast_manager import iniciar_polling_broadcast
+from app.frontend.broadcast_manager import iniciar_polling_broadcast, detener_polling_broadcast
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ ui_gestion_usuarios  = _safe_import("app.frontend.interfaz_gestion_usuarios", "u
 ui_categorias        = _safe_import("app.frontend.interfaz_categorias", "ui_categorias")
 ui_gestion_proveedores = _safe_import("app.frontend.interfaz_gestion_proveedores", "ui_gestion_proveedores")
 ui_dashboard_admin   = _safe_import("app.frontend.interfaz_dashboard_admin", "ui_dashboard_admin")
-
+ui_caja_router       = _safe_import("app.frontend.interfaz_caja", "ui_caja_router")
 def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     if not callable(fn):
         mostrar_info("No disponible", f"La pantalla '{nombre}' no está integrada.", parent=root)
@@ -65,7 +65,7 @@ def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
 
 def ui_menu_principal(parent, backend, usuario):
     # Iniciar polling global de broadcasts (corre independientemente del módulo abierto)
-    iniciar_polling_broadcast(parent, usuario)
+    iniciar_polling_broadcast(parent, usuario, backend)
 
     id_rol = usuario.get('id_rol')
     
@@ -93,6 +93,15 @@ def ui_menu_principal(parent, backend, usuario):
         win.geometry(f"{ancho}x{alto}+{x}+{y}")
         
     win.resizable(True, True)
+
+    def on_main_focus(event):
+        if event.widget == win:
+            if hasattr(win, '_ventanas_modulos'):
+                for ventana in win._ventanas_modulos.values():
+                    if ventana and ventana.winfo_exists():
+                        ventana.lift()
+    win.bind("<FocusIn>", on_main_focus)
+
 
     # Colores Opción A (Clásico corporativo)
     color_bg = "#f3f4f6" if ctk.get_appearance_mode() == "Light" else "#111827"
@@ -163,6 +172,7 @@ def ui_menu_principal(parent, backend, usuario):
             return
         if mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
             stock_events.desuscribir(check_stock)
+            detener_polling_broadcast(win)
             win.quit()
 
     ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
@@ -178,7 +188,7 @@ def ui_menu_principal(parent, backend, usuario):
     # Venta > Caja > Compras > Cta Cte > Inventario > Proveedores > Clientes > Categorías > Reportes > Historiales > Usuarios
     todos_botones = [
         ("💵 POS Venta", "realizar_ventas", ui_venta, {}, True),
-        ("📦 Control de Caja", 'abrir_caja', ui_reportes, {'modo_vista':'caja'}, False),
+        ("📦 Control de Caja", 'abrir_caja', ui_caja_router, {}, False),
         ("🛒 Registrar Compra", "registrar_compras", ui_compra, {}, False),
         
         ("📚 Cuenta Corriente", 'gestionar_cuenta_corriente', ui_cuenta_corriente, {}, False),

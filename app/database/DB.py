@@ -61,6 +61,99 @@ def conectar() -> MySQLConnection:
     return db_pool.get_connection()
 
 # ======================================================
+# HELPERS INTERNOS (DRY)
+# ======================================================
+def _obtener_id_sesion_ventas(cur, id_usuario_apertura: int) -> Optional[int]:
+    """Retorna el ID de la caja de ventas abierta para el usuario especificado, o None."""
+    cur.execute(
+        "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'turno' AND id_usuario_apertura = %s LIMIT 1",
+        (id_usuario_apertura,)
+    )
+    row = cur.fetchone()
+    if isinstance(row, dict):
+        return row.get('id_session')
+    return row[0] if row else None
+
+def _obtener_id_tesoreria(cur) -> Optional[int]:
+    cur.execute("SELECT id_session FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'administrativa' LIMIT 1")
+    row = cur.fetchone()
+    if isinstance(row, dict):
+        return row.get('id_session')
+    return row[0] if row else None
+
+def _cerrar_tesoreria_anterior(cur, id_session: int) -> None:
+    cur.execute(
+        "UPDATE caja_session SET estado='cerrada', fecha_cierre=NOW(), observaciones_cierre='Cierre automático por cambio de día' WHERE id_session=%s",
+        (id_session,)
+    )
+
+def obtener_tesoreria_hoy(cur) -> Optional[dict]:
+    cur.execute("SELECT * FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'administrativa' LIMIT 1")
+    row = cur.fetchone()
+    if not row:
+        return None
+    if isinstance(row, tuple):
+        columns = [desc[0] for desc in cur.description]
+        row = dict(zip(columns, row))
+    fecha_apertura = row['fecha_apertura']
+    if isinstance(fecha_apertura, datetime):
+        fecha_apertura = fecha_apertura.date()
+    if fecha_apertura < date.today():
+        _cerrar_tesoreria_anterior(cur, row['id_session'])
+        return None
+    return row
+
+def crear_tesoreria_hoy(cur, id_usuario: int) -> dict:
+    if not id_usuario:
+        cur.execute("SELECT id_usuario FROM Usuario WHERE id_rol=1 LIMIT 1")
+        row = cur.fetchone()
+        id_usuario = row[0] if isinstance(row, tuple) else row['id_usuario']
+    cur.execute(
+        "INSERT INTO caja_session (id_usuario_apertura, fecha_apertura, monto_apertura, estado, tipo_caja) VALUES (%s, NOW(), 0.00, 'abierta', 'administrativa')",
+        (id_usuario,)
+    )
+    id_session = cur.lastrowid
+    cur.execute(
+        "INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, id_registro, datos_nuevos) VALUES (%s, %s, %s, %s, %s)",
+        (id_usuario, "CREAR_TESORERIA_AUTOMATICA", "caja_session", id_session, json.dumps({"monto_apertura": 0.00}))
+    )
+    cur.execute("SELECT * FROM caja_session WHERE id_session=%s", (id_session,))
+    row = cur.fetchone()
+    if isinstance(row, tuple):
+        columns = [desc[0] for desc in cur.description]
+        row = dict(zip(columns, row))
+    return row
+
+def obtener_o_crear_tesoreria_hoy(cur, id_usuario: int) -> dict:
+    tesoreria = obtener_tesoreria_hoy(cur)
+    if not tesoreria:
+        tesoreria = crear_tesoreria_hoy(cur, id_usuario)
+    return tesoreria
+
+def _asegurar_registro_inventario(cur, id_producto: int, stock_minimo_defecto: int = 5) -> None:
+    """Asegura que el producto exista en la tabla Inventario."""
+    cur.execute("SELECT 1 FROM Inventario WHERE id_producto=%s", (id_producto,))
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s, %s, %s)",
+            (id_producto, 0.000, stock_minimo_defecto)
+        )
+
+def _obtener_totales_movimientos(cur, id_session: int) -> list:
+    """Obtiene el resumen agrupado de movimientos de una caja por motivo, tipo y medio."""
+    cur.execute("""
+        SELECT 
+            motivo,
+            tipo,
+            medio,
+            SUM(monto) as total
+        FROM caja_movimiento
+        WHERE id_session = %s
+        GROUP BY motivo, tipo, medio
+    """, (id_session,))
+    return cur.fetchall()
+
+# ======================================================
 # AUTENTICACIÓN
 # ======================================================
 def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
@@ -107,7 +200,7 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
 # ======================================================
 # CLIENTES
 # ======================================================
-def insertar_cliente(nombre: str, dni: str = "", cuit: str = "", direccion: str = "", telefono: str = "", email: str = "", limite_credito: float = 50000.00) -> Optional[int]:
+def crear_cliente(nombre: str, dni: str = "", cuit: str = "", direccion: str = "", telefono: str = "", email: str = "", limite_credito: float = 50000.00) -> Optional[int]:
     if not nombre.strip(): raise ValueError("El nombre es obligatorio.")
     conn = cur = None
     try:
@@ -131,7 +224,7 @@ def insertar_cliente(nombre: str, dni: str = "", cuit: str = "", direccion: str 
         return None
     except Exception as e:
         if conn: conn.rollback()
-        logger.error(f"insertar_cliente: {e}")
+        logger.error(f"crear_cliente: {e}")
         return None
     finally:
         if cur: cur.close()
@@ -475,7 +568,7 @@ def reactivar_categoria(id_categoria: int) -> bool:
 # ======================================================
 # PRODUCTOS / INVENTARIO
 # ======================================================
-def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int], es_pesable: bool = False) -> Optional[int]:
+def crear_producto(nombre: str, precio: float, id_categoria: Optional[int], es_pesable: bool = False) -> Optional[int]:
     if not nombre.strip():
         raise ValueError("El nombre del producto es obligatorio.")
     conn = cur = None
@@ -494,7 +587,7 @@ def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int], e
         if conn:
             try: conn.rollback()
             except Exception: pass
-        logger.error(f"insertar_producto: {e}")
+        logger.error(f"crear_producto: {e}")
         return None
     finally:
         try:
@@ -507,7 +600,7 @@ def insertar_producto(nombre: str, precio: float, id_categoria: Optional[int], e
 def crear_producto_completo(
     nombre: str, precio: float, id_categoria: Optional[int], stock_inicial: float, stock_minimo: int, es_pesable: bool = False
 ) -> Optional[int]:
-    pid = insertar_producto(nombre, precio, id_categoria, es_pesable)
+    pid = crear_producto(nombre, precio, id_categoria, es_pesable)
     if not pid:
         return None
     conn = cur = None
@@ -688,10 +781,7 @@ def actualizar_inventario_absoluto(id_producto: int, cantidad_abs: float, stock_
     try:
         conn = conectar()
         cur = conn.cursor()
-        cur.execute("SELECT 1 FROM Inventario WHERE id_producto=%s", (id_producto,))
-        if not cur.fetchone():
-            cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s,%s,%s)",
-                        (id_producto, 0.000, int(stock_minimo) if stock_minimo is not None else 5))
+        _asegurar_registro_inventario(cur, id_producto, stock_minimo_defecto=int(stock_minimo) if stock_minimo is not None else 5)
         if stock_minimo is not None:
             cur.execute(
                 "UPDATE Inventario SET cantidad=%s, stock_minimo=%s WHERE id_producto=%s",
@@ -777,9 +867,7 @@ def actualizar_stock(id_producto: int, delta: float, *_compat) -> bool:
     try:
         conn = conectar()
         cur = conn.cursor()
-        cur.execute("SELECT 1 FROM Inventario WHERE id_producto=%s", (id_producto,))
-        if not cur.fetchone():
-            cur.execute("INSERT INTO Inventario (id_producto, cantidad, stock_minimo) VALUES (%s,%s,%s)", (id_producto, 0.000, 5))
+        _asegurar_registro_inventario(cur, id_producto)
         cur.execute("UPDATE Inventario SET cantidad = GREATEST(cantidad + %s, 0) WHERE id_producto=%s", (delta, id_producto))
         conn.commit()
         return cur.rowcount > 0
@@ -889,22 +977,13 @@ def registrar_venta_completa(
         id_rol = usuario_row['id_rol']
         
         if id_rol == 2:  # Vendedor
-            cur.execute(
-                "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'ventas' AND id_usuario_apertura = %s LIMIT 1",
-                (id_usuario,)
-            )
-            session_row = cur.fetchone()
-            if not session_row:
+            id_session_activa = _obtener_id_sesion_ventas(cur, id_usuario)
+            if not id_session_activa:
                 raise ValueError("CAJA_CERRADA")
         else: # Admin (1) o Supervisor (3)
-            cur.execute(
-                "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'tesoreria' LIMIT 1"
-            )
-            session_row = cur.fetchone()
-            if not session_row:
+            id_session_activa = _obtener_id_tesoreria(cur)
+            if not id_session_activa:
                 raise ValueError("TESORERIA_CERRADA")
-                
-        id_session_activa = session_row['id_session']
         
         if id_session is not None:
             id_session_activa = id_session
@@ -978,16 +1057,37 @@ def registrar_venta_completa(
             
             total_venta += cantidad * precio_unitario
         
-        # 5. Actualizar total de venta
-        cur.execute("UPDATE Venta SET total = %s WHERE id_venta = %s", (total_venta, id_venta))
-        
-        # 6. Si es cuenta corriente, solo verificar que el cliente tiene cuenta
-        # El trigger trg_venta_au_cuentacorriente actualiza el saldo automáticamente
-        # al hacer UPDATE Venta SET total=X en paso 5. No hacer UPDATE manual aquí.
+        # 5. Validar límite de crédito (con bloqueo) y actualizar total de venta
+        # El SELECT ... FOR UPDATE debe ejecutarse ANTES del UPDATE Venta SET total,
+        # ya que ese UPDATE dispara el trigger que descuenta el saldo en CuentaCorriente.
+        # El lock garantiza que ninguna otra transacción paralela pueda leer/modificar
+        # el saldo del mismo cliente hasta que esta transacción haga COMMIT.
         if tipo_pago == 'cuenta_corriente' and id_cliente:
-            cur.execute("SELECT id_cuenta FROM CuentaCorriente WHERE id_cliente = %s", (id_cliente,))
-            if not cur.fetchone():
+            cur.execute(
+                "SELECT id_cuenta, saldo, limite_credito FROM CuentaCorriente WHERE id_cliente = %s FOR UPDATE",
+                (id_cliente,)
+            )
+            cc_row = cur.fetchone()
+            if not cc_row:
                 raise ValueError(f"Cliente {id_cliente} no tiene cuenta corriente")
+
+            saldo_actual = float(cc_row['saldo'])
+            limite_credito = float(cc_row['limite_credito'])
+            saldo_proyectado = saldo_actual - total_venta
+
+            if saldo_proyectado < -limite_credito:
+                credito_disponible = limite_credito + saldo_actual
+                raise ValueError(
+                    f"LIMITE_CREDITO_EXCEDIDO|"
+                    f"Límite: {limite_credito:.2f}|"
+                    f"Saldo actual: {saldo_actual:.2f}|"
+                    f"Disponible: {max(0.0, credito_disponible):.2f}|"
+                    f"Monto venta: {total_venta:.2f}"
+                )
+
+        # 6. Actualizar total de venta (dispara trigger trg_venta_au_cuentacorriente
+        # que descuenta el saldo en CuentaCorriente de forma atómica bajo el lock anterior)
+        cur.execute("UPDATE Venta SET total = %s WHERE id_venta = %s", (total_venta, id_venta))
         
         # 7. REGISTRAR MOVIMIENTO DE CAJA SEGÚN EL TIPO DE PAGO
         # -------------------------------------------------------
@@ -1170,13 +1270,10 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
         cur = conn.cursor(dictionary=True)
         conn.start_transaction()
 
-        # 🔥 VALIDAR QUE LA TESORERÍA ESTÉ ABIERTA (OBLIGATORIO PARA PAGOS A PROVEEDORES)
-        cur.execute("SELECT id_session, monto_apertura FROM caja_session WHERE tipo_caja = 'tesoreria' AND estado = 'abierta' LIMIT 1")
-        session_row = cur.fetchone()
-        if not session_row:
-            raise ValueError("TESORERIA_CERRADA")
-        
+        # 🔥 OBTENER O CREAR TESORERÍA (PAGOS A PROVEEDORES)
+        session_row = obtener_o_crear_tesoreria_hoy(cur, id_usuario)
         id_session = session_row['id_session']
+        tipo_caja = session_row['tipo_caja']
         monto_apertura = float(session_row['monto_apertura'] or 0.0)
         saldo_caja_actual = 0.0
         
@@ -1184,18 +1281,7 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
         if medio_pago == 'efectivo':
             # 🔥 CALCULAR SALDO ACTUAL DE EFECTIVO EN CAJA
             # Solo contamos movimientos QUE NO SEAN la apertura
-            cur.execute("""
-                SELECT 
-                    motivo,
-                    tipo,
-                    medio,
-                    SUM(monto) as total
-                FROM caja_movimiento
-                WHERE id_session = %s
-                GROUP BY motivo, tipo, medio
-            """, (id_session,))
-            
-            movimientos = cur.fetchall()
+            movimientos = _obtener_totales_movimientos(cur, id_session)
             
             ingresos = 0.0
             egresos = 0.0
@@ -1226,15 +1312,24 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
             
             # 🔥 VALIDAR SALDO SUFICIENTE
             if saldo_caja_actual < monto:
-                raise ValueError(
-                    f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
-                    f"Disponible: ${saldo_caja_actual:,.2f}\n"
-                    f"Intentas pagar: ${monto:,.2f}\n"
-                    f"Faltante: ${(monto - saldo_caja_actual):,.2f}\n\n"
-                    f"💡 Opciones:\n"
-                    f"• Paga con Transferencia o Cheque\n"
-                    f"• Realiza pagos parciales"
-                )
+                if tipo_caja == 'administrativa':
+                    logger.warning(f"Tesoreria queda en saldo negativo: {saldo_caja_actual - monto}")
+                    cur.execute(
+                        "INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, datos_anteriores, datos_nuevos) VALUES (%s, %s, %s, %s, %s)",
+                        (id_usuario, "TESORERIA_SALDO_NEGATIVO", "caja_session", 
+                         json.dumps({"saldo_anterior": saldo_caja_actual, "monto_movimiento": monto}),
+                         json.dumps({"saldo_resultante": saldo_caja_actual - monto}))
+                    )
+                else:
+                    raise ValueError(
+                        f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
+                        f"Disponible: ${saldo_caja_actual:,.2f}\n"
+                        f"Intentas pagar: ${monto:,.2f}\n"
+                        f"Faltante: ${(monto - saldo_caja_actual):,.2f}\n\n"
+                        f"💡 Opciones:\n"
+                        f"• Paga con Transferencia o Cheque\n"
+                        f"• Realiza pagos parciales"
+                    )
 
         # 2. Guardar el Registro del Pago (Historial)
         cur.execute(
@@ -1293,7 +1388,64 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
             if conn: conn.close()
         except: pass
         
-def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor="", telefono="", email="", direccion=""):
+def registrar_ingreso_capital(monto: float, observacion: str, id_usuario: int) -> bool:
+    """
+    Registra un ingreso de capital a la tesorería (solo para id_rol = 1).
+    """
+    if monto <= 0:
+        raise ValueError("El monto debe ser mayor a cero.")
+    if not observacion or not observacion.strip():
+        raise ValueError("La observación es obligatoria.")
+        
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        conn.start_transaction()
+
+        cur.execute("SELECT id_rol FROM Usuario WHERE id_usuario = %s", (id_usuario,))
+        usuario = cur.fetchone()
+        if not usuario or usuario['id_rol'] != 1:
+            raise ValueError("Solo el Administrador puede registrar ingreso de capital.")
+
+        session_row = obtener_o_crear_tesoreria_hoy(cur, id_usuario)
+        id_session = session_row['id_session']
+        
+        cur.execute(
+            """
+            INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, descripcion)
+            VALUES (%s, 'ingreso', %s, 'efectivo', 'ingreso_capital', %s, %s)
+            """,
+            (id_session, monto, id_usuario, f"Ingreso Capital: {observacion.strip()}")
+        )
+        id_mov = cur.lastrowid
+        
+        datos = json.dumps({"monto": monto, "observacion": observacion.strip()})
+        cur.execute(
+            """
+            INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, id_registro, datos_nuevos)
+            VALUES (%s, 'INGRESO_CAPITAL', 'caja_movimiento', %s, %s)
+            """,
+            (id_usuario, id_mov, datos)
+        )
+        
+        conn.commit()
+        logger.info(f"✅ Ingreso de capital registrado: ${monto:.2f} por usuario {id_usuario}")
+        return True
+
+    except Exception as e:
+        if conn:
+            try: conn.rollback()
+            except: pass
+        logger.error(f"registrar_ingreso_capital: {e}")
+        raise
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except: pass
+
+def crear_proveedor(nombre, empresa, cuit_empresa, dni_vendedor="", telefono="", email="", direccion=""):
     if not nombre.strip(): raise ValueError("Nombre proveedor obligatorio.")
     if not empresa.strip(): raise ValueError("Nombre empresa obligatorio.")
     if not cuit_empresa.strip(): raise ValueError("CUIT de la empresa obligatorio.")
@@ -1317,7 +1469,7 @@ def insertar_proveedor(nombre, empresa, cuit_empresa, dni_vendedor="", telefono=
         return None
     except Exception as e:
         if conn: conn.rollback()
-        logger.error(f"insertar_proveedor: {e}")
+        logger.error(f"crear_proveedor: {e}")
         raise e
     finally:
         try:
@@ -1528,24 +1680,22 @@ def quitar_producto_a_proveedor(id_proveedor: int, id_producto: int) -> bool:
         except Exception: pass
 
 
-def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio_pago: str = 'efectivo') -> int | None:
+def registrar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio_pago: str = 'efectivo') -> int | None:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         conn.start_transaction()
 
-        # 🔥 VALIDAR QUE LA TESORERÍA ESTÉ ABIERTA (OBLIGATORIO PARA COMPRAS EXCEPTO CUENTA CORRIENTE)
+        # 🔥 OBTENER O CREAR TESORERÍA (COMPRAS EXCEPTO CUENTA CORRIENTE)
         if medio_pago != 'cuenta_corriente':
-            cur.execute("SELECT id_session, monto_apertura FROM caja_session WHERE tipo_caja = 'tesoreria' AND estado = 'abierta' LIMIT 1")
-            session_row = cur.fetchone()
-            if not session_row: 
-                raise ValueError("TESORERIA_CERRADA")
-            
+            session_row = obtener_o_crear_tesoreria_hoy(cur, id_usuario)
             id_session = session_row['id_session']
+            tipo_caja = session_row['tipo_caja']
             monto_apertura = float(session_row['monto_apertura'] or 0.0)
         else:
             id_session = None
+            tipo_caja = 'administrativa'
             monto_apertura = 0.0
         
         # 🔥 VALIDACIÓN DE SALDO SOLO PARA EFECTIVO
@@ -1554,18 +1704,7 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
             total_compra_estimado = sum(float(item['cant']) * float(item['costo']) for item in items)
             
             # 🔥 CALCULAR SALDO ACTUAL DE EFECTIVO EN CAJA
-            cur.execute("""
-                SELECT 
-                    motivo,
-                    tipo,
-                    medio,
-                    SUM(monto) as total
-                FROM caja_movimiento
-                WHERE id_session = %s
-                GROUP BY motivo, tipo, medio
-            """, (id_session,))
-            
-            movimientos = cur.fetchall()
+            movimientos = _obtener_totales_movimientos(cur, id_session)
             
             ingresos = 0.0
             egresos = 0.0
@@ -1596,16 +1735,25 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
             
             # 🔥 VALIDAR SALDO SUFICIENTE
             if saldo_caja_actual < total_compra_estimado:
-                raise ValueError(
-                    f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
-                    f"Disponible: ${saldo_caja_actual:,.2f}\n"
-                    f"Total compra: ${total_compra_estimado:,.2f}\n"
-                    f"Faltante: ${(total_compra_estimado - saldo_caja_actual):,.2f}\n\n"
-                    f"💡 Opciones:\n"
-                    f"• Paga con Transferencia o Tarjeta\n"
-                    f"• Usa Cuenta Corriente\n"
-                    f"• Realiza un depósito en caja"
-                )
+                if tipo_caja == 'administrativa':
+                    logger.warning(f"Tesoreria queda en saldo negativo: {saldo_caja_actual - total_compra_estimado}")
+                    cur.execute(
+                        "INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, datos_anteriores, datos_nuevos) VALUES (%s, %s, %s, %s, %s)",
+                        (id_usuario, "TESORERIA_SALDO_NEGATIVO", "caja_session", 
+                         json.dumps({"saldo_anterior": saldo_caja_actual, "monto_movimiento": total_compra_estimado}),
+                         json.dumps({"saldo_resultante": saldo_caja_actual - total_compra_estimado}))
+                    )
+                else:
+                    raise ValueError(
+                        f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
+                        f"Disponible: ${saldo_caja_actual:,.2f}\n"
+                        f"Total compra: ${total_compra_estimado:,.2f}\n"
+                        f"Faltante: ${(total_compra_estimado - saldo_caja_actual):,.2f}\n\n"
+                        f"💡 Opciones:\n"
+                        f"• Paga con Transferencia o Tarjeta\n"
+                        f"• Usa Cuenta Corriente\n"
+                        f"• Realiza un depósito en caja"
+                    )
 
         # Insertar la compra
         cur.execute("INSERT INTO Compra (id_usuario, id_proveedor, estado, medio_pago) VALUES (%s, %s, 'recibida', %s)", (id_usuario, id_proveedor, medio_pago))
@@ -1668,19 +1816,210 @@ def insertar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medio
         if conn: 
             try: conn.rollback()
             except: pass
-        logger.error(f"insertar_compra: {e}")
+        logger.error(f"registrar_compra: {e}")
         raise
     finally:
         if cur: cur.close()
         if conn: conn.close()
+
+# ======================================================
+# ANULACIÓN DE COMPRA
+# ======================================================
+def anular_compra(id_compra: int, id_usuario: int, motivo=None) -> bool:
+    """
+    Anula una compra de forma atómica:
+      - Cambia Compra.estado a 'cancelada'
+      - Resta stock en Inventario por cada DetalleCompra (revirtiendo el ingreso)
+      - Si fue a cuenta corriente, revierte el saldo del Proveedor (sumando el total)
+      - Si fue pagada, genera un ingreso en la caja (devolución del dinero)
+      - Registra la acción en AuditoriaAcciones
+
+    Returns:
+        True si se anuló correctamente.
+
+    Raises:
+        ValueError: Si la compra no existe o ya está cancelada o si no hay caja abierta.
+        Exception: Cualquier error de DB (rollback automático).
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        conn.start_transaction()
+
+        # 1. Obtener y bloquear la compra para evitar concurrencia
+        cur.execute(
+            """
+            SELECT id_compra, estado, medio_pago, id_proveedor, total
+            FROM Compra
+            WHERE id_compra = %s
+            FOR UPDATE
+            """,
+            (id_compra,)
+        )
+        compra = cur.fetchone()
+
+        if not compra:
+            raise ValueError(f"La compra #{id_compra} no existe.")
+        if compra['estado'] == 'cancelada':
+            raise ValueError(f"La compra #{id_compra} ya se encuentra anulada.")
+
+        estado_anterior = compra['estado']
+        total_compra = float(compra['total'] or 0.0)
+        medio_pago = compra['medio_pago']
+        id_proveedor = compra['id_proveedor']
+
+        # 2. Marcar la compra como cancelada
+        cur.execute(
+            "UPDATE Compra SET estado = 'cancelada' WHERE id_compra = %s",
+            (id_compra,)
+        )
+
+        # 3. Obtener todos los items de la compra para revertir stock
+        cur.execute(
+            """
+            SELECT id_producto, cantidad
+            FROM DetalleCompra
+            WHERE id_compra = %s AND id_producto IS NOT NULL
+            """,
+            (id_compra,)
+        )
+        detalles = cur.fetchall()
+
+        for det in detalles:
+            # Revertir el ingreso de stock -> restar
+            cur.execute(
+                "UPDATE Inventario SET cantidad = cantidad - %s WHERE id_producto = %s",
+                (float(det['cantidad']), det['id_producto'])
+            )
+
+        # 4. Revertir pago (Caja o Cuenta Corriente)
+        if medio_pago == 'cuenta_corriente' and id_proveedor:
+            # En la compra CC el saldo se restó, al anular se suma (se revierte la deuda)
+            cur.execute(
+                "UPDATE Proveedor SET saldo = saldo + %s WHERE id_proveedor = %s",
+                (total_compra, id_proveedor)
+            )
+        else:
+            # Si se pagó por un medio como efectivo, transferencia, etc.
+            # Se requiere caja abierta para generar un movimiento de ingreso.
+            session_row = _obtener_tesoreria_activa(cur)
+            if not session_row:
+                raise ValueError("Para anular una compra pagada se requiere una caja abierta para asentar la devolución del dinero.")
+            id_session = session_row['id_session']
+            
+            medio_map = {
+                'efectivo': 'efectivo',
+                'transferencia': 'transferencia',
+                'cheque': 'cheque',
+                'tarjeta_debito': 'tarjeta_debito',
+                'tarjeta_credito': 'tarjeta_credito'
+            }
+            medio = medio_map.get(medio_pago, medio_pago)
+            
+            cur.execute(
+                """INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, id_compra, descripcion) 
+                   VALUES (%s, 'ingreso', %s, %s, 'ajuste_positivo', %s, %s, %s)""", 
+                (id_session, total_compra, medio, id_usuario, id_compra, f"Anulación Compra #{id_compra}")
+            )
+
+        # 5. Registrar en AuditoriaAcciones
+        motivo_registro = motivo.strip() if motivo and motivo.strip() else "Sin motivo especificado"
+        datos_anteriores = json.dumps({'estado': estado_anterior})
+        datos_nuevos = json.dumps({
+            'estado': 'cancelada',
+            'motivo': motivo_registro,
+            'stock_restado': len(detalles),
+            'medio_revertido': medio_pago
+        })
+        cur.execute(
+            """
+            INSERT INTO AuditoriaAcciones
+                (id_usuario, accion, tabla_afectada, id_registro, datos_anteriores, datos_nuevos)
+            VALUES (%s, 'ANULAR_COMPRA', 'Compra', %s, %s, %s)
+            """,
+            (id_usuario, id_compra, datos_anteriores, datos_nuevos)
+        )
+
+        conn.commit()
+        logger.info(
+            f"Compra #{id_compra} anulada por usuario {id_usuario}. "
+            f"Stock restado: {len(detalles)} item(s). Medio revertido: {medio_pago}."
+        )
+        return True
+
+    except ValueError:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        raise
+    except Exception as e:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error(f"anular_compra #{id_compra}: {e}")
+        raise
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
 # ======================================================
 # HISTORIAL DE VENTAS
 # ======================================================
-def obtener_ventas_maestro(
+def contar_ventas_maestro(
     fecha_desde: Optional[str], 
     fecha_hasta: Optional[str], 
     id_cliente: Optional[int], 
     id_vendedor: Optional[int]
+) -> int:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        sql = "SELECT COUNT(*) FROM Venta v"
+        where_clauses = []
+        params = []
+        if fecha_desde:
+            where_clauses.append("v.fecha >= %s")
+            params.append(f"{fecha_desde} 00:00:00")
+        if fecha_hasta:
+            where_clauses.append("v.fecha <= %s")
+            params.append(f"{fecha_hasta} 23:59:59")
+        if id_vendedor is not None:
+            where_clauses.append("v.id_usuario = %s")
+            params.append(id_vendedor)
+        if id_cliente is not None:
+            if id_cliente == 0: 
+                where_clauses.append("v.id_cliente IS NULL")
+            else:
+                where_clauses.append("v.id_cliente = %s")
+                params.append(id_cliente)
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+        cur.execute(sql, tuple(params))
+        row = cur.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"contar_ventas_maestro: {e}")
+        return 0
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def obtener_ventas_maestro(
+    fecha_desde: Optional[str], 
+    fecha_hasta: Optional[str], 
+    id_cliente: Optional[int], 
+    id_vendedor: Optional[int],
+    limit: Optional[int] = None,
+    offset: Optional[int] = 0
 ) -> list[dict]:
     conn = cur = None
     try:
@@ -1698,11 +2037,11 @@ def obtener_ventas_maestro(
         where_clauses = []
         params = []
         if fecha_desde:
-            where_clauses.append("DATE(v.fecha) >= %s")
-            params.append(fecha_desde)
+            where_clauses.append("v.fecha >= %s")
+            params.append(f"{fecha_desde} 00:00:00")
         if fecha_hasta:
-            where_clauses.append("DATE(v.fecha) <= %s")
-            params.append(fecha_hasta)
+            where_clauses.append("v.fecha <= %s")
+            params.append(f"{fecha_hasta} 23:59:59")
         if id_vendedor is not None:
             where_clauses.append("v.id_usuario = %s")
             params.append(id_vendedor)
@@ -1715,6 +2054,11 @@ def obtener_ventas_maestro(
         if where_clauses:
             sql += " WHERE " + " AND ".join(where_clauses)
         sql += " ORDER BY v.fecha DESC, v.id_venta DESC"
+        
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+            
         cur.execute(sql, tuple(params))
         return list(cur.fetchall() or [])
     except Exception as e:
@@ -1759,9 +2103,234 @@ def obtener_venta_detalle(id_venta: int) -> list[dict]:
             pass
 
 
+
+
+# ======================================================
+# ANULACION DE VENTA
+# ======================================================
+
+def anular_venta(id_venta: int, id_usuario: int, motivo=None) -> bool:
+    """
+    Anula una venta de forma atomica:
+      - Cambia Venta.estado a 'cancelada'
+      - Restituye stock en Inventario por cada DetalleVenta con id_producto
+      - Revierte saldo en CuentaCorriente si tipo_pago = 'cuenta_corriente'
+      - Registra la accion en AuditoriaAcciones
+
+    Returns:
+        True si se anuló correctamente.
+
+    Raises:
+        ValueError: Si la venta no existe, ya esta cancelada o no esta completada.
+        Exception: Cualquier error de DB (rollback automatico).
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        conn.start_transaction()
+
+        # 1. Obtener y bloquear la venta para evitar concurrencia
+        cur.execute(
+            """
+            SELECT id_venta, estado, tipo_pago, id_cliente, total
+            FROM Venta
+            WHERE id_venta = %s
+            FOR UPDATE
+            """,
+            (id_venta,)
+        )
+        venta = cur.fetchone()
+
+        if not venta:
+            raise ValueError(f"La venta #{id_venta} no existe.")
+        if venta['estado'] == 'cancelada':
+            raise ValueError(f"La venta #{id_venta} ya se encuentra anulada.")
+        if venta['estado'] != 'completada':
+            raise ValueError(
+                f"Solo se pueden anular ventas con estado 'completada'. "
+                f"Estado actual: '{venta['estado']}'."
+            )
+
+        estado_anterior = venta['estado']
+        total_venta = float(venta['total'] or 0.0)
+        tipo_pago = venta['tipo_pago']
+        id_cliente = venta['id_cliente']
+
+        # 2. Marcar la venta como cancelada
+        cur.execute(
+            "UPDATE Venta SET estado = 'cancelada' WHERE id_venta = %s",
+            (id_venta,)
+        )
+
+        # 3. Obtener todos los items de la venta para revertir stock
+        cur.execute(
+            """
+            SELECT id_producto, cantidad
+            FROM DetalleVenta
+            WHERE id_venta = %s AND id_producto IS NOT NULL
+            """,
+            (id_venta,)
+        )
+        detalles = cur.fetchall()
+
+        for det in detalles:
+            cur.execute(
+                "UPDATE Inventario SET cantidad = cantidad + %s WHERE id_producto = %s",
+                (float(det['cantidad']), det['id_producto'])
+            )
+
+        # 4. Revertir saldo de cuenta corriente si corresponde
+        if tipo_pago == 'cuenta_corriente' and id_cliente:
+            cur.execute(
+                "UPDATE CuentaCorriente SET saldo = saldo + %s WHERE id_cliente = %s",
+                (total_venta, id_cliente)
+            )
+
+        # 5. Registrar en AuditoriaAcciones
+        motivo_registro = motivo.strip() if motivo and motivo.strip() else "Sin motivo especificado"
+        datos_anteriores = json.dumps({'estado': estado_anterior})
+        datos_nuevos = json.dumps({
+            'estado': 'cancelada',
+            'motivo': motivo_registro,
+            'stock_restituido': len(detalles),
+            'cuenta_corriente_revertida': (tipo_pago == 'cuenta_corriente' and bool(id_cliente))
+        })
+        cur.execute(
+            """
+            INSERT INTO AuditoriaAcciones
+                (id_usuario, accion, tabla_afectada, id_registro, datos_anteriores, datos_nuevos)
+            VALUES (%s, 'ANULAR_VENTA', 'Venta', %s, %s, %s)
+            """,
+            (id_usuario, id_venta, datos_anteriores, datos_nuevos)
+        )
+
+        conn.commit()
+        logger.info(
+            f"Venta #{id_venta} anulada por usuario {id_usuario}. "
+            f"Stock restituido: {len(detalles)} item(s). "
+            f"CC revertida: {tipo_pago == 'cuenta_corriente' and bool(id_cliente)}."
+        )
+        return True
+
+    except ValueError:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.error(f"anular_venta #{id_venta}: {e}")
+        raise
+    finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 # ======================================================
 # HISTORIAL DE MOVIMIENTOS DE CAJA (MEJORADO CON CIERRES)
 # ======================================================
+
+def contar_historial_movimientos_caja(
+    fecha_desde: str | None = None,
+    fecha_hasta: str | None = None,
+    tipo: str | None = None,
+    motivo: str | None = None,
+    id_usuario: int | None = None,
+    id_session: int | None = None,
+    tipo_caja: str | None = None
+) -> int:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        
+        params_movs = []
+        params_cierres = []
+        
+        sql_movs = "SELECT COUNT(*) FROM caja_movimiento cm"
+        if tipo_caja:
+            sql_movs += " LEFT JOIN caja_session cs ON cm.id_session = cs.id_session WHERE 1=1"
+        else:
+            sql_movs += " WHERE 1=1"
+            
+        if fecha_desde:
+            sql_movs += " AND cm.fecha_hora >= %s"
+            params_movs.append(f"{fecha_desde} 00:00:00")
+        if fecha_hasta:
+            sql_movs += " AND cm.fecha_hora <= %s"
+            params_movs.append(f"{fecha_hasta} 23:59:59")
+        if tipo and tipo != 'cierre':
+            sql_movs += " AND cm.tipo = %s"
+            params_movs.append(tipo)
+        if motivo and motivo not in ('cierre_caja', 'apertura_cierre'):
+            sql_movs += " AND cm.motivo = %s"
+            params_movs.append(motivo)
+        if id_usuario:
+            sql_movs += " AND cm.id_usuario = %s"
+            params_movs.append(id_usuario)
+        if id_session:
+            sql_movs += " AND cm.id_session = %s"
+            params_movs.append(id_session)
+        if tipo_caja:
+            sql_movs += " AND cs.tipo_caja = %s"
+            params_movs.append(tipo_caja)
+
+        sql_cierres = "SELECT COUNT(*) FROM caja_session cs WHERE cs.fecha_cierre IS NOT NULL"
+        if fecha_desde:
+            sql_cierres += " AND cs.fecha_cierre >= %s"
+            params_cierres.append(f"{fecha_desde} 00:00:00")
+        if fecha_hasta:
+            sql_cierres += " AND cs.fecha_cierre <= %s"
+            params_cierres.append(f"{fecha_hasta} 23:59:59")
+        if id_usuario:
+            sql_cierres += " AND cs.id_usuario_cierre = %s"
+            params_cierres.append(id_usuario)
+        if id_session:
+            sql_cierres += " AND cs.id_session = %s"
+            params_cierres.append(id_session)
+        if tipo_caja:
+            sql_cierres += " AND cs.tipo_caja = %s"
+            params_cierres.append(tipo_caja)
+
+        incluir_movs = True
+        incluir_cierres = True
+
+        if tipo == 'cierre': incluir_movs = False
+        if tipo in ('ingreso', 'egreso'): incluir_cierres = False
+        if motivo == 'cierre_caja': incluir_movs = False
+        if motivo == 'apertura_caja': incluir_cierres = False
+
+        total = 0
+        if incluir_movs:
+            cur.execute(sql_movs, tuple(params_movs))
+            r = cur.fetchone()
+            if r: total += r[0]
+        if incluir_cierres:
+            cur.execute(sql_cierres, tuple(params_cierres))
+            r = cur.fetchone()
+            if r: total += r[0]
+            
+        return total
+    except Exception as e:
+        logger.error(f"contar_historial_movimientos_caja: {e}")
+        return 0
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 def obtener_historial_movimientos_caja(
     fecha_desde: str | None = None,
@@ -1769,7 +2338,10 @@ def obtener_historial_movimientos_caja(
     tipo: str | None = None,
     motivo: str | None = None,
     id_usuario: int | None = None,
-    id_session: int | None = None
+    id_session: int | None = None,
+    tipo_caja: str | None = None,
+    limit: int | None = None,
+    offset: int = 0
 ) -> list[dict]:
     """
     Obtiene el historial UNIFICADO: Movimientos normales + Cierres de Caja.
@@ -1796,18 +2368,20 @@ def obtener_historial_movimientos_caja(
                 cm.motivo,
                 cm.descripcion,
                 u.nombre AS usuario_nombre,
-                'movimiento' as origen_dato
+                'movimiento' as origen_dato,
+                cs.tipo_caja
             FROM caja_movimiento cm
             LEFT JOIN Usuario u ON cm.id_usuario = u.id_usuario
+            LEFT JOIN caja_session cs ON cm.id_session = cs.id_session
             WHERE 1=1
         """
         
         if fecha_desde:
-            sql_movs += " AND DATE(cm.fecha_hora) >= %s"
-            params_movs.append(fecha_desde)
+            sql_movs += " AND cm.fecha_hora >= %s"
+            params_movs.append(f"{fecha_desde} 00:00:00")
         if fecha_hasta:
-            sql_movs += " AND DATE(cm.fecha_hora) <= %s"
-            params_movs.append(fecha_hasta)
+            sql_movs += " AND cm.fecha_hora <= %s"
+            params_movs.append(f"{fecha_hasta} 23:59:59")
         if tipo and tipo != 'cierre':
             sql_movs += " AND cm.tipo = %s"
             params_movs.append(tipo)
@@ -1820,6 +2394,9 @@ def obtener_historial_movimientos_caja(
         if id_session:
             sql_movs += " AND cm.id_session = %s"
             params_movs.append(id_session)
+        if tipo_caja:
+            sql_movs += " AND cs.tipo_caja = %s"
+            params_movs.append(tipo_caja)
 
         # 2. QUERY DE CIERRES DE CAJA (Simulados como movimientos)
         # --------------------------------------------------------
@@ -1838,24 +2415,28 @@ def obtener_historial_movimientos_caja(
                           CONCAT(' | Obs: ', cs.observaciones_cierre), '')
                 ) as descripcion,
                 u.nombre as usuario_nombre,
-                'cierre' as origen_dato
+                'cierre' as origen_dato,
+                cs.tipo_caja
             FROM caja_session cs
             LEFT JOIN Usuario u ON cs.id_usuario_cierre = u.id_usuario
             WHERE cs.fecha_cierre IS NOT NULL
         """
         
         if fecha_desde:
-            sql_cierres += " AND DATE(cs.fecha_cierre) >= %s"
-            params_cierres.append(fecha_desde)
+            sql_cierres += " AND cs.fecha_cierre >= %s"
+            params_cierres.append(f"{fecha_desde} 00:00:00")
         if fecha_hasta:
-            sql_cierres += " AND DATE(cs.fecha_cierre) <= %s"
-            params_cierres.append(fecha_hasta)
+            sql_cierres += " AND cs.fecha_cierre <= %s"
+            params_cierres.append(f"{fecha_hasta} 23:59:59")
         if id_usuario:
             sql_cierres += " AND cs.id_usuario_cierre = %s"
             params_cierres.append(id_usuario)
         if id_session:
             sql_cierres += " AND cs.id_session = %s"
             params_cierres.append(id_session)
+        if tipo_caja:
+            sql_cierres += " AND cs.tipo_caja = %s"
+            params_cierres.append(tipo_caja)
 
         # 3. UNIR Y ORDENAR
         # -----------------
@@ -1882,6 +2463,10 @@ def obtener_historial_movimientos_caja(
         else:
             return []
 
+        if limit is not None:
+            sql_final += " LIMIT %s OFFSET %s"
+            params_final.extend([limit, offset])
+
         cur.execute(sql_final, tuple(params_final))
         return list(cur.fetchall() or [])
         
@@ -1900,10 +2485,71 @@ def obtener_historial_movimientos_caja(
 # ======================================================
 # En app/database/DB.py
 
-def obtener_compras_maestro(
+def contar_compras_maestro(
     fecha_desde: Optional[str], 
     fecha_hasta: Optional[str], 
     id_proveedor: Optional[int]
+) -> int:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        
+        where_compra = ["1=1"]
+        where_pago = ["1=1"]
+        params_compra = []
+        params_pago = []
+        
+        if id_proveedor is not None:
+             where_compra.append("c.id_proveedor = %s")
+             params_compra.append(id_proveedor)
+             where_pago.append("pp.id_proveedor = %s")
+             params_pago.append(id_proveedor)
+
+        if fecha_desde:
+             where_compra.append("c.fecha >= %s")
+             params_compra.append(f"{fecha_desde} 00:00:00")
+             where_pago.append("pp.fecha >= %s")
+             params_pago.append(f"{fecha_desde} 00:00:00")
+             
+        if fecha_hasta:
+             where_compra.append("c.fecha <= %s")
+             params_compra.append(f"{fecha_hasta} 23:59:59")
+             where_pago.append("pp.fecha <= %s")
+             params_pago.append(f"{fecha_hasta} 23:59:59")
+
+        sql = f"""
+            SELECT COUNT(*) FROM (
+                SELECT c.id_compra
+                FROM Compra c
+                WHERE {' AND '.join(where_compra)}
+                UNION ALL
+                SELECT pp.id_pago_prov
+                FROM PagoProveedor pp
+                WHERE {' AND '.join(where_pago)}
+            ) AS combined
+        """
+        
+        cur.execute(sql, tuple(params_compra + params_pago))
+        row = cur.fetchone()
+        return row[0] if row else 0
+
+    except Exception as e:
+        logger.error(f"contar_compras_maestro: {e}")
+        return 0
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def obtener_compras_maestro(
+    fecha_desde: Optional[str], 
+    fecha_hasta: Optional[str], 
+    id_proveedor: Optional[int],
+    limit: Optional[int] = None,
+    offset: Optional[int] = 0
 ) -> list[dict]:
     conn = cur = None
     try:
@@ -1923,16 +2569,16 @@ def obtener_compras_maestro(
              params_pago.append(id_proveedor)
 
         if fecha_desde:
-             where_compra.append("DATE(c.fecha) >= %s")
-             params_compra.append(fecha_desde)
-             where_pago.append("DATE(pp.fecha) >= %s")
-             params_pago.append(fecha_desde)
+             where_compra.append("c.fecha >= %s")
+             params_compra.append(f"{fecha_desde} 00:00:00")
+             where_pago.append("pp.fecha >= %s")
+             params_pago.append(f"{fecha_desde} 00:00:00")
              
         if fecha_hasta:
-             where_compra.append("DATE(c.fecha) <= %s")
-             params_compra.append(fecha_hasta)
-             where_pago.append("DATE(pp.fecha) <= %s")
-             params_pago.append(fecha_hasta)
+             where_compra.append("c.fecha <= %s")
+             params_compra.append(f"{fecha_hasta} 23:59:59")
+             where_pago.append("pp.fecha <= %s")
+             params_pago.append(f"{fecha_hasta} 23:59:59")
 
         sql = f"""
             SELECT 
@@ -1956,7 +2602,12 @@ def obtener_compras_maestro(
             ORDER BY fecha DESC
         """
         
-        cur.execute(sql, tuple(params_compra + params_pago))
+        params_final = params_compra + params_pago
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params_final.extend([limit, offset])
+            
+        cur.execute(sql, tuple(params_final))
         return list(cur.fetchall() or [])
 
     except Exception as e:
@@ -1990,11 +2641,67 @@ def obtener_compra_detalle(id_compra: int) -> list[dict]:
 # ======================================================
 # HISTORIAL DE PAGOS (NUEVO)
 # ======================================================
-def obtener_pagos_maestro(
+def contar_pagos_maestro(
     fecha_desde: Optional[str], 
     fecha_hasta: Optional[str], 
     id_cliente: Optional[int], 
     id_usuario: Optional[int]
+) -> int:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        sql = """
+            SELECT COUNT(*)
+            FROM Pago p
+            JOIN CuentaCorriente cc ON p.id_cuenta = cc.id_cuenta
+            JOIN Cliente c ON cc.id_cliente = c.id_cliente
+            LEFT JOIN Usuario u ON p.id_usuario = u.id_usuario
+        """
+        where_clauses = []
+        params = []
+        
+        # Filtro de Fechas
+        if fecha_desde:
+            where_clauses.append("p.fecha >= %s")
+            params.append(f"{fecha_desde} 00:00:00")
+        if fecha_hasta:
+            where_clauses.append("p.fecha <= %s")
+            params.append(f"{fecha_hasta} 23:59:59")
+
+        # Filtro de Cliente
+        if id_cliente is not None and id_cliente != 0:
+            where_clauses.append("c.id_cliente = %s")
+            params.append(id_cliente)
+            
+        # Filtro de Usuario (quien registró el pago)
+        if id_usuario is not None:
+            where_clauses.append("p.id_usuario = %s")
+            params.append(id_usuario)
+
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+            
+        cur.execute(sql, tuple(params))
+        row = cur.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"contar_pagos_maestro: {e}")
+        return 0
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def obtener_pagos_maestro(
+    fecha_desde: Optional[str], 
+    fecha_hasta: Optional[str], 
+    id_cliente: Optional[int], 
+    id_usuario: Optional[int],
+    limit: Optional[int] = None,
+    offset: Optional[int] = 0
 ) -> list[dict]:
     conn = cur = None
     try:
@@ -2015,11 +2722,11 @@ def obtener_pagos_maestro(
         
         # Filtro de Fechas
         if fecha_desde:
-            where_clauses.append("DATE(p.fecha) >= %s")
-            params.append(fecha_desde)
+            where_clauses.append("p.fecha >= %s")
+            params.append(f"{fecha_desde} 00:00:00")
         if fecha_hasta:
-            where_clauses.append("DATE(p.fecha) <= %s")
-            params.append(fecha_hasta)
+            where_clauses.append("p.fecha <= %s")
+            params.append(f"{fecha_hasta} 23:59:59")
 
         # Filtro de Cliente
         if id_cliente is not None and id_cliente != 0:
@@ -2036,6 +2743,10 @@ def obtener_pagos_maestro(
             
         sql += " ORDER BY p.fecha DESC"
         
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+            
         cur.execute(sql, tuple(params))
         return list(cur.fetchall() or [])
     except Exception as e:
@@ -2132,22 +2843,12 @@ def registrar_pago_cuenta_corriente(id_cuenta: int, monto: float, metodo: str, i
         id_rol = usuario_row['id_rol']
         
         if id_rol == 2:  # Vendedor
-            cur.execute(
-                "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'ventas' AND id_usuario_apertura = %s LIMIT 1",
-                (id_usuario,)
-            )
-            session_row = cur.fetchone()
-            if not session_row:
+            id_session = _obtener_id_sesion_ventas(cur, id_usuario)
+            if not id_session:
                 raise ValueError("CAJA_CERRADA")
         else: # Admin (1) o Supervisor (3)
-            cur.execute(
-                "SELECT id_session FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'tesoreria' LIMIT 1"
-            )
-            session_row = cur.fetchone()
-            if not session_row:
-                raise ValueError("TESORERIA_CERRADA")
-                
-        id_session = session_row['id_session']
+            session_row = obtener_o_crear_tesoreria_hoy(cur, id_usuario)
+            id_session = session_row['id_session']
         
         cur.execute("SELECT id_cliente FROM CuentaCorriente WHERE id_cuenta = %s", (id_cuenta,))
         cuenta_row = cur.fetchone()
@@ -2364,198 +3065,6 @@ def actualizar_rol_usuario(id_usuario: int, id_rol_nuevo: int, nuevo_nombre: str
         except Exception:
             pass
 
-def buscar_usuario_por_codigo(codigo_barras: str) -> Optional[dict]:
-    """Busca un usuario por su código de barras, retorna sus datos completos si está activo."""
-    if not codigo_barras: return None
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT 
-                u.id_usuario, 
-                u.nombre, 
-                u.id_rol, 
-                u.codigo_barras,
-                u.activo, 
-                r.nombre AS rol_nombre 
-            FROM Usuario u 
-            LEFT JOIN Rol r ON u.id_rol = r.id_rol 
-            WHERE u.codigo_barras = %s AND u.activo = TRUE
-        """, (codigo_barras.strip(),))
-        return cur.fetchone()
-    except Exception as e:
-        logger.error(f"Error en buscar_usuario_por_codigo: {e}")
-        return None
-    finally:
-        if cur: cur.close()
-        if conn: conn.close()
-
-def resetear_password_usuario(id_usuario: int, password_plana_nueva: str) -> bool:
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor()
-        
-        hashed_pass = _hash_password(password_plana_nueva)
-        
-        cur.execute("UPDATE Usuario SET contraseña=%s WHERE id_usuario=%s", (hashed_pass, id_usuario))
-        conn.commit()
-        return cur.rowcount > 0
-    except Exception as e:
-        if conn:
-            try: conn.rollback()
-            except Exception: pass
-        logger.error(f"resetear_password_usuario: {e}")
-        return False
-    finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
-
-def desactivar_usuario(id_usuario: int) -> bool:
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor()
-        
-        cur.execute("SELECT id_rol, activo FROM Usuario WHERE id_usuario = %s", (id_usuario,))
-        row = cur.fetchone()
-        if row and row[0] == 1 and row[1]:
-            if obtener_cantidad_administradores_activos() <= 1:
-                raise ValueError("No se puede desactivar al último administrador del sistema.")
-                
-        cur.execute("UPDATE Usuario SET activo=FALSE WHERE id_usuario=%s", (id_usuario,))
-        conn.commit()
-        return cur.rowcount > 0
-    except ValueError:
-        if conn: conn.rollback()
-        raise
-    except Exception as e:
-        if conn:
-            try: conn.rollback()
-            except Exception: pass
-        logger.error(f"desactivar_usuario: {e}")
-        return False
-    finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
-
-def activar_usuario(id_usuario: int) -> bool:
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor()
-        cur.execute("UPDATE Usuario SET activo=TRUE WHERE id_usuario=%s", (id_usuario,))
-        conn.commit()
-        return cur.rowcount > 0
-    except Exception as e:
-        if conn:
-            try: conn.rollback()
-            except Exception: pass
-        logger.error(f"activar_usuario: {e}")
-        return False
-    finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
-
-
-def actualizar_nombre_usuario(id_usuario: int, nuevo_nombre: str) -> bool:
-    if not nuevo_nombre.strip():
-        raise ValueError("El nombre no puede estar vacío.")
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor()
-        cur.execute("UPDATE Usuario SET nombre=%s WHERE id_usuario=%s", (nuevo_nombre.strip(), id_usuario))
-        conn.commit()
-        return cur.rowcount > 0
-    except mysql.connector.IntegrityError as e:
-        if conn: conn.rollback()
-        # 🔥 PROPAGAR error de nombre duplicado para que la UI lo maneje de forma clara
-        if getattr(e, "errno", None) == 1062:
-            raise ValueError("NOMBRE_DUPLICADO") from e
-        logger.warning(f"actualizar_nombre_usuario (IntegrityError): {e}")
-        return False
-    except Exception as e:
-        if conn:
-            try: conn.rollback()
-            except Exception: pass
-        logger.error(f"actualizar_nombre_usuario: {e}")
-        return False
-    finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
-            
-# ======================================================
-# AUDITORÍA DE ACCIONES (CORREGIDO)
-# ======================================================
-def registrar_auditoria(
-    id_usuario: Optional[int],
-    accion: str,
-    tabla_afectada: Optional[str] = None,
-    id_registro: Optional[int] = None,
-    datos_anteriores: Optional[dict] = None,
-    datos_nuevos: Optional[dict] = None
-) -> bool:
-    """
-    Registra una acción en la tabla AuditoriaAcciones.
-    Incluye corrección para serializar Decimal y Fechas.
-    """
-    
-    conn = cur = None
-    try:
-        conn = conectar()
-        cur = conn.cursor()
-        
-        # --- CORRECCIÓN: Encoder personalizado para JSON ---
-        def default_serializer(obj):
-            if isinstance(obj, (datetime, date)):
-                return obj.isoformat()  # Convierte fechas a texto ISO
-            if hasattr(obj, '__str__'): 
-                return str(obj)         # Convierte Decimales a string
-            return str(obj)             # Fallback genérico
-
-        # Usar 'default=default_serializer' para evitar el error de Decimal
-        datos_ant_json = json.dumps(datos_anteriores, ensure_ascii=False, default=default_serializer) if datos_anteriores else None
-        datos_new_json = json.dumps(datos_nuevos, ensure_ascii=False, default=default_serializer) if datos_nuevos else None
-        
-        cur.execute(
-            """
-            INSERT INTO AuditoriaAcciones 
-            (id_usuario, accion, tabla_afectada, id_registro, datos_anteriores, datos_nuevos)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (id_usuario, accion, tabla_afectada, id_registro, datos_ant_json, datos_new_json)
-        )
-        
-        conn.commit()
-        return True
-        
-    except Exception as e:
-        if conn:
-            try: conn.rollback()
-            except Exception: pass
-        logger.error(f"registrar_auditoria: {e}")
-        return False
-
-    finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
 
 def buscar_usuario_por_codigo(codigo_barras: str) -> Optional[dict]:
     """Busca un usuario por su código de barras, retorna sus datos completos si está activo."""
@@ -2741,6 +3250,69 @@ def registrar_auditoria(
             try: conn.rollback()
             except Exception: pass
         logger.error(f"registrar_auditoria: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+
+# ======================================================
+# AUDITORÍA DE INVENTARIO (manual — no via trigger)
+# ======================================================
+
+def registrar_auditoria_inventario(
+    id_producto: int,
+    cantidad_anterior: float,
+    cantidad_nueva: float,
+    tipo_movimiento: str,
+    id_referencia: Optional[int] = None,
+    id_usuario: Optional[int] = None,
+    observaciones: Optional[str] = None
+) -> bool:
+    """
+    Inserta una fila en AuditoriaInventario para movimientos que no son
+    generados automáticamente por los triggers (venta/compra).
+
+    Usar para:
+    - Ajustes manuales de stock
+    - Anulaciones de venta (futura mejora)
+    - Stock inicial al crear producto (futura mejora)
+
+    Args:
+        tipo_movimiento: Valor libre. Recomendado: 'ajuste_manual', 'anulacion', 'stock_inicial'.
+        observaciones:   Motivo del ajuste. Queda registrado en la columna 'observaciones'.
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO AuditoriaInventario
+                (id_producto, cantidad_anterior, cantidad_nueva,
+                 tipo_movimiento, id_referencia, id_usuario, observaciones)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                id_producto,
+                float(cantidad_anterior),
+                float(cantidad_nueva),
+                tipo_movimiento,
+                id_referencia,
+                id_usuario,
+                observaciones
+            )
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error(f"registrar_auditoria_inventario: {e}")
         return False
     finally:
         try:
@@ -2760,7 +3332,7 @@ def obtener_session_abierta(id_usuario: int) -> dict | None:
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM caja_session WHERE id_usuario_apertura = %s AND estado = 'abierta' AND tipo_caja = 'ventas' LIMIT 1", (id_usuario,))
+        cur.execute("SELECT * FROM caja_session WHERE id_usuario_apertura = %s AND estado = 'abierta' AND tipo_caja = 'turno' LIMIT 1", (id_usuario,))
         return cur.fetchone()
     except Exception as e:
         logger.error(f"Error sesión usuario {id_usuario}: {e}"); return None
@@ -2774,7 +3346,7 @@ def obtener_session_activa() -> dict | None:
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'ventas' ORDER BY id_session DESC LIMIT 1")
+        cur.execute("SELECT * FROM caja_session WHERE estado = 'abierta' AND tipo_caja = 'turno' ORDER BY id_session DESC LIMIT 1")
         return cur.fetchone()
     except Exception as e:
         logger.error(f"Error sesión activa: {e}"); return None
@@ -2796,7 +3368,7 @@ def obtener_tesoreria_activa() -> dict | None:
         if cur: cur.close()
         if conn: conn.close()
 
-def abrir_caja_session(id_usuario: int, monto_inicial: float, tipo_caja: str = 'ventas') -> bool:
+def abrir_caja_session(id_usuario: int, monto_inicial: float, tipo_caja: str = 'turno') -> bool:
     """Abre una nueva sesión de caja (Ventas o Tesorería)."""
     if monto_inicial < 0:
         raise ValueError("El monto inicial no puede ser negativo.")
@@ -2808,15 +3380,16 @@ def abrir_caja_session(id_usuario: int, monto_inicial: float, tipo_caja: str = '
         
         if tipo_caja == 'tesoreria':
             # Validar que no haya ninguna tesorería abierta (sin importar fecha)
-            cur.execute("SELECT id_session, fecha_apertura FROM caja_session WHERE tipo_caja='tesoreria' AND estado='abierta' LIMIT 1")
-            abiertas = cur.fetchall()
-            if abiertas:
-                fecha_abierta = abiertas[0]['fecha_apertura'].strftime("%Y-%m-%d")
-                raise ValueError(f"Ya existe una Tesorería abierta desde {fecha_abierta}. Debe cerrarla antes de abrir una nueva (Cierre Diario Obligatorio).")
+            tesoreria = _obtener_tesoreria_activa(cur)
+            if tesoreria:
+                fecha_abierta = tesoreria.get('fecha_apertura')
+                fecha_str = fecha_abierta.strftime("%Y-%m-%d") if fecha_abierta else "desconocida"
+                raise ValueError(f"Ya existe una Tesorería abierta desde {fecha_str}. Debe cerrarla antes de abrir una nueva (Cierre Diario Obligatorio).")
         else:
-            # 🔥 AUTOLIMPIEZA: Cerrar cualquier sesión de ventas que haya quedado abierta por accidente para este usuario
-            cur.execute("UPDATE caja_session SET estado='cerrada', fecha_cierre=NOW() WHERE estado='abierta' AND tipo_caja='ventas' AND id_usuario_apertura = %s", (id_usuario,))
-
+            # Validar que no haya una caja de ventas abierta para este usuario
+            cur.execute("SELECT id_session FROM caja_session WHERE estado='abierta' AND tipo_caja='turno' AND id_usuario_apertura = %s", (id_usuario,))
+            if cur.fetchone():
+                raise ValueError("Ya tienes una sesión de caja abierta. Por favor, recarga la pantalla o cierra la sesión actual antes de abrir una nueva.")
         # 1. Crear Sesión
         cur.execute(
             "INSERT INTO caja_session (id_usuario_apertura, monto_apertura, estado, tipo_caja) VALUES (%s, %s, 'abierta', %s)",
@@ -2870,7 +3443,7 @@ def registrar_movimiento_manual(id_session: int, tipo: str, monto: float, motivo
         if cur: cur.close()
         if conn: conn.close()
 
-def transferir_entre_cajas(id_session_origen: int, id_session_destino: int, monto: float, id_usuario: int, motivo_salida: str, motivo_entrada: str, descripcion: str) -> bool:
+def transferir_entre_cajas(id_session_origen: int, id_session_destino: int, monto: float, id_usuario: int, motivo_salida: str, motivo_entrada: str, descripcion: str, id_autorizador: int = None) -> bool:
     """Transfiere fondos de manera atómica entre dos sesiones (ej. Venta -> Tesorería)."""
     if monto <= 0:
         raise ValueError("El monto a transferir debe ser mayor a cero.")
@@ -2924,6 +3497,25 @@ def transferir_entre_cajas(id_session_origen: int, id_session_destino: int, mont
             (id_session_destino, monto, motivo_entrada, id_usuario, descripcion)
         )
 
+        # 4. Registrar APROBACION_TRANSFERENCIA en AuditoriaAcciones si hay un supervisor/autorizador
+        if id_autorizador is not None:
+            import json
+            datos = json.dumps({
+                "origen": id_session_origen,
+                "destino": id_session_destino,
+                "monto": float(monto),
+                "motivo": motivo_salida,
+                "id_cajero": id_usuario,
+                "id_autorizador": id_autorizador
+            })
+            cur.execute(
+                """
+                INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, id_registro, datos_nuevos)
+                VALUES (%s, 'APROBACION_TRANSFERENCIA', 'caja_movimiento', %s, %s)
+                """,
+                (id_autorizador, id_session_origen, datos)
+            )
+
         conn.commit()
         logger.info(f"Transferencia de ${monto} de caja {id_session_origen} a {id_session_destino} completada.")
         return True
@@ -2961,6 +3553,7 @@ def obtener_resumen_cierre(id_session: int) -> dict:
         'ajuste_positivo',
         'transferencia_tesoreria_entrada',
         'ingreso_extraordinario',
+        'ingreso_capital',
     }
     MOTIVOS_EFECTIVO_EGRESO = {
         'pago_proveedor',
@@ -2996,14 +3589,9 @@ def obtener_resumen_cierre(id_session: int) -> dict:
 
         # CORRECCIÓN: filtrar por medio='efectivo' para ingresos y egresos reales
         # Así tarjeta/transferencia/cuenta_corriente no inflan el efectivo esperado
-        cur.execute("""
-            SELECT motivo, tipo, medio, SUM(monto) as total
-            FROM caja_movimiento
-            WHERE id_session = %s
-            GROUP BY motivo, tipo, medio
-        """, (id_session,))
+        movimientos = _obtener_totales_movimientos(cur, id_session)
 
-        for r in cur.fetchall():
+        for r in movimientos:
             m    = float(r['total'])
             mot  = r['motivo']
             tipo = r['tipo']
@@ -3320,12 +3908,20 @@ def obtener_productos_mas_vendidos(fecha_desde: str, fecha_hasta: str, limite: i
             except: pass
             conn.close()
 
-def obtener_sesiones_abiertas_con_totales() -> list[dict]:
+def obtener_sesiones_abiertas_con_totales(tipo_caja: str = None) -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute('''
+        
+        # Auto-cerrar tesorerías de días anteriores (Cierre automático)
+        cur.execute("""
+            UPDATE caja_session 
+            SET estado='cerrada', fecha_cierre=NOW(), observaciones_cierre='Cierre automático por cambio de día' 
+            WHERE estado='abierta' AND tipo_caja='administrativa' AND DATE(fecha_apertura) < CURDATE()
+        """)
+        
+        query = '''
             SELECT 
                 cs.id_session,
                 cs.monto_apertura,
@@ -3335,13 +3931,19 @@ def obtener_sesiones_abiertas_con_totales() -> list[dict]:
                 (SELECT COUNT(*) FROM caja_movimiento cm WHERE cm.id_session = cs.id_session AND cm.tipo = 'ingreso' AND cm.motivo LIKE 'venta_%%') as cantidad_ventas,
                 (
                     cs.monto_apertura 
-                    + COALESCE((SELECT SUM(monto) FROM caja_movimiento cm WHERE cm.id_session = cs.id_session AND cm.tipo = 'ingreso' AND cm.medio = 'efectivo'), 0)
+                    + COALESCE((SELECT SUM(monto) FROM caja_movimiento cm WHERE cm.id_session = cs.id_session AND cm.tipo = 'ingreso' AND cm.medio = 'efectivo' AND cm.motivo != 'apertura_caja'), 0)
                     - COALESCE((SELECT SUM(monto) FROM caja_movimiento cm WHERE cm.id_session = cs.id_session AND cm.tipo = 'egreso' AND cm.medio = 'efectivo'), 0)
                 ) as monto_acumulado
             FROM caja_session cs
             JOIN Usuario u ON cs.id_usuario_apertura = u.id_usuario
             WHERE cs.estado = 'abierta'
-        ''')
+        '''
+        params = []
+        if tipo_caja:
+            query += " AND cs.tipo_caja = %s"
+            params.append(tipo_caja)
+            
+        cur.execute(query, tuple(params) if params else None)
         return list(cur.fetchall() or [])
     except Exception as e:
         logger.error(f"obtener_sesiones_abiertas_con_totales: {e}")
@@ -3381,7 +3983,7 @@ def obtener_kpis_admin() -> dict:
                 COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) as ingresos,
                 COALESCE(SUM(CASE WHEN tipo = 'egreso' THEN monto ELSE 0 END), 0) as egresos
             FROM caja_movimiento
-            WHERE DATE(fecha_hora) = CURDATE() AND medio = 'efectivo'
+            WHERE DATE(fecha_hora) = CURDATE() AND medio = 'efectivo' AND motivo != 'apertura_caja'
         """)
         movs = cur.fetchone() or {'ingresos': 0.0, 'egresos': 0.0}
         ingresos = float(movs['ingresos'])
@@ -3530,7 +4132,50 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
 # ======================================================
 # AUDITORÍA (BITÁCORA)
 # ======================================================
-def obtener_bitacora_acciones(fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None, id_usuario: Optional[int] = None, accion: Optional[str] = None) -> list[dict]:
+def contar_bitacora_acciones(fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None, id_usuario: Optional[int] = None, accion: Optional[str] = None) -> int:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        query = """
+            SELECT COUNT(*)
+            FROM AuditoriaAcciones a
+            LEFT JOIN Usuario u ON a.id_usuario = u.id_usuario
+            WHERE 1=1 
+              AND a.accion NOT IN ('CIERRE_CAJA', 'APERTURA_CAJA', 'RETIRO_CAJA', 'INGRESO_CAJA', 'TRANSFERENCIA_TESORERIA')
+        """
+        params = []
+        if fecha_desde:
+            query += " AND a.fecha >= %s"
+            params.append(f"{fecha_desde} 00:00:00")
+        if fecha_hasta:
+            query += " AND a.fecha <= %s"
+            params.append(f"{fecha_hasta} 23:59:59")
+        if id_usuario:
+            query += " AND a.id_usuario = %s"
+            params.append(id_usuario)
+        if accion and accion != "Todas":
+            query += " AND a.accion = %s"
+            params.append(accion)
+            
+        cur.execute(query, tuple(params))
+        row = cur.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"contar_bitacora_acciones: {e}")
+        return 0
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+def obtener_bitacora_acciones(
+    fecha_desde: Optional[str] = None, 
+    fecha_hasta: Optional[str] = None, 
+    id_usuario: Optional[int] = None, 
+    accion: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = 0
+) -> list[dict]:
     conn = cur = None
     try:
         conn = conectar()
@@ -3556,13 +4201,171 @@ def obtener_bitacora_acciones(fecha_desde: Optional[str] = None, fecha_hasta: Op
             query += " AND a.accion = %s"
             params.append(accion)
             
-        query += " ORDER BY a.fecha DESC LIMIT 1000"
+        query += " ORDER BY a.fecha DESC"
         
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+        else:
+            # Fallback to avoid huge loads if called without limit
+            query += " LIMIT 1000"
+            
         cur.execute(query, tuple(params))
         return cur.fetchall()
     except Exception as e:
         logger.error(f"obtener_bitacora_acciones: {e}")
         return []
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+# ======================================================
+# BROADCAST
+# ======================================================
+
+def enviar_mensaje_broadcast(
+    contenido: str,
+    id_admin: int,
+    destinatario_tipo: str = "todos",
+    destinatario_id: Optional[int] = None,
+) -> bool:
+    """
+    Inserta un mensaje en la tabla mensajes_broadcast.
+    Retorna True si fue insertado correctamente, False en caso de error.
+    La tabla y las columnas necesarias deben existir previamente (ver auto_migrate).
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        if not conn:
+            return False
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO mensajes_broadcast "
+            "(contenido, id_admin, destinatario_tipo, destinatario_id) "
+            "VALUES (%s, %s, %s, %s)",
+            (contenido, id_admin, destinatario_tipo, destinatario_id),
+        )
+        conn.commit()
+        logger.info(
+            "Broadcast enviado por admin %d → tipo=%s id=%s",
+            id_admin, destinatario_tipo, destinatario_id,
+        )
+        return True
+    except Exception as e:
+        logger.error("enviar_mensaje_broadcast: %s", e)
+        return False
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def obtener_mensajes_broadcast_no_leidos(
+    id_rol: int,
+    id_usuario: int,
+    excluir_id_admin: Optional[int] = None,
+    ultimo_id: int = 0,
+) -> list[dict]:
+    """
+    Devuelve los mensajes broadcast con id_mensaje > ultimo_id dirigidos al rol
+    o usuario indicado.
+
+    El filtrado por cursor (id_mensaje > ultimo_id) reemplaza el flag `leido`:
+    cada cliente mantiene su propio cursor en memoria, eliminando los UPDATEs
+    concurrentes que hacían que el primer usuario en pollear borrara el mensaje
+    para todos los demás.
+
+    Args:
+        id_rol:           Rol del usuario receptor.
+        id_usuario:       ID del usuario receptor.
+        excluir_id_admin: Si se proporciona, omite mensajes enviados por ese admin
+                          (evita que el administrador reciba sus propios broadcasts).
+        ultimo_id:        Cursor local del cliente; solo se devuelven mensajes
+                          con id_mensaje estrictamente mayor a este valor.
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        if not conn:
+            return []
+        cur = conn.cursor(dictionary=True)
+
+        sql = """
+            SELECT id_mensaje, contenido
+            FROM mensajes_broadcast
+            WHERE id_mensaje > %s
+              AND (
+                  destinatario_tipo = 'todos' OR
+                  (destinatario_tipo = 'rol'     AND destinatario_id = %s) OR
+                  (destinatario_tipo = 'usuario' AND destinatario_id = %s)
+              )
+        """
+        params: list = [ultimo_id, id_rol, id_usuario]
+
+        if excluir_id_admin is not None:
+            sql += " AND id_admin != %s"
+            params.append(excluir_id_admin)
+
+        sql += " ORDER BY id_mensaje ASC"
+
+        cur.execute(sql, tuple(params))
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error("obtener_mensajes_broadcast_no_leidos: %s", e)
+        return []
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def marcar_mensajes_broadcast_leidos(ids: list[int]) -> bool:
+    """
+    Marca como leídos los mensajes cuyo id_mensaje esté en la lista ids.
+    Retorna True si la operación fue exitosa.
+    """
+    if not ids:
+        return True
+    conn = cur = None
+    try:
+        conn = conectar()
+        if not conn:
+            return False
+        cur = conn.cursor()
+        placeholders = ",".join(["%s"] * len(ids))
+        cur.execute(
+            f"UPDATE mensajes_broadcast SET leido = TRUE "
+            f"WHERE id_mensaje IN ({placeholders})",
+            tuple(ids),
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error("marcar_mensajes_broadcast_leidos: %s", e)
+        return False
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+def obtener_ultimo_id_broadcast() -> int:
+    """
+    Devuelve el id_mensaje más alto actualmente en la tabla mensajes_broadcast.
+
+    Se usa al iniciar el ciclo de polling para fijar el cursor inicial del cliente,
+    evitando que se re-entreguen mensajes históricos al conectarse.
+    Retorna 0 si la tabla está vacía o si ocurre un error de conexión.
+    """
+    conn = cur = None
+    try:
+        conn = conectar()
+        if not conn:
+            return 0
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(MAX(id_mensaje), 0) FROM mensajes_broadcast")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        logger.error("obtener_ultimo_id_broadcast: %s", e)
+        return 0
     finally:
         if cur: cur.close()
         if conn: conn.close()

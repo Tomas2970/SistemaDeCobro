@@ -66,13 +66,13 @@ class BackendAdapter:
         return DB.verificar_contraseña(usuario, contraseña)
 
     # ---------- Clientes (Firmas Actualizadas con CUIT) ----------
-    def insertar_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
+    def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
         try:
             limite_valido = float(limite_credito)
         except (ValueError, TypeError):
             limite_valido = 50000.00
         # Incluye CUIT
-        nuevo_id = DB.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        nuevo_id = DB.crear_cliente(nombre, dni, cuit, direccion, telefono, email, limite_valido)
         if nuevo_id:
             self._registrar_auditoria(
                 id_usuario=id_usuario_admin,
@@ -83,9 +83,9 @@ class BackendAdapter:
             )
         return nuevo_id
     
-    def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
-        """Alias usado por la interfaz de registro de clientes."""
-        return self.insertar_cliente(nombre, dni, cuit, direccion, telefono, email, limite_credito, id_usuario_admin=id_usuario_admin)
+    def insertar_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
+        """DEPRECATED: Alias de compatibilidad de interfaz → delega a crear_cliente()."""
+        return self.crear_cliente(nombre, dni, cuit, direccion, telefono, email, limite_credito, id_usuario_admin=id_usuario_admin)
 
     def actualizar_cliente(self, id_cliente: int, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float, id_usuario_admin: int | None = None) -> bool:
         try:
@@ -110,17 +110,29 @@ class BackendAdapter:
                 )
         return resultado
         
-    def listar_clientes(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
+    def obtener_clientes(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_clientes", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
 
-    def listar_clientes_con_saldos(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
+    def listar_clientes(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
+        """DEPRECATED: Usar obtener_clientes()."""
+        return self.obtener_clientes(incluir_inactivos)
+
+    def obtener_clientes_con_saldos(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_clientes_con_saldos", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
 
-    def obtener_cliente_para_editar(self, id_cliente: int) -> dict | None:
+    def listar_clientes_con_saldos(self, incluir_inactivos: bool = False) -> list[dict[str, Any]]:
+        """DEPRECATED: Usar obtener_clientes_con_saldos()."""
+        return self.obtener_clientes_con_saldos(incluir_inactivos)
+
+    def obtener_cliente_completo(self, id_cliente: int) -> dict | None:
         fn = getattr(DB, "obtener_cliente_completo", None)
         return fn(id_cliente) if callable(fn) else None
+
+    def obtener_cliente_para_editar(self, id_cliente: int) -> dict | None:
+        """DEPRECATED: Usar obtener_cliente_completo()."""
+        return self.obtener_cliente_completo(id_cliente)
 
     def buscar_cliente_por_nombre(self, patron: str) -> list[dict[str, Any]]:
         fn = getattr(DB, "buscar_cliente_por_nombre", None)
@@ -159,17 +171,7 @@ class BackendAdapter:
         return resultado
 
     # ---------- Ventas ----------
-    def insertar_venta(self, id_usuario: int, id_cliente: int | None = None) -> int | None:
-        return DB.insertar_venta(id_usuario, None if id_cliente in (None, 0) else id_cliente)
-    def insertar_detalle_venta(self, id_venta: int, id_producto: int, cantidad: float, precio_unitario: float) -> bool:
-        return DB.insertar_detalle_venta(id_venta, id_producto, cantidad, precio_unitario)
-    def insertar_detalle_venta_libre(self, id_venta: int, nombre: str, cantidad: float, precio_unitario: float) -> bool:
-        fn = getattr(DB, "insertar_detalle_venta_libre", None)
-        return bool(fn(id_venta, nombre, cantidad, precio_unitario)) if callable(fn) else False
-    def actualizar_pago_y_estado_venta(self, id_venta: int, tipo_pago: str) -> bool:
-        fn = getattr(DB, "actualizar_pago_y_estado_venta", None)
-        return bool(fn(id_venta, tipo_pago, "completada")) if callable(fn) else False
-        
+
     def registrar_venta_completa(
         self, 
         id_usuario: int, 
@@ -246,9 +248,13 @@ class BackendAdapter:
     def obtener_categorias(self, incluir_inactivas: bool = False) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_categorias", None)
         return list(fn(incluir_inactivas) or []) if callable(fn) else []
+    def obtener_productos(self) -> list[dict[str, Any]]:
+        fn = getattr(DB, "obtener_productos", None)
+        return list(fn() or []) if callable(fn) else []
+
     def obtener_productos_full(self) -> list[dict[str, Any]]:
-        fn = getattr(DB, "buscar_producto_por_nombre", None)
-        return list(fn("") or []) if callable(fn) else []
+        """DEPRECATED: Alias de conveniencia. Usar obtener_productos()."""
+        return self.obtener_productos()
     def buscar_producto_por_nombre(self, patron: str) -> list[dict[str, Any]]:
         return list(DB.buscar_producto_por_nombre(patron) or [])
     def buscar_producto_por_codigo_barras(self, codigo: str) -> dict | None:
@@ -398,22 +404,40 @@ class BackendAdapter:
         fn = getattr(DB, "obtener_stock_minimo", None)
         return int(fn(id_producto)) if callable(fn) else 0
         
-    def actualizar_inventario_absoluto(self, id_producto: int, stock_abs: float, stock_minimo: Optional[int], id_usuario: int | None = None) -> bool:
-        
+    def actualizar_inventario_absoluto(
+        self,
+        id_producto: int,
+        stock_abs: float,
+        stock_minimo: Optional[int],
+        id_usuario: int | None = None,
+        motivo: str = ""
+    ) -> bool:
+        """Establece el stock de un producto a un valor absoluto.
+
+        Args:
+            id_producto: ID del producto a actualizar.
+            stock_abs: Nuevo valor de stock (valor absoluto, no delta).
+            stock_minimo: Nuevo stock mínimo. Si es None, no se modifica.
+            id_usuario: ID del usuario que realiza el ajuste (para auditoría).
+            motivo: Razón del ajuste (obligatorio desde el módulo de ajuste manual;
+                    puede quedar vacío cuando se llama desde el ABM de productos).
+        """
         # 1. Obtener datos anteriores PARA AUDITAR
         stock_anterior = self.obtener_stock(id_producto)
         stock_min_anterior = self.obtener_stock_minimo(id_producto)
-        
+
         fn = getattr(DB, "actualizar_inventario_absoluto", None)
-        
+
         # 2. Actualizar
         resultado = bool(fn(id_producto, float(stock_abs), int(stock_minimo) if stock_minimo is not None else None)) if callable(fn) else False
-        
+
         # 3. Registrar auditoría
         if resultado:
             datos_viejos = {"stock": stock_anterior, "stock_minimo": stock_min_anterior}
             datos_nuevos = {"stock": stock_abs, "stock_minimo": stock_minimo}
-            
+            if motivo:
+                datos_nuevos["motivo"] = motivo
+
             self._registrar_auditoria(
                 id_usuario=id_usuario,
                 accion="AJUSTE_STOCK_MANUAL",
@@ -422,7 +446,23 @@ class BackendAdapter:
                 datos_anteriores=datos_viejos,
                 datos_nuevos=datos_nuevos
             )
-        
+
+            # 4. Insertar fila en AuditoriaInventario (cierra el hueco de trazabilidad)
+            try:
+                fn_inv = getattr(DB, "registrar_auditoria_inventario", None)
+                if callable(fn_inv):
+                    fn_inv(
+                        id_producto=id_producto,
+                        cantidad_anterior=stock_anterior,
+                        cantidad_nueva=float(stock_abs),
+                        tipo_movimiento="ajuste_manual",
+                        id_referencia=None,
+                        id_usuario=id_usuario,
+                        observaciones=motivo or None
+                    )
+            except Exception as e:
+                logger.warning(f"No se pudo insertar en AuditoriaInventario: {e}")
+
         return resultado
 
     def obtener_stock_bajo(self) -> list[dict[str, Any]]:
@@ -455,7 +495,11 @@ class BackendAdapter:
 
 # ---------- Proveedores y Compras ----------
 
-    def registrar_pago_proveedor(self, id_proveedor: int, monto: float, medio: str, id_usuario: int, obs: str) -> bool:
+    def registrar_pago_proveedor(self, id_proveedor: int, monto: float, medio: str, id_usuario: int, obs: str,
+                                   usuario_actual: dict | None = None) -> bool:
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'registrar_pagos_proveedores'):
+            raise PermissionError("Sin permiso: registrar_pagos_proveedores")
         fn = getattr(DB, "registrar_pago_proveedor", None)
         if callable(fn):
             return fn(id_proveedor, monto, medio, id_usuario, obs)
@@ -465,16 +509,21 @@ class BackendAdapter:
         fn = getattr(DB, "obtener_proveedores", None)
         return list(fn(incluir_inactivos) or []) if callable(fn) else []
 
-    # EN app/database/backend_adapter.py (Línea ~312)
-    def insertar_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str, id_usuario_admin: int | None = None) -> int | None:
-        fn = getattr(DB, "insertar_proveedor", None)
+    def crear_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str,
+                            email: str, direccion: str,
+                            id_usuario_admin: int | None = None,
+                            usuario_actual: dict | None = None) -> int | None:
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'crear_proveedores'):
+            raise PermissionError("Sin permiso: crear_proveedores")
+        fn = getattr(DB, "crear_proveedor", None)
         if not callable(fn):
             return None
         nuevo_id = fn(
             nombre=nombre,
             empresa=empresa,
-            cuit_empresa=cuit_empresa, # ¡Asegúrate de que este cuit sea el nuevo nombre!
-            dni_vendedor=dni_vendedor, # ¡Asegúrate de que este dni sea el nuevo nombre!
+            cuit_empresa=cuit_empresa,
+            dni_vendedor=dni_vendedor,
             telefono=telefono,
             email=email,
             direccion=direccion
@@ -489,29 +538,50 @@ class BackendAdapter:
             )
         return nuevo_id
 
-    # EN app/database/backend_adapter.py (Línea ~324)
-    def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str, email: str, direccion: str) -> bool:
+    def insertar_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str,
+                            email: str, direccion: str,
+                            id_usuario_admin: int | None = None,
+                            usuario_actual: dict | None = None) -> int | None:
+        """DEPRECATED: Usar crear_proveedor()."""
+        return self.crear_proveedor(nombre, empresa, cuit_empresa, dni_vendedor, telefono, email, direccion, id_usuario_admin, usuario_actual)
+
+    def actualizar_proveedor(self, id_proveedor: int, nombre: str, empresa: str, cuit_empresa: str,
+                              dni_vendedor: str, telefono: str, email: str, direccion: str,
+                              id_usuario_admin: int | None = None,
+                              usuario_actual: dict | None = None) -> bool:
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'editar_proveedores'):
+            raise PermissionError("Sin permiso: editar_proveedores")
         fn = getattr(DB, "actualizar_proveedor", None)
         if not callable(fn):
             return False
-        return bool(fn(
+        resultado = bool(fn(
             id_proveedor=id_proveedor,
             nombre=nombre,
             empresa=empresa,
-            cuit_empresa=cuit_empresa, # ¡Asegúrate de que este cuit sea el nuevo nombre!
-            dni_vendedor=dni_vendedor, # ¡Asegúrate de que este dni sea el nuevo nombre!
+            cuit_empresa=cuit_empresa,
+            dni_vendedor=dni_vendedor,
             telefono=telefono,
             email=email,
             direccion=direccion
         ))
+        if resultado:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="EDITAR_PROVEEDOR",
+                tabla_afectada="Proveedor",
+                id_registro=id_proveedor,
+                datos_nuevos={"empresa": empresa, "cuit_empresa": cuit_empresa}
+            )
+        return resultado
 
     def obtener_proveedor_completo(self, id_proveedor: int) -> dict | None:
         fn = getattr(DB, "obtener_proveedor_completo", None)
         return fn(id_proveedor) if callable(fn) else None
 
     def obtener_proveedor_para_editar(self, id_proveedor: int) -> dict | None:
-        fn = getattr(DB, "obtener_proveedor_completo", None)
-        return fn(id_proveedor) if callable(fn) else None
+        """DEPRECATED: Alias de compatibilidad → delega a obtener_proveedor_completo()."""
+        return self.obtener_proveedor_completo(id_proveedor)
 
     def eliminar_proveedor_logico(self, id_proveedor: int, id_usuario_admin: int | None = None) -> bool:
         fn = getattr(DB, "eliminar_proveedor_logico", None)
@@ -557,65 +627,153 @@ class BackendAdapter:
         fn = getattr(DB, "quitar_producto_a_proveedor", None)
         return bool(fn(id_proveedor, id_producto)) if callable(fn) else False
 
-    def insertar_compra(self, id_usuario: int, id_proveedor: int, items: list[dict] | None = None, medio_pago: str = 'efectivo') -> int | None:
-            """
-            Inserta compra permitiendo seleccionar medio de pago.
-            """
-            fn = getattr(DB, "insertar_compra", None)
-            if not callable(fn):
-                return None
+    def registrar_compra(self, id_usuario: int, id_proveedor: int, items: list[dict] | None = None,
+                         medio_pago: str = 'efectivo',
+                         usuario_actual: dict | None = None) -> int | None:
+        """
+        Registra compra permitiendo seleccionar medio de pago.
+        """
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'registrar_compras'):
+            raise PermissionError("Sin permiso: registrar_compras")
+        fn = getattr(DB, "registrar_compra", None)
+        if not callable(fn):
+            return None
 
-            try:
-                # Llamamos a la nueva firma de DB.insertar_compra
-                if items is not None:
-                    return fn(id_usuario, id_proveedor, items, medio_pago)
-                else:
-                    return fn(id_usuario, id_proveedor)
-            except TypeError:
-                # Fallback por si DB no se actualizó
-                if items is not None:
-                    return fn(id_usuario, id_proveedor, items)
+        try:
+            # Llamamos a la nueva firma de DB.registrar_compra
+            if items is not None:
+                return fn(id_usuario, id_proveedor, items, medio_pago)
+            else:
                 return fn(id_usuario, id_proveedor)
-        
-    def insertar_detalle_compra(self, id_compra: int, id_producto: int, cantidad: float, precio_costo: float) -> bool:
-        fn = getattr(DB, "insertar_detalle_compra", None)
-        return bool(fn(id_compra, id_producto, cantidad, precio_costo)) if callable(fn) else False
-    
+        except TypeError:
+            # Fallback por si DB no se actualizó
+            if items is not None:
+                return fn(id_usuario, id_proveedor, items)
+            return fn(id_usuario, id_proveedor)
+
+    def insertar_compra(self, id_usuario: int, id_proveedor: int, items: list[dict] | None = None,
+                         medio_pago: str = 'efectivo',
+                         usuario_actual: dict | None = None) -> int | None:
+        """DEPRECATED: Usar registrar_compra()."""
+        return self.registrar_compra(id_usuario, id_proveedor, items, medio_pago, usuario_actual)
+
+
     # ---------- Historiales (Venta/Compra) ----------
-    def obtener_ventas_maestro(
+    def contar_ventas_maestro(
         self, 
         fecha_desde: Optional[str], 
         fecha_hasta: Optional[str], 
         id_cliente: Optional[int], 
         id_vendedor: Optional[int]
+    ) -> int:
+        fn = getattr(DB, "contar_ventas_maestro", None)
+        return int(fn(fecha_desde, fecha_hasta, id_cliente, id_vendedor)) if callable(fn) else 0
+
+    def obtener_ventas_maestro(
+        self, 
+        fecha_desde: Optional[str], 
+        fecha_hasta: Optional[str], 
+        id_cliente: Optional[int], 
+        id_vendedor: Optional[int],
+        limit: Optional[int] = None,
+        offset: Optional[int] = 0
     ) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_ventas_maestro", None)
-        return list(fn(fecha_desde, fecha_hasta, id_cliente, id_vendedor) or []) if callable(fn) else []
+        return list(fn(fecha_desde, fecha_hasta, id_cliente, id_vendedor, limit, offset) or []) if callable(fn) else []
     def obtener_venta_detalle(self, id_venta: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_venta_detalle", None)
         return list(fn(id_venta) or []) if callable(fn) else []
-    def obtener_compras_maestro(
+
+    def anular_venta(self, id_venta: int, id_usuario: int, motivo: str | None = None) -> bool:
+        """
+        Anula una venta de forma atómica: cambia el estado a 'cancelada',
+        restituye stock y revierte la cuenta corriente si corresponde.
+
+        Raises:
+            ValueError: Si la venta ya está anulada o no está completada.
+            Exception: Error de base de datos.
+            PermissionError: Si un vendedor intenta anular una venta.
+        """
+        from app.database import DB
+        usuarios = DB.obtener_usuarios_con_rol()
+        user = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+        if user and user.get('rol_nombre') == 'vendedor':
+            raise PermissionError("No tienes permisos para anular ventas.")
+
+        fn = getattr(DB, "anular_venta", None)
+        if not callable(fn):
+            raise RuntimeError("DB.anular_venta no está implementado.")
+        return bool(fn(id_venta, id_usuario, motivo))
+
+    def anular_compra(self, id_compra: int, id_usuario: int, motivo: str | None = None) -> bool:
+        """
+        Anula una compra de forma atómica: cambia el estado a 'cancelada',
+        restituye stock y revierte el pago/cuenta corriente si corresponde.
+
+        Raises:
+            ValueError: Si la compra ya está anulada o no hay caja.
+            Exception: Error de base de datos.
+            PermissionError: Si un vendedor intenta anular una compra.
+        """
+        from app.database import DB
+        usuarios = DB.obtener_usuarios_con_rol()
+        user = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+        if user and user.get('rol_nombre') == 'vendedor':
+            raise PermissionError("No tienes permisos para anular compras.")
+
+        fn = getattr(DB, "anular_compra", None)
+        if not callable(fn):
+            raise RuntimeError("DB.anular_compra no está implementado.")
+        return bool(fn(id_compra, id_usuario, motivo))
+
+    def contar_compras_maestro(
         self, 
         fecha_desde: Optional[str], 
         fecha_hasta: Optional[str], 
         id_proveedor: Optional[int]
+    ) -> int:
+        fn = getattr(DB, "contar_compras_maestro", None)
+        return int(fn(fecha_desde, fecha_hasta, id_proveedor)) if callable(fn) else 0
+
+    def obtener_compras_maestro(
+        self, 
+        fecha_desde: Optional[str], 
+        fecha_hasta: Optional[str], 
+        id_proveedor: Optional[int],
+        limit: Optional[int] = None,
+        offset: Optional[int] = 0
     ) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_compras_maestro", None)
-        return list(fn(fecha_desde, fecha_hasta, id_proveedor) or []) if callable(fn) else []
+        return list(fn(fecha_desde, fecha_hasta, id_proveedor, limit, offset) or []) if callable(fn) else []
+
     def obtener_compra_detalle(self, id_compra: int) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_compra_detalle", None)
         return list(fn(id_compra) or []) if callable(fn) else []
+
     
     # ---------- Historial de Pagos ----------
-    def obtener_pagos_maestro(
+    def contar_pagos_maestro(
         self,
         fecha_desde: Optional[str],
         fecha_hasta: Optional[str],
         id_cliente: Optional[int],
         id_usuario: Optional[int]
+    ) -> int:
+        fn = getattr(DB, "contar_pagos_maestro", None)
+        return int(fn(fecha_desde, fecha_hasta, id_cliente, id_usuario)) if callable(fn) else 0
+
+    def obtener_pagos_maestro(
+        self,
+        fecha_desde: Optional[str],
+        fecha_hasta: Optional[str],
+        id_cliente: Optional[int],
+        id_usuario: Optional[int],
+        limit: Optional[int] = None,
+        offset: Optional[int] = 0
     ) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_pagos_maestro", None)
-        return list(fn(fecha_desde, fecha_hasta, id_cliente, id_usuario) or []) if callable(fn) else []
+        return list(fn(fecha_desde, fecha_hasta, id_cliente, id_usuario, limit, offset) or []) if callable(fn) else []
     
     # ---------- Cuenta Corriente ----------
     def obtener_clientes_con_deuda(self) -> list[dict[str, Any]]:
@@ -715,6 +873,13 @@ class BackendAdapter:
                     datos_anteriores=datos_anteriores,
                     datos_nuevos=datos_nuevos
                 )
+
+            # Si el rol cambió, enviar un broadcast para forzar el cierre de sesión remotamente
+            if id_rol_nuevo != rol_anterior:
+                try:
+                    self.enviar_mensaje_broadcast("SYS:FORCE_LOGOUT", 1, "usuario", id_usuario)
+                except Exception as e:
+                    logger.error(f"Error enviando broadcast de cierre de sesión: {e}")
         
         return exito_rol and exito_nombre
 
@@ -774,6 +939,11 @@ class BackendAdapter:
         fn = getattr(DB, "obtener_ventas_diarias", None)
         return list(fn(desde, hasta) or []) if callable(fn) else []
 
+    def obtener_productos_mas_vendidos(self, fecha_desde: str, fecha_hasta: str, limite: int = 5) -> list[dict[str, Any]]:
+        """Retorna los productos más vendidos en el rango de fechas indicado."""
+        fn = getattr(DB, "obtener_productos_mas_vendidos", None)
+        return list(fn(fecha_desde, fecha_hasta, limite) or []) if callable(fn) else []
+
 # ---------- CAJA (SISTEMA INDIVIDUAL POR USUARIO) ----------
     
     def obtener_session_abierta(self, id_usuario: int) -> dict | None:
@@ -806,7 +976,7 @@ class BackendAdapter:
         fn = getattr(DB, "obtener_tesoreria_activa", None)
         return fn() if callable(fn) else None
     
-    def abrir_caja_session(self, id_usuario: int, monto_inicial: float, tipo_caja: str = 'ventas') -> bool:
+    def abrir_caja_session(self, id_usuario: int, monto_inicial: float, tipo_caja: str = 'turno') -> bool:
         fn = getattr(DB, "abrir_caja_session", None)
         if not callable(fn): return False
         try:
@@ -819,9 +989,9 @@ class BackendAdapter:
         fn = getattr(DB, "registrar_movimiento_manual", None)
         return bool(fn(id_session, tipo, monto, motivo, descripcion, id_usuario)) if callable(fn) else False
     
-    def transferir_entre_cajas(self, origen: int, destino: int, monto: float, id_usuario: int, motivo_salida: str, motivo_entrada: str, obs: str) -> bool:
+    def transferir_entre_cajas(self, origen: int, destino: int, monto: float, id_usuario: int, motivo_salida: str, motivo_entrada: str, obs: str, id_autorizador: int = None) -> bool:
         fn = getattr(DB, "transferir_entre_cajas", None)
-        return bool(fn(origen, destino, monto, id_usuario, motivo_salida, motivo_entrada, obs)) if callable(fn) else False
+        return bool(fn(origen, destino, monto, id_usuario, motivo_salida, motivo_entrada, obs, id_autorizador)) if callable(fn) else False
     
     def obtener_resumen_cierre(self, id_session: int) -> dict:
         fn = getattr(DB, "obtener_resumen_cierre", None)
@@ -835,10 +1005,18 @@ class BackendAdapter:
         fn = getattr(DB, "cerrar_caja_por_supervisor", None)
         return bool(fn(id_session, id_supervisor, obs)) if callable(fn) else False
 
+    def registrar_ingreso_capital(self, monto: float, observacion: str, id_usuario: int) -> bool:
+        fn = getattr(DB, "registrar_ingreso_capital", None)
+        return bool(fn(monto, observacion, id_usuario)) if callable(fn) else False
+
     # ---------- Auditoría (Bitácora) ----------
-    def obtener_bitacora_acciones(self, fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None, id_usuario: Optional[int] = None, accion: Optional[str] = None) -> list[dict]:
+    def contar_bitacora_acciones(self, fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None, id_usuario: Optional[int] = None, accion: Optional[str] = None) -> int:
+        fn = getattr(DB, "contar_bitacora_acciones", None)
+        return int(fn(fecha_desde, fecha_hasta, id_usuario, accion)) if callable(fn) else 0
+
+    def obtener_bitacora_acciones(self, fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None, id_usuario: Optional[int] = None, accion: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = 0) -> list[dict]:
         fn = getattr(DB, "obtener_bitacora_acciones", None)
-        return list(fn(fecha_desde, fecha_hasta, id_usuario, accion) or []) if callable(fn) else []
+        return list(fn(fecha_desde, fecha_hasta, id_usuario, accion, limit, offset) or []) if callable(fn) else []
     
     # --- REPORTES DE CAJA ---
     def obtener_resumen_diario(self, fecha: str | None = None) -> dict:
@@ -849,6 +1027,19 @@ class BackendAdapter:
         fn = getattr(DB, "obtener_resumen_diario", None)
         return fn(fecha) if callable(fn) else {}
     
+    def contar_historial_movimientos_caja(
+        self,
+        fecha_desde: str | None = None,
+        fecha_hasta: str | None = None,
+        tipo: str | None = None,
+        motivo: str | None = None,
+        id_usuario: int | None = None,
+        id_session: int | None = None,
+        tipo_caja: str | None = None
+    ) -> int:
+        fn = getattr(DB, "contar_historial_movimientos_caja", None)
+        return int(fn(fecha_desde, fecha_hasta, tipo, motivo, id_usuario, id_session, tipo_caja)) if callable(fn) else 0
+
     def obtener_historial_movimientos_caja(
         self,
         fecha_desde: str | None = None,
@@ -856,18 +1047,21 @@ class BackendAdapter:
         tipo: str | None = None,
         motivo: str | None = None,
         id_usuario: int | None = None,
-        id_session: int | None = None
+        id_session: int | None = None,
+        tipo_caja: str | None = None,
+        limit: int | None = None,
+        offset: int = 0
     ) -> list[dict]:
         """
         Obtiene historial de movimientos de caja con filtros.
         """
         fn = getattr(DB, "obtener_historial_movimientos_caja", None)
-        return list(fn(fecha_desde, fecha_hasta, tipo, motivo, id_usuario, id_session) or []) if callable(fn) else []
+        return list(fn(fecha_desde, fecha_hasta, tipo, motivo, id_usuario, id_session, tipo_caja, limit, offset) or []) if callable(fn) else []
 
-    def obtener_sesiones_abiertas_con_totales(self) -> list[dict[str, Any]]:
+    def obtener_sesiones_abiertas_con_totales(self, tipo_caja: str = None) -> list[dict[str, Any]]:
         """Retorna todas las sesiones de caja abiertas con sus totales acumulados."""
         fn = getattr(DB, "obtener_sesiones_abiertas_con_totales", None)
-        return list(fn() or []) if callable(fn) else []
+        return list(fn(tipo_caja) or []) if callable(fn) else []
 
     def obtener_kpis_admin(self) -> dict[str, Any]:
         """Obtiene los KPIs globales del día para el dashboard del administrador."""
@@ -882,4 +1076,125 @@ class BackendAdapter:
     def obtener_usuarios_actividad_hoy(self) -> list[dict]:
         """Obtiene la lista de usuarios con actividad el día de hoy para el filtro del Live Feed."""
         fn = getattr(DB, "obtener_usuarios_actividad_hoy", None)
-        return list(fn() or []) if callable(fn) else []
+        return list(fn() or []) if callable(fn) else []
+
+    # ---------- Broadcast ----------
+
+    def obtener_usuarios_activos_para_broadcast(self, excluir_id: int | None = None) -> list[dict]:
+        """
+        Obtiene usuarios activos para poblar el selector de destinatario en el broadcast.
+        Excluye opcionalmente al admin emisor.
+        """
+        fn = getattr(DB, "obtener_usuarios_con_rol", None)
+        if not callable(fn):
+            return []
+        usuarios = list(fn() or [])
+        if excluir_id is not None:
+            usuarios = [u for u in usuarios if u.get("id_usuario") != excluir_id]
+        return [{"id_usuario": u["id_usuario"], "nombre": u["nombre"]} for u in usuarios if u.get("activo", True)]
+
+    def enviar_mensaje_broadcast(
+        self,
+        contenido: str,
+        id_admin: int,
+        destinatario_tipo: str = "todos",
+        destinatario_id: int | None = None,
+    ) -> bool:
+        """
+        Inserta un mensaje broadcast en la tabla mensajes_broadcast.
+        Delega a DB.enviar_mensaje_broadcast().
+        Retorna True si el mensaje fue insertado, False en caso de error.
+        """
+        fn = getattr(DB, "enviar_mensaje_broadcast", None)
+        if callable(fn):
+            return bool(fn(contenido, id_admin, destinatario_tipo, destinatario_id))
+        logger.error("enviar_mensaje_broadcast: función no disponible en DB.py")
+        return False
+
+    def obtener_mensajes_no_leidos(
+        self,
+        id_rol: int,
+        id_usuario: int,
+        excluir_id_admin: int | None = None,
+        ultimo_id: int = 0,
+    ) -> list[dict]:
+        """
+        Devuelve los mensajes broadcast con id_mensaje > ultimo_id para el usuario dado.
+
+        El parámetro ultimo_id actúa como cursor local del cliente: solo se retornan
+        mensajes nuevos desde la última verificación, sin modificar la BD.
+        Si excluir_id_admin se proporciona, se omiten los mensajes enviados por ese
+        admin (evita que el administrador reciba sus propios broadcasts).
+        """
+        fn = getattr(DB, "obtener_mensajes_broadcast_no_leidos", None)
+        if callable(fn):
+            return list(fn(id_rol, id_usuario, excluir_id_admin, ultimo_id) or [])
+        return []
+
+    def marcar_mensajes_leidos(self, ids: list[int]) -> bool:
+        """Marca como leídos los mensajes broadcast con los ids indicados.
+
+        Nota: Este método queda disponible por compatibilidad pero ya no se invoca
+        en el ciclo de polling (v2). El estado de lectura ahora se gestiona con
+        un cursor local en memoria en `broadcast_manager.py`.
+        """
+        fn = getattr(DB, "marcar_mensajes_broadcast_leidos", None)
+        if callable(fn):
+            return bool(fn(ids))
+        return False
+
+    def obtener_ultimo_id_broadcast(self) -> int:
+        """
+        Devuelve el id_mensaje más alto en mensajes_broadcast.
+
+        Usado al iniciar el polling para fijar el cursor del cliente y evitar
+        que se re-entreguen mensajes históricos al iniciar sesión.
+        """
+        fn = getattr(DB, "obtener_ultimo_id_broadcast", None)
+        if callable(fn):
+            return int(fn() or 0)
+        return 0
+    # ---------- Tesorería ----------
+    def obtener_tesoreria_hoy(self) -> dict | None:
+        conn = None
+        try:
+            conn = DB.conectar()
+            cur = conn.cursor(dictionary=True)
+            return DB.obtener_tesoreria_hoy(cur)
+        except Exception as e:
+            logger.error(f"Error en obtener_tesoreria_hoy: {e}")
+            return None
+        finally:
+            if conn: conn.close()
+            
+    def crear_tesoreria_hoy(self, id_usuario: int) -> dict | None:
+        conn = None
+        try:
+            conn = DB.conectar()
+            cur = conn.cursor(dictionary=True)
+            conn.start_transaction()
+            res = DB.crear_tesoreria_hoy(cur, id_usuario)
+            conn.commit()
+            return res
+        except Exception as e:
+            if conn: conn.rollback()
+            logger.error(f"Error en crear_tesoreria_hoy: {e}")
+            return None
+        finally:
+            if conn: conn.close()
+            
+    def obtener_o_crear_tesoreria_hoy(self, id_usuario: int) -> dict | None:
+        conn = None
+        try:
+            conn = DB.conectar()
+            cur = conn.cursor(dictionary=True)
+            conn.start_transaction()
+            res = DB.obtener_o_crear_tesoreria_hoy(cur, id_usuario)
+            conn.commit()
+            return res
+        except Exception as e:
+            if conn: conn.rollback()
+            logger.error(f"Error en obtener_o_crear_tesoreria_hoy: {e}")
+            return None
+        finally:
+            if conn: conn.close()

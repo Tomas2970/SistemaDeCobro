@@ -23,6 +23,7 @@ ui_gestion_clientes  = _safe_import("app.frontend.interfaz_gestion_clientes", "u
 ui_gestion_proveedores = _safe_import("app.frontend.interfaz_gestion_proveedores", "ui_gestion_proveedores")
 ui_caja_router       = _safe_import("app.frontend.interfaz_caja", "ui_caja_router")
 ui_compra            = _safe_import("app.frontend.interfaz_compra", "ui_compra")
+ui_historiales       = _safe_import("app.frontend.interfaz_historiales", "ui_historiales")
 
 def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     if not callable(fn):
@@ -78,6 +79,14 @@ class InterfazDashboardSupervisor:
         bg_color = get_color("bg_surface") if ctk.get_appearance_mode() == "Light" else "#111827"
         self.win.configure(fg_color=bg_color)
 
+        def on_main_focus(event):
+            if event.widget == self.win:
+                if hasattr(self.win, '_ventanas_modulos'):
+                    for ventana in self.win._ventanas_modulos.values():
+                        if ventana and ventana.winfo_exists():
+                            ventana.lift()
+        self.win.bind("<FocusIn>", on_main_focus)
+
         # ====== SIDEBAR ======
         color_sidebar = "#1e3a8a"
         sidebar = ctk.CTkFrame(self.win, width=260, fg_color=color_sidebar, corner_radius=0)
@@ -90,13 +99,14 @@ class InterfazDashboardSupervisor:
 
         # Módulos permitidos explícitos
         modulos = [
-            ("📦 Inventario", "ver_inventario", ui_inventario, {}),
-            ("🥫 Productos", "ver_productos", ui_productos, {}),
-            ("🛒 Registrar Compra", "registrar_compras", ui_compra, {}),
-            ("👥 Clientes", 'ver_clientes', ui_gestion_clientes, {}),
-            ("🚚 Proveedores", 'ver_proveedores', ui_gestion_proveedores, {}),
-            ("📊 Reportes del Día", 'ver_reportes', ui_reportes, {'modo_vista': 'reportes'}),
-            ("📦 Control de Caja", 'abrir_caja', ui_caja_router, {})
+            ("📦 Inventario",          "ver_inventario",   ui_inventario,          {}),
+            ("🛒 Registrar Compra",     "registrar_compras",ui_compra,              {}),
+            ("👥 Clientes",             'ver_clientes',     ui_gestion_clientes,    {}),
+            ("🚚 Proveedores",          'ver_proveedores',  ui_gestion_proveedores, {}),
+            ("📊 Reportes del Día",     'ver_reportes',     ui_reportes,            {'modo_vista': 'reportes'}),
+            ("📦 Control de Caja",      'abrir_caja',       ui_caja_router,         {}),
+            # Historial limitado a los últimos DIAS_HISTORIAL_SUPERVISOR días
+            ("🧾 Historial (7 días)",   'ver_ventas',       ui_historiales,         {'max_dias_atras': 7}),
         ]
 
         for texto, permiso, fn, kw in modulos:
@@ -128,12 +138,11 @@ class InterfazDashboardSupervisor:
         self.container_tarjetas_cajas = ctk.CTkFrame(self.frm_cajas, fg_color="transparent")
         self.container_tarjetas_cajas.pack(fill="both", expand=True, padx=10)
 
-        # --- SECCIÓN DERECHA: ALERTAS Y ACCIONES ---
+        # --- SECCIÓN DERECHA: ALERTAS ---
         frm_derecha = ctk.CTkFrame(main_container, fg_color="transparent")
         frm_derecha.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         frm_derecha.grid_columnconfigure(0, weight=1)
-        frm_derecha.grid_rowconfigure(0, weight=7) # 70% Alertas
-        frm_derecha.grid_rowconfigure(1, weight=3) # 30% Acciones Rápidas
+        frm_derecha.grid_rowconfigure(0, weight=1) # 100% Alertas
 
         # 2. PANEL DE ALERTAS
         self.frm_alertas = ctk.CTkScrollableFrame(frm_derecha, fg_color=get_color("bg_surface"), corner_radius=15,
@@ -144,32 +153,6 @@ class InterfazDashboardSupervisor:
         self.container_alertas = ctk.CTkFrame(self.frm_alertas, fg_color="transparent")
         self.container_alertas.pack(fill="both", expand=True, padx=10)
 
-        # 3. ACCIONES RÁPIDAS
-        frm_acciones = ctk.CTkFrame(frm_derecha, fg_color=get_color("bg_surface"), corner_radius=15,
-                                    border_color="#e2e8f0" if ctk.get_appearance_mode()=="Light" else "#1e293b", border_width=1)
-        frm_acciones.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-        
-        ctk.CTkLabel(frm_acciones, text="⚡ Acciones Rápidas", font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(anchor="w", padx=15, pady=(15, 10))
-        
-        btn_grid = ctk.CTkFrame(frm_acciones, fg_color="transparent")
-        btn_grid.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-        
-        btn_grid.grid_columnconfigure(0, weight=1)
-        btn_grid.grid_columnconfigure(1, weight=1)
-
-        def cmd_inv(): _abrir_seguro(self.win, self.backend, self.usuario, ui_inventario, "Inventario")
-        def cmd_hist(): _abrir_seguro(self.win, self.backend, self.usuario, ui_reportes, "Historial de Ventas", modo_vista='reportes')
-        def cmd_cli(): _abrir_seguro(self.win, self.backend, self.usuario, ui_gestion_clientes, "Clientes")
-        
-        btn_inv = ctk.CTkButton(btn_grid, text="📦 Ajuste Inventario", font=("Segoe UI", 13, "bold"), fg_color="#4f46e5", hover_color="#4338ca", command=cmd_inv)
-        btn_inv.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
-        
-        btn_hist = ctk.CTkButton(btn_grid, text="📊 Ventas del Día", font=("Segoe UI", 13, "bold"), fg_color="#10b981", hover_color="#059669", command=cmd_hist)
-        btn_hist.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        
-        btn_cli = ctk.CTkButton(btn_grid, text="👥 Gestión Clientes", font=("Segoe UI", 13, "bold"), fg_color="#f59e0b", hover_color="#d97706", command=cmd_cli)
-        btn_cli.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-
         # Iniciar ciclo de actualización
         self.refresh_dashboard()
         
@@ -178,19 +161,30 @@ class InterfazDashboardSupervisor:
         
         # LIMPIEZA POST-SESIÓN
         if self.win.winfo_exists():
-            for widget in self.win.winfo_children():
-                try:
-                    widget.destroy()
-                except Exception:
-                    pass
+            try:
+                for widget in self.win.winfo_children():
+                    try:
+                        widget.destroy()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     def cerrar_sesion(self):
         if messagebox.mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
             self.cerrar()
 
     def cerrar(self):
-        if self._polling_job:
+        if hasattr(self, '_polling_job') and self._polling_job:
             self.win.after_cancel(self._polling_job)
+            self._polling_job = None
+            
+        try:
+            from app.frontend.broadcast_manager import detener_polling_broadcast
+            detener_polling_broadcast(self.win)
+        except Exception:
+            pass
+            
         self.win.quit()
 
     def refresh_dashboard(self):
@@ -199,19 +193,22 @@ class InterfazDashboardSupervisor:
         self._polling_job = self.win.after(10000, self.refresh_dashboard)
 
     def _actualizar_cajas(self):
-        for widget in self.container_tarjetas_cajas.winfo_children():
-            widget.destroy()
+        try:
+            for widget in self.container_tarjetas_cajas.winfo_children():
+                widget.destroy()
+        except Exception:
+            return
             
         try:
             if hasattr(self.backend, "obtener_sesiones_abiertas_con_totales"):
-                sesiones = self.backend.obtener_sesiones_abiertas_con_totales()
+                sesiones = self.backend.obtener_sesiones_abiertas_con_totales(tipo_caja='turno')
             else:
                 sesiones = []
                 
             print(f"DEBUG (Supervisor): _actualizar_cajas ejecutado. Cajas encontradas: {len(sesiones)}")
                 
             if not sesiones:
-                ctk.CTkLabel(self.container_tarjetas_cajas, text="No hay cajas abiertas en este momento.", 
+                ctk.CTkLabel(self.container_tarjetas_cajas, text="No hay cajas de turno abiertas en este momento", 
                              font=("Segoe UI", 14, "italic"), text_color=get_color("text_secondary")).pack(pady=40)
                 return
                 
@@ -281,8 +278,11 @@ class InterfazDashboardSupervisor:
             logger.error(f"Error actualizando cajas: {e}")
 
     def _actualizar_alertas(self):
-        for widget in self.container_alertas.winfo_children():
-            widget.destroy()
+        try:
+            for widget in self.container_alertas.winfo_children():
+                widget.destroy()
+        except Exception:
+            return
             
         hay_alertas = False
 
@@ -322,7 +322,7 @@ class InterfazDashboardSupervisor:
                     crear_alerta("🔄", f"Devolución reciente: ${ult_dev.get('monto', 0)} ({ult_dev.get('descripcion', '')})", "#fffbeb" if ctk.get_appearance_mode()=="Light" else "#78350f", "#d97706" if ctk.get_appearance_mode()=="Light" else "#fcd34d")
             
             if hasattr(self.backend, "obtener_sesiones_abiertas_con_totales"):
-                sesiones = self.backend.obtener_sesiones_abiertas_con_totales()
+                sesiones = self.backend.obtener_sesiones_abiertas_con_totales(tipo_caja='turno')
                 ahora = datetime.now()
                 for s in sesiones:
                     fecha_str = s.get('fecha_ultima_venta') or s.get('fecha_apertura')

@@ -12,64 +12,10 @@ logger = logging.getLogger(__name__)
 # Configuración de límites (idealmente vendrían de la configuración general en BD)
 LIMITE_EFECTIVO_CAJA = 100000.0
 
-# =========================================================
-# HELPERS DE BASE DE DATOS (Aislados para broadcast)
-# =========================================================
-def _asegurar_tabla_broadcast():
-    conexion = None
-    cursor = None
-    try:
-        from app.database import DB
-        conexion = DB.conectar()
-        if conexion:
-            cursor = conexion.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS mensajes_broadcast (
-                    id_mensaje INT AUTO_INCREMENT PRIMARY KEY,
-                    contenido TEXT,
-                    id_admin INT,
-                    destinatario_tipo ENUM('todos', 'rol', 'usuario') DEFAULT 'todos',
-                    destinatario_id INT NULL,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    leido BOOLEAN DEFAULT FALSE
-                )
-            """)
-            try:
-                cursor.execute("ALTER TABLE mensajes_broadcast ADD COLUMN destinatario_tipo ENUM('todos', 'rol', 'usuario') DEFAULT 'todos'")
-                cursor.execute("ALTER TABLE mensajes_broadcast ADD COLUMN destinatario_id INT NULL")
-            except Exception:
-                pass
-            conexion.commit()
-    except Exception as e:
-        logger.error(f"Fallo al asegurar tabla broadcast: {e}")
-    finally:
-        try:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
-        except Exception:
-            pass
+# Las operaciones de broadcast (enviar y obtener usuarios) se delegaron
+# al BackendAdapter (backend.enviar_mensaje_broadcast / backend.obtener_usuarios_activos_para_broadcast)
+# para respetar la arquitectura de capas. No hay conexiones directas a DB en este módulo.
 
-def _enviar_mensaje_broadcast(contenido, id_admin, destinatario_tipo='todos', destinatario_id=None):
-    _asegurar_tabla_broadcast()
-    conexion = None
-    cursor = None
-    try:
-        from app.database import DB
-        conexion = DB.conectar()
-        if conexion:
-            cursor = conexion.cursor()
-            cursor.execute("INSERT INTO mensajes_broadcast (contenido, id_admin, destinatario_tipo, destinatario_id) VALUES (%s, %s, %s, %s)", (contenido, id_admin, destinatario_tipo, destinatario_id))
-            conexion.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Fallo al enviar broadcast: {e}")
-    finally:
-        try:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
-        except Exception:
-            pass
-    return False
 
 # =========================================================
 # IMPORTACIONES SEGURAS Y RUTEO
@@ -208,6 +154,14 @@ class InterfazDashboardAdmin:
         bg_color = get_color("bg_surface") if ctk.get_appearance_mode() == "Light" else "#111827"
         self.win.configure(fg_color=bg_color)
 
+        def on_main_focus(event):
+            if event.widget == self.win:
+                if hasattr(self.win, '_ventanas_modulos'):
+                    for ventana in self.win._ventanas_modulos.values():
+                        if ventana and ventana.winfo_exists():
+                            ventana.lift()
+        self.win.bind("<FocusIn>", on_main_focus)
+
         # ====== SIDEBAR ======
         color_sidebar = "#1e3a8a"
         sidebar = ctk.CTkFrame(self.win, width=260, fg_color=color_sidebar, corner_radius=0)
@@ -222,7 +176,6 @@ class InterfazDashboardAdmin:
         modulos = [
             ("🏦 Tesorería", 'ver_tesoreria', ui_tesoreria, {}),
             ("📦 Inventario", "ver_inventario", ui_inventario, {}),
-            ("🥫 Productos", "ver_productos", ui_productos, {}),
             ("🛒 Registrar Compra", "registrar_compras", ui_compra, {}),
             ("👥 Clientes", 'ver_clientes', ui_gestion_clientes, {}),
             ("🚚 Proveedores", 'ver_proveedores', ui_gestion_proveedores, {}),
@@ -237,6 +190,11 @@ class InterfazDashboardAdmin:
                 cmd = lambda t=texto, f=fn, k=kw: _abrir_seguro(self.win, self.backend, self.usuario, f, t, **k)
                 ctk.CTkButton(sidebar, text=texto, fg_color="transparent", hover_color="#2563eb",
                               font=("Segoe UI", 13, "bold"), anchor="w", height=40, command=cmd).pack(fill="x", padx=10, pady=2)
+
+        if self.usuario.get("id_rol") == 1:
+            ctk.CTkFrame(sidebar, fg_color="#3b82f6", height=1).pack(fill="x", padx=20, pady=10)
+            ctk.CTkButton(sidebar, text="💰 Ingreso de Capital", fg_color="#10b981", hover_color="#059669",
+                          font=("Segoe UI", 13, "bold"), height=40, command=self._abrir_ingreso_capital).pack(fill="x", padx=10, pady=2)
 
         ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
                       font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=20)
@@ -302,17 +260,86 @@ class InterfazDashboardAdmin:
 
         # --- FILTRO POR USUARIO ---
         self.var_filtro_usuario = tk.StringVar(value="Todos los usuarios")
-        self.mapa_usuarios_feed = {}
+        self.var_usuario_feed_id = tk.IntVar(value=0)
         
         self.combo_filtro_feed = ctk.CTkComboBox(
             fr_header_feed, 
-            values=["Todos los usuarios"], 
+            values=["Todos los usuarios", "Usuario específico"], 
             variable=self.var_filtro_usuario,
             state="readonly",
             width=180,
             command=self._on_filtro_usuario_changed
         )
         self.combo_filtro_feed.pack(side="right")
+        
+        self.fr_busqueda_usr_feed = ctk.CTkFrame(fr_header_feed, fg_color="transparent")
+        
+        self.var_busqueda_feed = tk.StringVar()
+        self.ent_busqueda_feed = ctk.CTkEntry(self.fr_busqueda_usr_feed, textvariable=self.var_busqueda_feed, font=("Segoe UI", 12), placeholder_text="Buscar usuario...", width=160, height=28)
+        self.ent_busqueda_feed.pack(side="top", fill="x")
+        
+        self.fr_lista_feed = ctk.CTkFrame(self.fr_busqueda_usr_feed, fg_color="transparent")
+        self.listbox_feed = tk.Listbox(self.fr_lista_feed, font=("Segoe UI", 11), height=4)
+        self.listbox_feed.pack(fill="both", expand=True)
+        
+        def actualizar_lista_feed(*_):
+            q = self.var_busqueda_feed.get().strip().lower()
+            self.listbox_feed.delete(0, tk.END)
+            
+            if not q and not self.ent_busqueda_feed.focus_get() == self.ent_busqueda_feed:
+                self.fr_lista_feed.pack_forget()
+                return
+                
+            self.fr_lista_feed.pack(fill="x", pady=(0, 2))
+            
+            usuarios_activos = []
+            try:
+                if hasattr(self.backend, "obtener_usuarios_actividad_hoy"):
+                    usuarios_activos = self.backend.obtener_usuarios_actividad_hoy()
+            except Exception:
+                pass
+                
+            coincidencias = []
+            for d in usuarios_activos:
+                id_v = str(d.get('id_usuario', '')).lower()
+                nom_v = str(d.get('nombre', '')).lower()
+                if q in id_v or q in nom_v:
+                    coincidencias.append(d)
+                    
+            if not coincidencias:
+                self.listbox_feed.insert(tk.END, "No se encontraron usuarios")
+                self.listbox_feed.configure(state="disabled")
+            else:
+                self.listbox_feed.configure(state="normal")
+                for c in coincidencias:
+                    self.listbox_feed.insert(tk.END, f"{c.get('nombre', '')} (ID: {c.get('id_usuario', '')})")
+                    
+        self.var_busqueda_feed.trace_add("write", actualizar_lista_feed)
+        
+        def enfocar_feed(e):
+            actualizar_lista_feed()
+            
+        self.ent_busqueda_feed.bind("<FocusIn>", enfocar_feed)
+        
+        def seleccionar_feed(event=None):
+            if self.listbox_feed.cget("state") == "disabled": return
+            sel = self.listbox_feed.curselection()
+            if not sel: return
+            val = self.listbox_feed.get(sel[0])
+            if "No se encontraron" in val: return
+            
+            import re
+            m = re.search(r"\(ID: (\d+)\)$", val)
+            if m:
+                uid = int(m.group(1))
+                self.var_usuario_feed_id.set(uid)
+                self.ent_busqueda_feed.delete(0, tk.END)
+                self.ent_busqueda_feed.insert(0, val)
+                
+            self.fr_lista_feed.pack_forget()
+            self._actualizar_live_feed()
+            
+        self.listbox_feed.bind("<<ListboxSelect>>", seleccionar_feed)
 
         # Scroll del Live Feed
         self.scroll_feed = ctk.CTkScrollableFrame(self.frm_derecha, fg_color="transparent")
@@ -341,123 +368,77 @@ class InterfazDashboardAdmin:
         combo_destinatario = ctk.CTkComboBox(fr_selector, values=opciones_dest, variable=var_destinatario, state="readonly", width=200)
         combo_destinatario.pack(side="left")
 
-        # Cargar usuarios activos para la búsqueda
+        # Cargar usuarios activos para la búsqueda del selector de destinatario
         usuarios_activos = []
-        conn = None
-        c = None
         try:
-            from app.database import DB
-            conn = DB.conectar()
-            if conn:
-                c = conn.cursor(dictionary=True)
-                c.execute("SELECT id_usuario, nombre FROM Usuario WHERE activo = TRUE AND id_usuario != %s", (self.usuario.get("id_usuario", 0),))
-                usuarios_activos = c.fetchall()
+            admin_id = self.usuario.get("id_usuario", 0)
+            usuarios_activos = self.backend.obtener_usuarios_activos_para_broadcast(excluir_id=admin_id)
         except Exception:
             pass
-        finally:
-            try:
-                if c: c.close()
-                if conn: conn.close()
-            except Exception:
-                pass
+
 
         # 2. Buscador de usuarios (Medio, oculto por defecto)
         fr_busqueda_usr = ctk.CTkFrame(fr_zona_envio, fg_color="transparent")
-        
         var_usuario_seleccionado_id = tk.IntVar(value=0)
         
-        btn_seleccionar_usr = ctk.CTkButton(fr_busqueda_usr, text="🔍 Seleccionar Usuario...", font=("Segoe UI", 12, "bold"), fg_color="#3b82f6", hover_color="#2563eb", height=32)
-        btn_seleccionar_usr.pack(side="top", fill="x", pady=(0, 5))
+        var_busqueda_usr = tk.StringVar()
+        ent_busqueda_usr = ctk.CTkEntry(fr_busqueda_usr, textvariable=var_busqueda_usr, font=("Segoe UI", 12), placeholder_text="Buscar usuario...", height=32)
+        ent_busqueda_usr.pack(side="top", fill="x")
         
-        def _abrir_modal_usuario():
-            popup = ctk.CTkToplevel(self.win)
-            popup.title("Seleccionar Usuario")
-            popup.geometry("480x380")
+        fr_lista_usr = ctk.CTkFrame(fr_busqueda_usr, fg_color="transparent")
+        listbox_usr = tk.Listbox(fr_lista_usr, font=("Segoe UI", 11), height=4)
+        listbox_usr.pack(fill="both", expand=True)
+        
+        def actualizar_lista_usr(*_):
+            q = var_busqueda_usr.get().strip().lower()
+            listbox_usr.delete(0, tk.END)
             
-            try:
-                from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana, get_color
-                preparar_ventana(popup)
-            except: pass
+            if not q and not ent_busqueda_usr.focus_get() == ent_busqueda_usr:
+                fr_lista_usr.pack_forget()
+                return
+                
+            fr_lista_usr.pack(fill="x", pady=(0, 2))
             
-            try:
-                from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
-                configurar_navegacion_ventana(popup)
-            except: pass
-
-            var_pat = tk.StringVar()
-            lbl_title = ctk.CTkLabel(popup, text="Buscar Usuario (ID/Nombre):", font=("Segoe UI", 12, "bold"))
-            try: lbl_title.configure(text_color=get_color("text_primary"))
-            except: pass
-            lbl_title.pack(pady=(15,5), padx=15, anchor="w")
+            coincidencias = []
+            for d in usuarios_activos:
+                id_v = str(d.get('id_usuario', '')).lower()
+                nom_v = str(d.get('nombre', '')).lower()
+                if q in id_v or q in nom_v:
+                    coincidencias.append(d)
+                    
+            if not coincidencias:
+                listbox_usr.insert(tk.END, "No se encontraron usuarios")
+                listbox_usr.configure(state="disabled")
+            else:
+                listbox_usr.configure(state="normal")
+                for c in coincidencias:
+                    listbox_usr.insert(tk.END, f"{c.get('nombre', '')} (ID: {c.get('id_usuario', '')})")
+                    
+        var_busqueda_usr.trace_add("write", actualizar_lista_usr)
+        
+        def enfocar_usr(e):
+            actualizar_lista_usr()
             
-            ent = ctk.CTkEntry(popup, textvariable=var_pat, font=("Segoe UI", 13), height=40, placeholder_text="Buscar por ID o Nombre...")
-            ent.pack(fill="x", padx=15, pady=5)
+        ent_busqueda_usr.bind("<FocusIn>", enfocar_usr)
+        
+        def seleccionar_usr(event=None):
+            if listbox_usr.cget("state") == "disabled": return
+            sel = listbox_usr.curselection()
+            if not sel: return
+            val = listbox_usr.get(sel[0])
+            if "No se encontraron" in val: return
             
-            btn_frm = ctk.CTkFrame(popup, fg_color="transparent")
-            btn_frm.pack(fill="x", side="bottom", padx=15, pady=(5, 15))
+            import re
+            m = re.search(r"\(ID: (\d+)\)$", val)
+            if m:
+                uid = int(m.group(1))
+                var_usuario_seleccionado_id.set(uid)
+                ent_busqueda_usr.delete(0, tk.END)
+                ent_busqueda_usr.insert(0, val)
+                
+            fr_lista_usr.pack_forget()
             
-            try: bg_c = get_color("bg_surface")
-            except: bg_c = "gray"
-            frame_list = ctk.CTkFrame(popup, fg_color=bg_c, corner_radius=10, border_width=1)
-            frame_list.pack(expand=True, fill="both", padx=15, pady=10)
-            
-            cols = ("ID", "Nombre")
-            tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=6)
-            
-            sc = ctk.CTkScrollbar(frame_list, command=tree_sel.yview)
-            sc.pack(side="right", fill="y", padx=(0, 5), pady=5)
-            tree_sel.configure(yscrollcommand=sc.set)
-            tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-            
-            tree_sel.column("ID", width=70, anchor="center")
-            tree_sel.column("Nombre", width=350, anchor="w")
-            tree_sel.heading("ID", text="ID")
-            tree_sel.heading("Nombre", text="Nombre")
-            
-            def render(filas):
-                for i in tree_sel.get_children(): tree_sel.delete(i)
-                for c in filas:
-                    tree_sel.insert("", "end", values=[c.get('id_usuario'), c.get('nombre')])
-
-            render(usuarios_activos)
-            
-            def filtrar(*_):
-                q = var_pat.get().strip().lower()
-                if not q:
-                    render(usuarios_activos)
-                    return
-                filas_filtradas = []
-                for d in usuarios_activos:
-                    id_v = str(d.get('id_usuario', '')).lower()
-                    nom_v = str(d.get('nombre', '')).lower()
-                    if q in id_v or q in nom_v:
-                        filas_filtradas.append(d)
-                render(filas_filtradas)
-
-            var_pat.trace_add("write", filtrar)
-
-            def tomar(event=None): 
-                sel_id = tree_sel.focus()
-                if not sel_id: return 
-                vals = tree_sel.item(sel_id, "values")
-                if not vals: return
-                var_usuario_seleccionado_id.set(int(vals[0]))
-                btn_seleccionar_usr.configure(text=f"👤 {vals[1]} (ID: {vals[0]})", fg_color="#10b981", hover_color="#059669")
-                popup.destroy()
-
-            tree_sel.bind("<Double-1>", tomar)
-            tree_sel.bind("<Return>", tomar)
-            
-            ctk.CTkButton(btn_frm, text="Cancelar", command=popup.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
-            ctk.CTkButton(btn_frm, text="✓ Seleccionar", command=tomar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), width=180, height=45).pack(side="right", padx=10)
-            
-            popup.after(100, lambda: ent.focus_set())
-            try: centrar_y_mostrar_ventana(popup)
-            except: pass
-            popup.grab_set()
-            popup.transient(self.win)
-            
-        btn_seleccionar_usr.configure(command=_abrir_modal_usuario)
+        listbox_usr.bind("<<ListboxSelect>>", seleccionar_usr)
 
         # 3. Campo de texto y botón enviar (Abajo)
         fr_broadcast = ctk.CTkFrame(fr_zona_envio, fg_color="transparent")
@@ -472,6 +453,8 @@ class InterfazDashboardAdmin:
                 fr_busqueda_usr.pack(before=fr_broadcast, fill="x", pady=(0, 10))
             else:
                 fr_busqueda_usr.pack_forget()
+                var_usuario_seleccionado_id.set(0)
+                var_busqueda_usr.set("")
                 
         combo_destinatario.configure(command=_on_cambio_destinatario)
         
@@ -499,7 +482,7 @@ class InterfazDashboardAdmin:
                     messagebox.mostrar_error("Error", "Debe seleccionar un usuario específico de la lista.", parent=self.win)
                     return
                         
-            if _enviar_mensaje_broadcast(msg, admin_id, destinatario_tipo, destinatario_id):
+            if self.backend.enviar_mensaje_broadcast(msg, admin_id, destinatario_tipo, destinatario_id):
                 ToastNotification(self.win, "📢 Broadcast Enviado", "El mensaje fue transmitido.", "info")
                 self.var_msg.set("")
             else:
@@ -525,6 +508,69 @@ class InterfazDashboardAdmin:
     # =========================================================
     # LÓGICA DE CONTROL Y EVENTOS
     # =========================================================
+    def _abrir_ingreso_capital(self):
+        
+        dlg = ctk.CTkToplevel(self.win)
+        dlg.title("💰 Ingreso de Capital")
+        dlg.geometry("400x350")
+        dlg.resizable(False, False)
+        dlg.transient(self.win)
+        dlg.grab_set()
+        
+        dlg.update_idletasks()
+        x = self.win.winfo_x() + (self.win.winfo_width() - 400) // 2
+        y = self.win.winfo_y() + (self.win.winfo_height() - 350) // 2
+        dlg.geometry(f"+{x}+{y}")
+        
+        ctk.CTkLabel(dlg, text="Registrar Ingreso de Capital", font=("Segoe UI", 18, "bold")).pack(pady=(20, 10))
+        ctk.CTkLabel(dlg, text="Este dinero ingresará a la tesorería del día.", font=("Segoe UI", 12), text_color="gray").pack(pady=(0, 20))
+        
+        frm_inputs = ctk.CTkFrame(dlg, fg_color="transparent")
+        frm_inputs.pack(fill="x", padx=30)
+        
+        ctk.CTkLabel(frm_inputs, text="Monto ($):", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ent_monto = ctk.CTkEntry(frm_inputs, font=("Segoe UI", 14), placeholder_text="0.00")
+        ent_monto.pack(fill="x", pady=(5, 15))
+        
+        ctk.CTkLabel(frm_inputs, text="Observación / Motivo:", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ent_obs = ctk.CTkEntry(frm_inputs, font=("Segoe UI", 14), placeholder_text="Ej: Aporte socio, Préstamo...")
+        ent_obs.pack(fill="x", pady=(5, 20))
+        
+        def confirmar():
+            monto_str = ent_monto.get().strip()
+            obs = ent_obs.get().strip()
+            
+            try:
+                monto = float(monto_str)
+                if monto <= 0: raise ValueError
+            except ValueError:
+                messagebox.mostrar_error("Error", "El monto debe ser un número mayor a cero.", parent=dlg)
+                return
+                
+            if not obs:
+                messagebox.mostrar_error("Error", "La observación es obligatoria.", parent=dlg)
+                return
+                
+            msg = f"¿Confirmas el ingreso de capital a la tesorería?\n\nMonto: ${monto:,.2f}\nMotivo: {obs}"
+            if messagebox.mostrar_confirmacion("Confirmar Ingreso", msg, parent=dlg):
+                try:
+                    if hasattr(self.backend, 'registrar_ingreso_capital'):
+                        exito = self.backend.registrar_ingreso_capital(monto, obs, self.usuario.get("id_usuario"))
+                        if exito:
+                            messagebox.mostrar_exito("Éxito", f"Se ha registrado el ingreso de ${monto:,.2f} correctamente.", parent=self.win)
+                            self.refresh_dashboard()
+                            dlg.destroy()
+                    else:
+                        messagebox.mostrar_error("Error", "Backend no implementa registrar_ingreso_capital.", parent=dlg)
+                except Exception as e:
+                    messagebox.mostrar_error("Error", f"No se pudo registrar el ingreso:\n{e}", parent=dlg)
+                    
+        frm_btns = ctk.CTkFrame(dlg, fg_color="transparent")
+        frm_btns.pack(fill="x", padx=30, pady=10)
+        
+        ctk.CTkButton(frm_btns, text="Cancelar", fg_color="#ef4444", hover_color="#dc2626", command=dlg.destroy).pack(side="left", expand=True, padx=(0, 5))
+        ctk.CTkButton(frm_btns, text="Confirmar", fg_color="#10b981", hover_color="#059669", command=confirmar).pack(side="right", expand=True, padx=(5, 0))
+
     def cerrar_sesion(self):
         if messagebox.mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
             self.cerrar()
@@ -533,26 +579,23 @@ class InterfazDashboardAdmin:
         if hasattr(self, '_polling_job') and self._polling_job:
             self.win.after_cancel(self._polling_job)
             self._polling_job = None
+            
+        try:
+            from app.frontend.broadcast_manager import detener_polling_broadcast
+            detener_polling_broadcast(self.win)
+        except Exception:
+            pass
+            
         self.win.quit()
 
     def refresh_dashboard(self):
         self._actualizar_cajas_y_kpis()
         self._actualizar_live_feed()
         self._actualizar_alertas_dashboard()
-        
-        # CHEQUEAR ALERTAS PROACTIVAS ADICIONALES (Stock, inactividad)
-        try:
-            if hasattr(self.backend, "obtener_alertas_proactivas"):
-                alertas = self.backend.obtener_alertas_proactivas()
-                for al in alertas:
-                    aid = al.get("id")
-                    if aid not in self.alertas_mostradas:
-                        ToastNotification(self.win, al.get("titulo", "Alerta"), al.get("mensaje", ""), al.get("tipo", "alerta"))
-                        self.alertas_mostradas.add(aid)
-        except Exception as e:
-            logger.error(f"Error cargando alertas proactivas: {e}")
 
-        self._polling_job = self.win.after(10000, self.refresh_dashboard)
+        # Reencolar solo si la ventana sigue existiendo (evita TclError en cierre rápido)
+        if self.win.winfo_exists():
+            self._polling_job = self.win.after(10000, self.refresh_dashboard)
 
     def _actualizar_cajas_y_kpis(self):
         try:
@@ -562,34 +605,29 @@ class InterfazDashboardAdmin:
             return
             
         try:
-            total_efectivo_sucursal = 0.0
-            total_ventas_dia = 0.0
-            total_tickets_dia = 0
-            
             if hasattr(self.backend, "obtener_sesiones_abiertas_con_totales"):
                 sesiones = self.backend.obtener_sesiones_abiertas_con_totales()
             else:
                 sesiones = []
-                
-            print(f"DEBUG (Admin): _actualizar_cajas_y_kpis ejecutado. Cajas encontradas: {len(sesiones)}")
-                
-            self.kpi_cajas_var.set(str(len(sesiones)))
+
+            logger.debug("_actualizar_cajas_y_kpis ejecutado. Cajas encontradas: %d", len(sesiones))
+            
+            cajas_turno = [s for s in sesiones if s.get('tipo_caja') != 'administrativa']
+            tesoreria = next((s for s in sesiones if s.get('tipo_caja') == 'administrativa'), None)
+
+            self.kpi_cajas_var.set(str(len(cajas_turno)))
             ahora = datetime.now()
-            
-            if not sesiones:
-                ctk.CTkLabel(self.container_tarjetas_cajas, text="No hay cajas abiertas en este momento.", 
+
+            if not cajas_turno:
+                ctk.CTkLabel(self.container_tarjetas_cajas, text="No hay cajas de turno abiertas.",
                              font=("Segoe UI", 14, "italic"), text_color=get_color("text_secondary")).pack(pady=40)
-            
-            for s in sesiones:
+
+            for s in cajas_turno:
                 vendedor = s.get('vendedor', 'Desconocido')
                 str_apertura = s.get('fecha_apertura', '---')
                 monto = float(s.get('monto_acumulado', 0.0))
                 ventas = int(s.get('cantidad_ventas', 0))
                 id_session = s.get('id_session')
-                
-                total_efectivo_sucursal += monto
-                total_ventas_dia += monto
-                total_tickets_dia += ventas
                 
                 # --- ALERTA PROACTIVA (Exceso de efectivo) ---
                 if monto > LIMITE_EFECTIVO_CAJA:
@@ -649,6 +687,34 @@ class InterfazDashboardAdmin:
                               fg_color="#ef4444", hover_color="#b91c1c", width=110, height=35, 
                               command=cmd_forzar_cierre).pack(side="right", pady=5)
 
+            # --- RENDERIZAR TESORERÍA APARTE ---
+            if tesoreria:
+                ctk.CTkFrame(self.container_tarjetas_cajas, height=2, fg_color="#cbd5e1" if ctk.get_appearance_mode()=="Light" else "#334155").pack(fill="x", pady=20, padx=20)
+                ctk.CTkLabel(self.container_tarjetas_cajas, text="🏦 Tesorería del Día", font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(pady=(0, 10))
+                
+                frm_tes_card = ctk.CTkFrame(self.container_tarjetas_cajas, fg_color="#10b981", corner_radius=10)
+                frm_tes_card.pack(fill="x", pady=8, ipady=5)
+                
+                monto_tes = float(tesoreria.get('monto_acumulado', 0.0))
+                str_apertura_tes = tesoreria.get('fecha_apertura', '---')
+                try:
+                    if hasattr(str_apertura_tes, 'strftime'):
+                        txt_ap_tes = str_apertura_tes.strftime('%d/%m/%Y')
+                    else:
+                        txt_ap_tes = datetime.strptime(str(str_apertura_tes), "%Y-%m-%d %H:%M:%S").strftime('%d/%m/%Y')
+                except Exception:
+                    txt_ap_tes = str(str_apertura_tes)
+
+                frm_tes_head = ctk.CTkFrame(frm_tes_card, fg_color="transparent")
+                frm_tes_head.pack(fill="x", padx=15, pady=(10, 5))
+                ctk.CTkLabel(frm_tes_head, text="Fondo Común Administrativo", font=("Segoe UI", 16, "bold"), text_color="#ffffff").pack(side="left")
+                ctk.CTkLabel(frm_tes_head, text=f"Día: {txt_ap_tes}", font=("Segoe UI", 11), text_color="#ffffff").pack(side="right", padx=10)
+                
+                frm_tes_body = ctk.CTkFrame(frm_tes_card, fg_color="transparent")
+                frm_tes_body.pack(fill="x", padx=15, pady=(5, 10))
+                ctk.CTkLabel(frm_tes_body, text="Saldo Disponible", font=("Segoe UI", 11), text_color="#ffffff").pack()
+                ctk.CTkLabel(frm_tes_body, text=f"${monto_tes:,.2f}", font=("Segoe UI", 24, "bold"), text_color="#ffffff").pack()
+
             # 2. ACTUALIZAR KPIs
             if hasattr(self.backend, "obtener_kpis_admin"):
                 kpis = self.backend.obtener_kpis_admin()
@@ -656,38 +722,30 @@ class InterfazDashboardAdmin:
                 self.kpi_efectivo_var.set(f"${kpis.get('efectivo_total', 0):,.2f}")
                 self.kpi_tickets_var.set(str(kpis.get('tickets', 0)))
             else:
-                self.kpi_ventas_var.set(f"${total_ventas_dia:,.2f}")
-                self.kpi_efectivo_var.set(f"${total_efectivo_sucursal:,.2f}")
-                self.kpi_tickets_var.set(str(total_tickets_dia))
+                self.kpi_ventas_var.set("$0.00")
+                self.kpi_efectivo_var.set("$0.00")
+                self.kpi_tickets_var.set("0")
                 
         except Exception as e:
             logger.error(f"Error actualizando cajas de admin: {e}")
 
     def _on_filtro_usuario_changed(self, valor):
-        self._actualizar_live_feed()
+        if valor == "Usuario específico":
+            self.fr_busqueda_usr_feed.pack(side="right", before=self.combo_filtro_feed, padx=(0, 10))
+            if self.var_usuario_feed_id.get() > 0:
+                self._actualizar_live_feed()
+        else:
+            self.fr_busqueda_usr_feed.pack_forget()
+            self.var_usuario_feed_id.set(0)
+            self.var_busqueda_feed.set("")
+            self._actualizar_live_feed()
 
     def _actualizar_live_feed(self):
-        # 1. Actualizar opciones del filtro
-        try:
-            if hasattr(self.backend, "obtener_usuarios_actividad_hoy"):
-                usuarios_activos = self.backend.obtener_usuarios_actividad_hoy()
-                self.mapa_usuarios_feed = {u['nombre']: u['id_usuario'] for u in usuarios_activos if u['nombre']}
-                opciones = ["Todos los usuarios"] + list(self.mapa_usuarios_feed.keys())
-                
-                sel_actual = self.var_filtro_usuario.get()
-                self.combo_filtro_feed.configure(values=opciones)
-                if sel_actual in opciones:
-                    self.var_filtro_usuario.set(sel_actual)
-                else:
-                    self.var_filtro_usuario.set("Todos los usuarios")
-        except Exception as e:
-            logger.error(f"Error actualizando filtro de usuarios feed: {e}")
-
-        # 2. Obtener id_usuario seleccionado
         id_usuario_filtro = None
-        sel = self.var_filtro_usuario.get()
-        if sel != "Todos los usuarios" and sel in self.mapa_usuarios_feed:
-            id_usuario_filtro = self.mapa_usuarios_feed[sel]
+        if self.var_filtro_usuario.get() == "Usuario específico":
+            uid = self.var_usuario_feed_id.get()
+            if uid > 0:
+                id_usuario_filtro = uid
 
         try:
             for widget in self.scroll_feed.winfo_children():
@@ -764,7 +822,17 @@ class InterfazDashboardAdmin:
                         _abrir_seguro(self.win, self.backend, self.usuario, ui_inventario, "Inventario", filtro_stock_bajo=True)
                     crear_alerta("⚠️", f"{len(stock_bajo)} productos con stock crítico.", "#fef2f2" if ctk.get_appearance_mode()=="Light" else "#7f1d1d", "#dc2626" if ctk.get_appearance_mode()=="Light" else "#fca5a5", on_double_click=cmd_stock)
         except Exception as e:
-            logger.error(f"Error cargando alertas dashboard admin: {e}")
+            logger.error(f"Error cargando alertas dashboard admin (stock): {e}")
+
+        try:
+            if hasattr(self.backend, "obtener_clientes_con_deuda"):
+                clientes_deuda = self.backend.obtener_clientes_con_deuda()
+                if clientes_deuda:
+                    def cmd_deuda(e):
+                        _abrir_seguro(self.win, self.backend, self.usuario, ui_gestion_clientes, "Clientes")
+                    crear_alerta("💳", f"{len(clientes_deuda)} clientes con deuda activa.", "#fffbeb" if ctk.get_appearance_mode()=="Light" else "#78350f", "#d97706" if ctk.get_appearance_mode()=="Light" else "#fcd34d", on_double_click=cmd_deuda)
+        except Exception as e:
+            logger.error(f"Error cargando alertas dashboard admin (deuda): {e}")
 
 def ui_dashboard_admin(parent, backend, usuario):
     InterfazDashboardAdmin(parent, backend, usuario)

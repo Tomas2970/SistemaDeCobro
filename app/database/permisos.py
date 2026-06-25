@@ -5,6 +5,10 @@
 # OPCIÓN A: SEGURIDAD MÁXIMA
 # =====================================
 
+# Límite de días hacia atrás que puede consultar el Supervisor en los Historiales.
+# Modificar este valor para ajustar el rango sin tocar más código.
+DIAS_HISTORIAL_SUPERVISOR = 7
+
 PERMISOS = {
     # ADMINISTRADOR: Puede hacer TODO
     'admin': [
@@ -43,6 +47,11 @@ PERMISOS = {
         # Proveedores y Compras
         'ver_proveedores',
         'crear_proveedores',
+        'editar_proveedores',
+        'desactivar_proveedores',
+        'reactivar_proveedores',
+        'registrar_pagos_proveedores',
+        'asignar_productos_proveedor',
         'registrar_compras',
         
         # Reportes
@@ -99,6 +108,11 @@ PERMISOS = {
         # Proveedores
         'ver_proveedores',
         'crear_proveedores',
+        'editar_proveedores',
+        'desactivar_proveedores',
+        'reactivar_proveedores',
+        'registrar_pagos_proveedores',
+        'asignar_productos_proveedor',
         'registrar_compras',
         
         # Reportes
@@ -248,6 +262,12 @@ def obtener_menu_items(usuario):
         'proveedores': {
             'habilitado': tiene_permiso(usuario, 'ver_proveedores'),
             'agregar': tiene_permiso(usuario, 'crear_proveedores'),
+            'editar': tiene_permiso(usuario, 'editar_proveedores'),
+            'desactivar': tiene_permiso(usuario, 'desactivar_proveedores'),
+            'reactivar': tiene_permiso(usuario, 'reactivar_proveedores'),
+            'pagar': tiene_permiso(usuario, 'registrar_pagos_proveedores'),
+            'asignar_productos': tiene_permiso(usuario, 'asignar_productos_proveedor'),
+            'registrar_compra': tiene_permiso(usuario, 'registrar_compras'),
         },
         
         'reportes': {

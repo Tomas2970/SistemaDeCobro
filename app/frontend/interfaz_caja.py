@@ -127,7 +127,7 @@ def ui_caja_router(parent, backend, usuario, **kwargs):
     Router principal para el botón del menú 'Control de Caja'.
     Si el usuario es Administrador (rol 1), redirige a su dashboard especial.
     Si el usuario es Supervisor (rol 3), se muestra el panel de cajas del turno.
-    De lo contrario (Vendedor), delega al módulo viejo (interfaz_reportes) para su caja.
+    De lo contrario (Vendedor), delega al módulo interfaz_caja_operativa para su caja.
     """
     id_rol = usuario.get('id_rol')
     
@@ -141,7 +141,7 @@ def ui_caja_router(parent, backend, usuario, **kwargs):
         ui_caja_supervisor(parent, backend, usuario)
     else:
         try:
-            from app.frontend.interfaz_reportes import ui_reportes
-            ui_reportes(parent, backend, usuario, modo_vista='caja')
+            from app.frontend.interfaz_caja_operativa import ui_caja_operativa
+            ui_caja_operativa(parent, backend, usuario)
         except ImportError:
             messagebox.mostrar_error("Error", "No se encontró el módulo de caja nativo.", parent=parent)

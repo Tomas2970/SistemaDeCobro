@@ -70,13 +70,13 @@ def test_actualizar_inventario_absoluto_exito(adapter, mock_db):
 
 def test_registrar_compra_exito(adapter, mock_db):
     """Verifica que se asienta una compra a proveedores incrementando stock."""
-    mock_db.insertar_compra.return_value = 100
+    mock_db.registrar_compra.return_value = 100
     
     items_compra = [
         {"id_producto": 1, "cantidad": 20, "precio_costo": 500.0, "precio_venta": 650.0}
     ]
     
-    cid = adapter.insertar_compra(
+    cid = adapter.registrar_compra(
         id_usuario=1,
         id_proveedor=2,
         items=items_compra,
@@ -84,7 +84,7 @@ def test_registrar_compra_exito(adapter, mock_db):
     )
     
     assert cid == 100
-    mock_db.insertar_compra.assert_called_once_with(1, 2, items_compra, "efectivo")
+    mock_db.registrar_compra.assert_called_once_with(1, 2, items_compra, "efectivo")
 
 
 # ======================================================
@@ -184,9 +184,43 @@ def test_anular_venta_admin_exito(adapter, mock_db):
     exito = adapter.anular_venta(id_venta=500, id_usuario=1) # 1 = Admin
     
     assert exito is True
-    mock_db.anular_venta.assert_called_once_with(500, 1)
+    mock_db.anular_venta.assert_called_once_with(500, 1, None)
 
 def test_anular_venta_vendedor_denegado(adapter, mock_db):
     """Verifica que un Vendedor no puede anular ventas (lanzando PermissionError)."""
     with pytest.raises(PermissionError, match="No tienes permisos para anular ventas"):
         adapter.anular_venta(id_venta=500, id_usuario=2) # 2 = Vendedor
+
+# ======================================================
+# 8. PRUEBAS DE TRANSFERENCIA A TESORERÍA (CONTROL DUAL)
+# ======================================================
+
+def test_transferir_tesoreria_exito(adapter, mock_db):
+    """Verifica la transferencia exitosa a la tesorería."""
+    mock_db.transferir_entre_cajas.return_value = True
+    
+    exito = adapter.transferir_entre_cajas(
+        origen=10, 
+        destino=20, 
+        monto=5000.0, 
+        id_usuario=2, 
+        motivo_salida='transferencia_tesoreria_salida',
+        motivo_entrada='transferencia_tesoreria_entrada',
+        obs='Retiro a tesorería',
+        id_autorizador=1
+    )
+    
+    assert exito is True
+    mock_db.transferir_entre_cajas.assert_called_once_with(
+        10, 20, 5000.0, 2, 'transferencia_tesoreria_salida', 'transferencia_tesoreria_entrada', 'Retiro a tesorería', 1
+    )
+
+def test_creacion_automatica_tesoreria(adapter, mock_db):
+    """Verifica la lógica de crear tesorería si no existe."""
+    mock_db.obtener_o_crear_tesoreria_hoy.return_value = {'id_session': 25, 'estado': 'abierta'}
+    
+    tesoreria = adapter.obtener_o_crear_tesoreria_hoy(id_usuario=1)
+    
+    assert tesoreria['id_session'] == 25
+    mock_db.obtener_o_crear_tesoreria_hoy.assert_called_once()
+

@@ -2,7 +2,6 @@
 # 🎯 SISTEMA DE VALIDACIÓN UNIFICADO PARA TODA LA APLICACIÓN
 # 🔥 CORREGIDO: Teléfono ahora rechaza números incompletos
 import tkinter as tk
-from tkinter import ttk
 import re
 import unicodedata
 
@@ -171,6 +170,55 @@ class ValidadoresVisuales:
             return True, "✓ Válido"
         except ValueError:
             return False, "❌ Número inválido"
+
+    @staticmethod
+    def validar_nombre_empresa(nombre: str) -> tuple[bool, str]:
+        """Valida el nombre de una empresa (mínimo 3 chars, sin restricción de primer carácter).
+
+        A diferencia de validar_nombre(), permite que empiece con número
+        (ej: "3M", "7-Eleven") ya que es válido para razones sociales.
+        """
+        nombre = nombre.strip()
+        if len(nombre) < 3:
+            return False, "❌ Mínimo 3 caracteres"
+        return True, "✓ Válido"
+
+    @staticmethod
+    def validar_cuit_obligatorio(cuit: str) -> tuple[bool, str]:
+        """Valida CUIT argentino (11 dígitos), tratándolo como campo OBLIGATORIO.
+
+        Usar en formularios de proveedores donde el CUIT es requerido.
+        A diferencia de validar_cuit(), el campo vacío es un error.
+        """
+        cuit = cuit.strip()
+        if len(cuit) == 0:
+            return False, "⚠️ CUIT obligatorio"
+        if len(cuit) < 11:
+            return False, f"❌ Faltan {11 - len(cuit)} dígitos"
+        if len(cuit) > 11:
+            return False, "❌ Máximo 11 dígitos"
+        if not cuit.isdigit():
+            return False, "❌ Solo números"
+        return True, "✓ Válido"
+
+    @staticmethod
+    def validar_telefono_obligatorio(telefono: str) -> tuple[bool, str]:
+        """Valida teléfono argentino (10 dígitos exactos), tratándolo como campo OBLIGATORIO.
+
+        Usar en formularios de proveedores donde el teléfono es requerido.
+        A diferencia de validar_telefono(), el campo vacío es un error.
+        """
+        telefono = telefono.strip()
+        if len(telefono) == 0:
+            return False, "⚠️ Teléfono obligatorio"
+        if len(telefono) < 10:
+            return False, f"❌ Faltan {10 - len(telefono)} dígitos"
+        if len(telefono) > 10:
+            return False, "❌ Máximo 10 dígitos"
+        if not telefono.isdigit():
+            return False, "❌ Solo números"
+        return True, "✓ Válido"
+
 
 # ============================================================================
 # 🎨 COMPONENTES UI CON VALIDACIÓN INTEGRADA
@@ -363,12 +411,18 @@ class ValidadorFormulario:
             # Validar según tipo
             if tipo_validacion == 'nombre':
                 valido, msg = ValidadoresVisuales.validar_nombre(valor)
+            elif tipo_validacion == 'nombre_empresa':
+                valido, msg = ValidadoresVisuales.validar_nombre_empresa(valor)
             elif tipo_validacion == 'dni':
                 valido, msg = ValidadoresVisuales.validar_dni(valor)
             elif tipo_validacion == 'cuit':
                 valido, msg = ValidadoresVisuales.validar_cuit(valor)
+            elif tipo_validacion == 'cuit_obligatorio':
+                valido, msg = ValidadoresVisuales.validar_cuit_obligatorio(valor)
             elif tipo_validacion == 'telefono':
                 valido, msg = ValidadoresVisuales.validar_telefono(valor)
+            elif tipo_validacion == 'telefono_obligatorio':
+                valido, msg = ValidadoresVisuales.validar_telefono_obligatorio(valor)
             elif tipo_validacion == 'email':
                 valido, msg = ValidadoresVisuales.validar_email(valor)
             elif tipo_validacion == 'monto':
@@ -380,6 +434,125 @@ class ValidadorFormulario:
                 return False, f"{nombre_campo}: {msg}"
         
         return True, "Todos los campos son válidos"
+
+# ============================================================================
+# 🌐 HELPERS PARA CTkEntry (customtkinter)
+# Compatible con border_color — no depende de tk.Entry bg
+# ============================================================================
+
+def aplicar_feedback_ctk(entry_ctk, label_ctk, valido: bool, mensaje: str) -> None:
+    """
+    Aplica feedback visual a un CTkEntry y su label de feedback asociado.
+
+    Equivalente a EntryValidado._validar_contenido(), pero compatible con
+    CTkEntry (usa border_color en lugar de bg del Entry).
+
+    Args:
+        entry_ctk:  CTkEntry al que aplicar el borde de color.
+        label_ctk:  CTkLabel donde mostrar el mensaje (puede ser None).
+        valido:     True si el campo es válido.
+        mensaje:    Texto a mostrar en el label.
+    """
+    valor = entry_ctk.get().strip()
+
+    if valor == "":
+        if valido:
+            # Campo opcional vacío → sin borde destacado
+            entry_ctk.configure(border_width=1, border_color="#4b5563")
+        else:
+            # Campo obligatorio vacío → borde rojo
+            entry_ctk.configure(border_width=2, border_color="#ef4444")
+    else:
+        entry_ctk.configure(
+            border_width=2,
+            border_color="#10b981" if valido else "#ef4444"
+        )
+
+    if label_ctk:
+        if "Opcional" in mensaje:
+            color = "#9ca3af"
+        elif valido:
+            color = "#10b981"
+        else:
+            color = "#ef4444"
+        label_ctk.configure(text=mensaje, text_color=color)
+
+
+def registrar_validadores_teclado_ctk(entry_ctk, tipo_validacion: str, ventana) -> None:
+    """
+    Registra el validador de teclado de ValidadoresTeclado en un CTkEntry.
+
+    Evita duplicar el registro manual de validatecommand en cada módulo.
+
+    Args:
+        entry_ctk:        El CTkEntry al que aplicar el bloqueo de teclado.
+        tipo_validacion:  Uno de: 'dni', 'cuit', 'telefono', 'solo_numeros',
+                          'solo_letras', 'letras_y_numeros', 'decimal', 'monto',
+                          'email', 'nombre'.
+        ventana:          La ventana (CTkToplevel o Tk) para register().
+    """
+    mapa = {
+        'dni':             ValidadoresTeclado.dni,
+        'cuit':            ValidadoresTeclado.cuit,
+        'telefono':        ValidadoresTeclado.telefono,
+        'solo_numeros':    ValidadoresTeclado.solo_numeros,
+        'solo_letras':     ValidadoresTeclado.solo_letras,
+        'letras_y_numeros':ValidadoresTeclado.letras_y_numeros,
+        'decimal':         ValidadoresTeclado.decimal,
+        'monto':           ValidadoresTeclado.decimal,
+        'email':           ValidadoresTeclado.email,
+        'nombre':          ValidadoresTeclado.solo_letras,
+    }
+    validador = mapa.get(tipo_validacion)
+    if validador:
+        vcmd = (ventana.register(validador), '%P')
+        entry_ctk.configure(validate='key', validatecommand=vcmd)
+
+
+def conectar_validacion_ctk(entry_ctk, label_ctk, tipo_validacion: str, ventana) -> None:
+    """
+    Configura un CTkEntry completo: bloqueo de teclado + feedback visual en
+    tiempo real. Es el equivalente a EntryValidado para CTkEntry.
+
+    Registra <KeyRelease> y <FocusOut> que llaman a aplicar_feedback_ctk().
+
+    Args:
+        entry_ctk:        CTkEntry a conectar.
+        label_ctk:        CTkLabel de feedback (puede ser None).
+        tipo_validacion:  Tipo de validación (ver registrar_validadores_teclado_ctk).
+        ventana:          Ventana para register().
+    """
+    registrar_validadores_teclado_ctk(entry_ctk, tipo_validacion, ventana)
+
+    def _on_change(event=None):
+        valor = entry_ctk.get()
+        vv = ValidadoresVisuales
+        if tipo_validacion == 'nombre':
+            valido, msg = vv.validar_nombre(valor)
+        elif tipo_validacion == 'nombre_empresa':
+            valido, msg = vv.validar_nombre_empresa(valor)
+        elif tipo_validacion == 'dni':
+            valido, msg = vv.validar_dni(valor)
+        elif tipo_validacion == 'cuit':
+            valido, msg = vv.validar_cuit(valor)
+        elif tipo_validacion == 'cuit_obligatorio':
+            valido, msg = vv.validar_cuit_obligatorio(valor)
+        elif tipo_validacion == 'telefono':
+            valido, msg = vv.validar_telefono(valor)
+        elif tipo_validacion == 'telefono_obligatorio':
+            valido, msg = vv.validar_telefono_obligatorio(valor)
+        elif tipo_validacion == 'email':
+            valido, msg = vv.validar_email(valor)
+        elif tipo_validacion == 'monto':
+            valido, msg = vv.validar_monto(valor)
+        else:
+            return  # Sin validación visual para tipos genéricos
+        aplicar_feedback_ctk(entry_ctk, label_ctk, valido, msg)
+
+    entry_ctk.bind('<KeyRelease>', _on_change)
+    entry_ctk.bind('<FocusOut>', _on_change)
+    # Aplicar estado inicial (útil en modo edición donde ya hay datos)
+    _on_change()
 
 # ============================================================================
 # 📝 EJEMPLO DE USO

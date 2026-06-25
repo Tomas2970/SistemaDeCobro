@@ -45,14 +45,12 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     def validar_len_60(t): return len(t) <= 60
     
     def validar_decimal(t):
-        if t == "": return True
-        if len(t) > 10: return False
-        return re.match(r'^[0-9]*\.?[0-9]*$', t) is not None
+        from app.frontend.validaciones_ui import ValidadoresTeclado
+        return len(t) <= 10 and ValidadoresTeclado.decimal(t)
         
     def validar_entero(t):
-        if t == "": return True
-        if len(t) > 10: return False
-        return t.isdigit()
+        from app.frontend.validaciones_ui import ValidadoresTeclado
+        return len(t) <= 10 and ValidadoresTeclado.solo_numeros(t)
 
     vc_30 = (win.register(validar_len_30), '%P')
     vc_60 = (win.register(validar_len_60), '%P')
@@ -287,11 +285,13 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
             minimo = int(var_stock_min.get() or 0)
             codigo = var_cod.get().strip() or None
 
-            if not nombre:
-                messagebox.showwarning("Campo requerido", "El nombre del producto es obligatorio.", parent=win)
-                return
-            if precio <= 0:
-                messagebox.showwarning("Campo requerido", "El precio de venta debe ser mayor a 0.", parent=win)
+            from app.frontend.validaciones_ui import ValidadorFormulario
+            ok, msg = ValidadorFormulario.validar_campos({
+                'Nombre del Producto': (nombre, 'nombre_empresa', True),
+                'Precio Venta': (str(precio), 'monto', True)
+            })
+            if not ok:
+                messagebox.showwarning("Campo inválido", msg, parent=win)
                 return
             
             cat_actual = combo_cat.get()

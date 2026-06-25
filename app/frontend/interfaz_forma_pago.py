@@ -110,13 +110,11 @@ class VentanaPago:
 
         ctk.CTkLabel(self.frame_efectivo, text="Paga con:", font=font_title, text_color="#1f2937" if ctk.get_appearance_mode()=="Light" else "white").grid(row=0, column=0, padx=(15, 5), pady=(15, 5), sticky="w")
         
-        def validar_float(texto):
-            if texto == "": return True
-            import re
-            if not re.match(r'^[0-9]*\.?[0-9]*$', texto): return False
-            return True
-
         self.entry_paga = ctk.CTkEntry(self.frame_efectivo, font=("Segoe UI", 18, "bold"), width=180, height=50, justify="center")
+        
+        from app.frontend.validaciones_ui import registrar_validadores_teclado_ctk
+        registrar_validadores_teclado_ctk(self.entry_paga, 'decimal', self.ventana)
+        
         self.entry_paga.grid(row=0, column=1, padx=10, pady=(20, 10), sticky="w")
         
         def _on_key_paga(event=None):

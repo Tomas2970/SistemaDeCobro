@@ -38,7 +38,7 @@ class InterfazTesoreria:
         main_frame.grid_rowconfigure(0, weight=1)
 
         # Panel Izquierdo: Estado de la Tesorería
-        estado_frame = ctk.CTkFrame(main_frame, fg_color=get_color("bg_primary"), corner_radius=15, border_width=1, border_color="#d1d5db" if ctk.get_appearance_mode() == "Light" else "#475569")
+        estado_frame = ctk.CTkFrame(main_frame, fg_color=get_color("bg_surface"), corner_radius=15, border_width=1, border_color="#d1d5db" if ctk.get_appearance_mode() == "Light" else "#475569")
         estado_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
         ctk.CTkLabel(estado_frame, text="📊 Estado Actual", font=("Segoe UI", 18, "bold")).pack(pady=(20, 10))
@@ -56,7 +56,7 @@ class InterfazTesoreria:
         self.btn_cerrar.pack(fill="x", padx=40, pady=10)
 
         # Panel Derecho: Aportes e Ingresos
-        acciones_frame = ctk.CTkFrame(main_frame, fg_color=get_color("bg_primary"), corner_radius=15, border_width=1, border_color="#d1d5db" if ctk.get_appearance_mode() == "Light" else "#475569")
+        acciones_frame = ctk.CTkFrame(main_frame, fg_color=get_color("bg_surface"), corner_radius=15, border_width=1, border_color="#d1d5db" if ctk.get_appearance_mode() == "Light" else "#475569")
         acciones_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
         ctk.CTkLabel(acciones_frame, text="💸 Movimientos Extraordinarios", font=("Segoe UI", 18, "bold")).pack(pady=(20, 10))
@@ -115,12 +115,14 @@ class InterfazTesoreria:
     def abrir_tesoreria(self):
         monto_str = messagebox.mostrar_entrada("Abrir Tesorería", "Ingrese el monto inicial (Ej: 0):", parent=self.win)
         if monto_str is None: return
-        try:
-            monto = float(monto_str)
-            if monto < 0: raise ValueError
-        except ValueError:
-            messagebox.mostrar_error("Error", "Monto inválido.", parent=self.win)
+        from app.frontend.validaciones_ui import ValidadorFormulario
+        ok, msg = ValidadorFormulario.validar_campos({
+            'Monto inicial': (monto_str, 'monto', True)
+        })
+        if not ok:
+            messagebox.mostrar_error("Error", msg, parent=self.win)
             return
+        monto = float(monto_str)
 
         try:
             if self.backend.abrir_caja_session(self.usuario['id_usuario'], monto, tipo_caja='tesoreria'):
@@ -148,11 +150,18 @@ class InterfazTesoreria:
             messagebox.mostrar_error("Error", f"Error al cerrar: {e}", parent=self.win)
 
     def registrar_ingreso(self):
-        try:
-            monto = float(self.var_monto.get() or 0)
-            if monto <= 0: raise ValueError
-        except ValueError:
-            messagebox.mostrar_error("Error", "Monto inválido. Debe ser mayor a 0.", parent=self.win)
+        monto_str = self.var_monto.get().strip()
+        from app.frontend.validaciones_ui import ValidadorFormulario
+        ok, msg = ValidadorFormulario.validar_campos({
+            'Monto a ingresar': (monto_str, 'monto', True)
+        })
+        if not ok:
+            messagebox.mostrar_error("Error", msg, parent=self.win)
+            return
+        
+        monto = float(monto_str)
+        if monto <= 0:
+            messagebox.mostrar_error("Error", "El monto debe ser mayor a 0.", parent=self.win)
             return
             
         motivo = self.var_motivo.get()

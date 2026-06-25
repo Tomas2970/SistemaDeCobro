@@ -147,9 +147,8 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     # VALIDADORES
     def validar_len_30(t): return len(t) <= 30
     def validar_cantidad(t):
-        if t == "": return True
-        if len(t) > 5: return False
-        return bool(re.match(r'^[0-9]{0,4}[.,]?[0-9]{0,3}$', t))
+        from app.frontend.validaciones_ui import ValidadoresTeclado
+        return len(t) <= 6 and ValidadoresTeclado.decimal(t)
     
     vc_30 = (win.register(validar_len_30), '%P')
     vc_cantidad = (win.register(validar_cantidad), '%P')
@@ -597,6 +596,30 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             
         lbl_total_monto.configure(text=f"$ {total_venta:,.2f}")
 
+    def _actualizar_precios_carrito():
+        if not win.winfo_exists():
+            try: stock_events.desuscribir(_actualizar_precios_carrito)
+            except: pass
+            return
+        
+        hubo_cambio = False
+        for i, (pid, nombre, cant, precio, cb) in enumerate(items):
+            if pid is not None:
+                try:
+                    prod = backend.buscar_producto_por_id(pid)
+                    if prod:
+                        nuevo_precio = float(prod.get('precio', precio))
+                        if abs(nuevo_precio - precio) > 1e-6:
+                            items[i] = (pid, nombre, cant, nuevo_precio, cb)
+                            hubo_cambio = True
+                except Exception:
+                    pass
+        
+        if hubo_cambio:
+            _refrescar_lista()
+
+    stock_events.suscribir(_actualizar_precios_carrito)
+
     def quitar_seleccion(event=None):
         sel = tree.selection()
         if not sel: return
@@ -684,6 +707,11 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         prod = prod_preseleccionado or _resolver_producto(token)
         if not prod:
             messagebox.showwarning("No encontrado", "No se encontró el producto.", parent=win); return
+
+        # 🔥 Asegurar que el entry muestre el nombre (no el código o ID) en caso de fallar posterior validación
+        if not prod_preseleccionado:
+            entry_producto.delete(0, tk.END)
+            entry_producto.insert(0, str(prod.get('nombre', '')))
 
         es_pesable = bool(prod.get("es_pesable", False))
         cantidad_str = entry_cantidad.get().strip().replace(",", ".") or "1"
@@ -792,14 +820,34 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             if not id_venta:
                 messagebox.showerror("Error", "ID de venta nulo.", parent=win); return
         except ValueError as ve:
-            if "CAJA_CERRADA" in str(ve):
+            err_str = str(ve)
+            if "CAJA_CERRADA" in err_str:
                 messagebox.showerror(
                     "⚠️ Caja Cerrada", 
                     "No se puede procesar la venta porque la caja está cerrada.\n\n"
                     "Por favor, abra la caja antes de continuar.", 
                     parent=win
                 )
-            elif "Stock insuficiente" in str(ve):
+            elif "LIMITE_CREDITO_EXCEDIDO" in err_str:
+                # Parsear los datos incluidos en el mensaje del backend
+                partes = {p.split(":")[0].strip(): p.split(":", 1)[1].strip()
+                          for p in err_str.split("|")[1:] if ":" in p}
+                limite    = partes.get("Límite", "?")
+                saldo     = partes.get("Saldo actual", "?")
+                disponible = partes.get("Disponible", "?")
+                monto     = partes.get("Monto venta", "?")
+                messagebox.showerror(
+                    "⚠️ Límite de Crédito Excedido",
+                    f"La venta fue rechazada por el servidor porque el cliente superó su límite de crédito.\n\n"
+                    f"• Límite de crédito:    $ {limite}\n"
+                    f"• Saldo actual:         $ {saldo}\n"
+                    f"• Crédito disponible:   $ {disponible}\n"
+                    f"• Monto de esta venta:  $ {monto}\n\n"
+                    f"⚠️ Esto puede ocurrir si otra caja registró una venta al mismo cliente\n"
+                    f"casi simultáneamente. La venta fue revertida automáticamente.",
+                    parent=win
+                )
+            elif "Stock insuficiente" in err_str:
                 messagebox.showwarning(
                     "⚠️ Stock Insuficiente", 
                     f"No se pudo completar la venta debido a un cambio en el inventario:\n\n{ve}",

@@ -233,15 +233,15 @@ class CuentaCorriente:
     def confirmar_pago(self):
         try:
             monto_raw = self.entry_monto.get().strip()
-            if not monto_raw:
-                messagebox.showwarning("Monto Requerido", "Por favor, ingresa el monto del pago a registrar.", parent=self.win_pago)
-                return
-            try:
-                monto = float(monto_raw.replace(",", "."))
-            except ValueError:
-                messagebox.showwarning("Monto Inválido", "El monto ingresado para el pago no es un número válido.", parent=self.win_pago)
+            from app.frontend.validaciones_ui import ValidadorFormulario
+            ok, msg = ValidadorFormulario.validar_campos({
+                'Monto a Pagar': (monto_raw, 'monto', True)
+            })
+            if not ok:
+                messagebox.showwarning("Monto Inválido", msg, parent=self.win_pago)
                 return
             
+            monto = float(monto_raw.replace(",", "."))
             if monto <= 0:
                 messagebox.showwarning("Monto Inválido", "El monto ingresado para el pago debe ser mayor a cero.", parent=self.win_pago)
                 return
@@ -268,7 +268,10 @@ class CuentaCorriente:
                 self.cargar_deudores()
             else:
                 from app.frontend.manejador_errores import ManejadorErroresUI
-                ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el pago. Asegúrate de que la caja de cobros esté abierta."), parent=self.win_pago, contexto="caja")
+                if self.usuario.get('id_rol') in (1, 3):
+                    ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el pago."), parent=self.win_pago, contexto="pago")
+                else:
+                    ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el pago. Asegúrate de que la caja de cobros esté abierta."), parent=self.win_pago, contexto="caja")
                 
         except ValueError as ve:
             from app.frontend.manejador_errores import ManejadorErroresUI

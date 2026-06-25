@@ -228,15 +228,21 @@ def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_
             if autorizador and autorizador.get('id_rol') in roles_permitidos:
                 procesar_aprobacion_local(autorizador)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            messagebox.showerror("Error", f"Fallo al buscar código: {e}", parent=popup)
         entry_pass.focus_set()
 
     def validar_local():
         u_nom = entry_user.get().strip()
         u_pass = entry_pass.get().strip()
-        if not u_nom or not u_pass:
-            messagebox.showwarning("Atención", "Ingrese credenciales completas", parent=popup)
+        
+        from app.frontend.validaciones_ui import ValidadorFormulario
+        ok, msg = ValidadorFormulario.validar_campos({
+            'Usuario / Credencial': (u_nom, None, True),
+            'Contraseña / PIN': (u_pass, None, True)
+        })
+        if not ok:
+            messagebox.showwarning("Atención", msg, parent=popup)
             return
         try:
             autorizador = backend.verificar_contraseña(u_nom, u_pass)

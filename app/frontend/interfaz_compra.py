@@ -219,9 +219,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
 
         # tk.Entry nativo: CTkEntry no funciona con .place() dentro de ttk.Treeview
         def _validar_numerico(txt):
-            if txt == "": return True
-            import re
-            return bool(re.match(r'^\d{0,10}([.,]\d{0,4})?$', txt))
+            from app.frontend.validaciones_ui import ValidadoresTeclado
+            return len(txt) <= 15 and ValidadoresTeclado.decimal(txt)
         vcmd_num = (tree.register(_validar_numerico), '%P')
         entry = tk.Entry(tree, font=("Segoe UI", 11), bg=col_input_bg, fg=col_input_fg, bd=0, insertbackground=col_input_fg, justify="right",
                          validate="key", validatecommand=vcmd_num)
@@ -377,26 +376,162 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         ctk.CTkButton(dialog, text="Cancelar", command=dialog.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), height=40).pack(pady=15)
         win.wait_window(dialog); return seleccion["valor"]
 
+    def _pedir_revision_precios(items_con_cambio: list[dict]) -> list[int]:
+        """
+        Muestra un diálogo donde el usuario ve Precio Actual → Precio Nuevo
+        y elige qué productos actualizar. Devuelve lista de id_producto confirmados.
+        """
+        if not items_con_cambio:
+            return []
+
+        rev = ctk.CTkToplevel(win)
+        rev.title("Revisión de Precios de Venta")
+        rev.geometry("720x480")
+        rev.configure(fg_color=col_bg)
+        rev.resizable(False, False)
+        rev.transient(win)
+        rev.grab_set()
+
+        ctk.CTkLabel(rev, text="📋 Revisión de Precios de Venta",
+                     font=("Segoe UI", 17, "bold"), text_color=col_text).pack(pady=(20, 4))
+        ctk.CTkLabel(rev, text="Seleccioná los productos cuyo precio de venta deseas actualizar.",
+                     font=("Segoe UI", 11), text_color="#9ca3af").pack(pady=(0, 12))
+
+        frm_tabla = ctk.CTkFrame(rev, fg_color=col_card, corner_radius=10,
+                                  border_color=col_border, border_width=1)
+        frm_tabla.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+
+        # Encabezado
+        hdr = ctk.CTkFrame(frm_tabla, fg_color="#1e3a8a", corner_radius=6)
+        hdr.pack(fill="x", padx=8, pady=(8, 4))
+        for txt, w in [("✓", 40), ("Producto", 280), ("Precio Actual", 140), ("Precio Nuevo", 140), ("Δ", 80)]:
+            ctk.CTkLabel(hdr, text=txt, font=("Segoe UI", 11, "bold"),
+                         text_color="white", width=w, anchor="w").pack(side="left", padx=4, pady=6)
+
+        checks: list[tuple[tk.BooleanVar, int]] = []  # (var, id_producto)
+
+        scroll_frame = ctk.CTkScrollableFrame(frm_tabla, fg_color="transparent", height=250)
+        scroll_frame.pack(fill="both", expand=True, padx=8, pady=4)
+
+        for it in items_con_cambio:
+            var = tk.BooleanVar(value=True)  # marcado por defecto
+            checks.append((var, it['id']))
+            delta = it['precio_venta'] - it['precio_actual']
+            color_delta = "#4ade80" if delta >= 0 else "#f87171"
+            signo = "+" if delta >= 0 else ""
+
+            fila = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            fila.pack(fill="x", pady=2)
+
+            ctk.CTkCheckBox(fila, text="", variable=var, width=40,
+                             fg_color="#10b981", hover_color="#059669").pack(side="left", padx=4)
+            ctk.CTkLabel(fila, text=it['nombre'], font=("Segoe UI", 12),
+                          text_color=col_text, width=280, anchor="w").pack(side="left", padx=4)
+            ctk.CTkLabel(fila, text=f"$ {it['precio_actual']:,.2f}",
+                          font=("Segoe UI", 12), text_color="#9ca3af",
+                          width=140, anchor="e").pack(side="left", padx=4)
+            ctk.CTkLabel(fila, text=f"$ {it['precio_venta']:,.2f}",
+                          font=("Segoe UI", 12, "bold"), text_color=col_text,
+                          width=140, anchor="e").pack(side="left", padx=4)
+            ctk.CTkLabel(fila, text=f"{signo}{delta:,.2f}",
+                          font=("Segoe UI", 11, "bold"), text_color=color_delta,
+                          width=80, anchor="e").pack(side="left", padx=4)
+
+        resultado = {"ids": []}
+
+        frm_btns = ctk.CTkFrame(rev, fg_color="transparent")
+        frm_btns.pack(fill="x", padx=20, pady=(0, 16))
+
+        def btn_todos():
+            for v, _ in checks: v.set(True)
+
+        def btn_ninguno():
+            for v, _ in checks: v.set(False)
+
+        def confirmar():
+            resultado["ids"] = [pid for v, pid in checks if v.get()]
+            rev.destroy()
+
+        def omitir():
+            resultado["ids"] = []
+            rev.destroy()
+
+        ctk.CTkButton(frm_btns, text="☑ Todos", command=btn_todos,
+                       fg_color="#374151", hover_color="#4b5563",
+                       font=("Segoe UI", 11), width=90, height=35).pack(side="left", padx=4)
+        ctk.CTkButton(frm_btns, text="☐ Ninguno", command=btn_ninguno,
+                       fg_color="#374151", hover_color="#4b5563",
+                       font=("Segoe UI", 11), width=90, height=35).pack(side="left", padx=4)
+        ctk.CTkButton(frm_btns, text="⏭ Omitir precios", command=omitir,
+                       fg_color="#6b7280", hover_color="#4b5563",
+                       font=("Segoe UI", 11, "bold"), width=130, height=35).pack(side="left", padx=10)
+        ctk.CTkButton(frm_btns, text="✓ Aplicar selección", command=confirmar,
+                       fg_color="#10b981", hover_color="#059669",
+                       font=("Segoe UI", 13, "bold"), width=180, height=40).pack(side="right", padx=4)
+
+        win.wait_window(rev)
+        return resultado["ids"]
+
     def guardar_compra():
+        from app.database.permisos import tiene_permiso
+        if not tiene_permiso(usuario, 'registrar_compras'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para registrar compras.", parent=win)
+            return
+
         if not proveedor_sel or not carrito: 
             messagebox.showwarning("Aviso", "Añada productos al carrito antes de confirmar.", parent=win)
             return
         medio = pedir_medio_pago()
         if not medio: return
         try:
-            id_compra = backend.insertar_compra(usuario['id_usuario'], proveedor_sel['id_proveedor'], carrito, medio_pago=medio)
+            id_compra = backend.insertar_compra(
+                usuario['id_usuario'],
+                proveedor_sel['id_proveedor'],
+                carrito,
+                medio_pago=medio,
+                usuario_actual=usuario
+            )
             if id_compra:
-                for item in carrito: backend.actualizar_precio_producto(item['id'], item['precio_venta'], id_usuario=usuario['id_usuario'])
+                # Construir lista de productos con cambio de precio para revisión
+                items_revision = []
+                for item in carrito:
+                    try:
+                        prod = backend.buscar_producto_por_id(item['id'])
+                        precio_actual = float(prod.get('precio_venta', 0.0)) if prod else 0.0
+                    except Exception:
+                        precio_actual = 0.0
+                    precio_nuevo = round(item['precio_venta'], 2)
+                    if abs(precio_nuevo - precio_actual) > 0.01:
+                        items_revision.append({
+                            'id': item['id'],
+                            'nombre': item['nombre'],
+                            'precio_actual': precio_actual,
+                            'precio_venta': precio_nuevo
+                        })
+
+                # Mostrar diálogo de revisión solo si hay cambios
+                ids_a_actualizar = _pedir_revision_precios(items_revision) if items_revision else []
+
+                for id_prod in ids_a_actualizar:
+                    nuevo_precio = next((i['precio_venta'] for i in items_revision if i['id'] == id_prod), None)
+                    if nuevo_precio is not None:
+                        backend.actualizar_precio_producto(id_prod, nuevo_precio, id_usuario=usuario['id_usuario'])
+
                 messagebox.showinfo("Éxito", "Compra registrada correctamente.", parent=win)
                 stock_events.notificar_cambio_stock(); win.destroy()
+        except PermissionError as pe:
+            messagebox.showerror("Acceso Denegado", str(pe), parent=win)
         except ValueError as ve:
-            if "CAJA_CERRADA" in str(ve):
-                messagebox.showerror(
-                    "⚠️ Caja Cerrada", 
-                    "No se puede procesar la compra porque la caja está cerrada.\n\n"
-                    "Por favor, abra la caja antes de continuar.", 
-                    parent=win
-                )
+            if "CAJA_CERRADA" in str(ve) or "TESORERIA_CERRADA" in str(ve):
+                if usuario.get('id_rol') in (1, 3):
+                    pass # En roles administrativos esto no bloquea, auto-crea la tesorería
+                else:
+                    messagebox.showerror(
+                        "⚠️ Caja Cerrada", 
+                        "No se puede procesar la compra porque la caja está cerrada.\n\n"
+                        "Por favor, abra la caja antes de continuar.", 
+                        parent=win
+                    )
             else:
                 messagebox.showerror("Error", str(ve), parent=win)
         except Exception as e: 

@@ -300,16 +300,18 @@ class UIManageCategorias:
  
         def guardar():
             nom = ent_nom.get().strip()
-            try: mar = float(ent_mar.get())
-            except: 
-                messagebox.showwarning("Margen Inválido", "Por favor, ingresa un valor numérico decimal válido para el margen de ganancia.", parent=pop)
+            mar_str = ent_mar.get().strip()
+            
+            from app.frontend.validaciones_ui import ValidadorFormulario
+            ok, msg = ValidadorFormulario.validar_campos({
+                'Nombre de Categoría': (nom, 'nombre_empresa', True),
+                'Margen de Ganancia': (mar_str, 'monto', True)
+            })
+            if not ok:
+                messagebox.showwarning("Campo inválido", msg, parent=pop)
                 return
-            if not nom:
-                messagebox.showwarning("Nombre Requerido", "El campo Nombre de Categoría es obligatorio.", parent=pop)
-                return
-            if mar < 0:
-                messagebox.showwarning("Margen Inválido", "El margen de ganancia sugerido no puede ser menor a cero.", parent=pop)
-                return
+            
+            mar = float(mar_str)
                 
             try:
                 exito = False

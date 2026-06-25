@@ -90,7 +90,7 @@ def ejecutar_migraciones():
                     diferencia DECIMAL(10,2) NULL,
                     observaciones_cierre TEXT NULL,
                     estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
-                    tipo_caja ENUM('ventas', 'tesoreria') DEFAULT 'ventas',
+                    tipo_caja ENUM('turno', 'administrativa') DEFAULT 'turno',
                     FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
                     FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
                     INDEX idx_caja_estado (estado),
@@ -281,7 +281,8 @@ def ejecutar_migraciones():
             cols_session = [row[0] for row in cursor.fetchall()]
             if "tipo_caja" not in cols_session:
                 logger.info("🔧 Migrando: Agregando tipo_caja a caja_session")
-                _ejecutar_paso(cursor, "session.tipo_caja", "ALTER TABLE caja_session ADD COLUMN tipo_caja ENUM('ventas', 'tesoreria') DEFAULT 'ventas'")
+                _ejecutar_paso(cursor, "session.tipo_caja", "ALTER TABLE caja_session ADD COLUMN tipo_caja ENUM('turno', 'administrativa') DEFAULT 'turno'")
+                _ejecutar_paso(cursor, "session.tipo_caja_update", "UPDATE caja_session SET tipo_caja = 'turno'")
                 
             # Para modificar ENUM de forma segura en MySQL
             logger.info("🔧 Migrando: Ampliando motivos de caja_movimiento para Tesorería")
@@ -294,7 +295,7 @@ def ejecutar_migraciones():
                     'pago_proveedor', 'gasto_vario', 'retiro_caja',
                     'devolucion_efectivo', 'ajuste_positivo', 'ajuste_negativo',
                     'transferencia_tesoreria_salida', 'transferencia_tesoreria_entrada',
-                    'ingreso_extraordinario', 'otro'
+                    'ingreso_extraordinario', 'ingreso_capital', 'otro'
                 ) NOT NULL
             """)
         except Exception as e:
@@ -320,6 +321,7 @@ def ejecutar_migraciones():
         _ejecutar_paso(cursor, "crear idx_mov_fecha_hora", "CREATE INDEX idx_mov_fecha_hora ON caja_movimiento (fecha_hora)")
         _ejecutar_paso(cursor, "crear idx_pagoprov_fecha", "CREATE INDEX idx_pagoprov_fecha ON PagoProveedor (fecha)")
         _ejecutar_paso(cursor, "crear idx_session_fecha_cierre", "CREATE INDEX idx_session_fecha_cierre ON caja_session (fecha_cierre)")
+        _ejecutar_paso(cursor, "crear idx_auditoria_fecha", "CREATE INDEX idx_auditoria_fecha ON AuditoriaAcciones (fecha)")
 
         # 10. USUARIO (codigo_barras)
         cursor.execute("DESCRIBE Usuario")

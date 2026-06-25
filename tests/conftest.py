@@ -16,7 +16,7 @@ def mock_db(monkeypatch):
     mock.conectar = MagicMock()
     mock.obtener_stock_por_producto.return_value = 10.0
     mock.obtener_stock_minimo.return_value = 5
-    mock.insertar_cliente.return_value = 1
+    mock.crear_cliente.return_value = 1
     mock.actualizar_cliente_completo.return_value = True
     
     # Simular roles
@@ -55,7 +55,7 @@ def mock_db(monkeypatch):
     monkeypatch.setattr("app.database.DB.conectar", mock.conectar)
     monkeypatch.setattr("app.database.DB.obtener_stock_por_producto", mock.obtener_stock_por_producto)
     monkeypatch.setattr("app.database.DB.obtener_stock_minimo", mock.obtener_stock_minimo)
-    monkeypatch.setattr("app.database.DB.insertar_cliente", mock.insertar_cliente)
+    monkeypatch.setattr("app.database.DB.crear_cliente", mock.crear_cliente)
     monkeypatch.setattr("app.database.DB.actualizar_cliente_completo", mock.actualizar_cliente_completo)
     monkeypatch.setattr("app.database.DB.obtener_usuarios_con_rol", mock.obtener_usuarios_con_rol)
     monkeypatch.setattr("app.database.DB.obtener_cliente_completo", mock.obtener_cliente_completo)
@@ -65,10 +65,12 @@ def mock_db(monkeypatch):
     monkeypatch.setattr("app.database.DB.crear_producto_completo", mock.crear_producto_completo)
     monkeypatch.setattr("app.database.DB.actualizar_producto", mock.actualizar_producto)
     monkeypatch.setattr("app.database.DB.actualizar_inventario_absoluto", mock.actualizar_inventario_absoluto)
-    monkeypatch.setattr("app.database.DB.insertar_compra", mock.insertar_compra)
+    monkeypatch.setattr("app.database.DB.registrar_compra", mock.registrar_compra)
     monkeypatch.setattr("app.database.DB.anular_venta", mock.anular_venta)
     monkeypatch.setattr("app.database.DB.reporte_ventas_por_vendedor", mock.reporte_ventas_por_vendedor)
     monkeypatch.setattr("app.database.DB.obtener_ventas_diarias", mock.obtener_ventas_diarias)
+    monkeypatch.setattr("app.database.DB.transferir_entre_cajas", mock.transferir_entre_cajas)
+    monkeypatch.setattr("app.database.DB.obtener_o_crear_tesoreria_hoy", mock.obtener_o_crear_tesoreria_hoy)
     
     return mock
 

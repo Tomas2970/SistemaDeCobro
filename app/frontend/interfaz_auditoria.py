@@ -31,7 +31,8 @@ MAPEO_ACCIONES = {
     "DESACTIVAR_PROVEEDOR": "❌ Proveedor desactivado",
     "REACTIVAR_PROVEEDOR": "♻️ Proveedor reactivado",
     "CIERRE_CAJA_SUPERVISOR": "🔒 Cierre forzado de caja",
-    "CIERRE_CAJA": "🔒 Cierre de caja"
+    "CIERRE_CAJA": "🔒 Cierre de caja",
+    "EXPORTAR_HISTORIAL": "📤 Exportación de historial",
 }
 
 INV_MAPEO_ACCIONES = {v: k for k, v in MAPEO_ACCIONES.items()}
@@ -55,6 +56,10 @@ class InterfazAuditoria:
         self.win.minsize(1050, 650)
         
         configurar_estilo_treeview()
+        
+        self.pag_size = 50
+        self.pag_aud = 0
+        self.total_aud = 0
         
         self.crear_widgets()
         self.cargar_filtros()
@@ -150,6 +155,19 @@ class InterfazAuditoria:
         # Estructura para guardar datos crudos asociados al row id
         self.datos_crudos_tree = {}
         
+        # --- PAGINACION ---
+        frm_pag_aud = ctk.CTkFrame(self.win, fg_color="transparent")
+        frm_pag_aud.pack(fill="x", padx=20, pady=(0, 10))
+        
+        btn_prev_aud = ctk.CTkButton(frm_pag_aud, text="Anterior", width=80, fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"), command=self._prev_page_aud)
+        btn_prev_aud.pack(side="left", padx=5)
+        
+        self.lbl_pag_aud = ctk.CTkLabel(frm_pag_aud, text="Página 1", font=("Segoe UI", 12))
+        self.lbl_pag_aud.pack(side="left", padx=10)
+        
+        btn_next_aud = ctk.CTkButton(frm_pag_aud, text="Siguiente", width=80, fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"), command=self._next_page_aud)
+        btn_next_aud.pack(side="left", padx=5)
+
         # --- BOTONES INFERIORES ---
         frame_btns = ctk.CTkFrame(self.win, fg_color="transparent")
         frame_btns.pack(fill="x", padx=20, pady=(0, 20))
@@ -321,7 +339,10 @@ class InterfazAuditoria:
             return
             
         try:
-            registros = self.backend.obtener_bitacora_acciones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, id_usuario=id_user, accion=accion_tecnica)
+            limit = self.pag_size
+            offset = self.pag_aud * self.pag_size
+            self.total_aud = self.backend.contar_bitacora_acciones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, id_usuario=id_user, accion=accion_tecnica)
+            registros = self.backend.obtener_bitacora_acciones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, id_usuario=id_user, accion=accion_tecnica, limit=limit, offset=offset)
             
             for r in registros:
                 fecha = str(r.get('fecha'))[:16] # "2024-01-01 15:30"
@@ -352,8 +373,24 @@ class InterfazAuditoria:
                     "datos_nuevos": r.get('datos_nuevos')
                 }
                 
+            if hasattr(self, 'lbl_pag_aud'):
+                tot_pages = max(1, (self.total_aud + self.pag_size - 1) // self.pag_size)
+                self.lbl_pag_aud.configure(text=f"Página {self.pag_aud + 1} de {tot_pages} ({self.total_aud} registros)")
+                
         except Exception as e:
-            messagebox.showerror("Error", f"Error consultando bitácora: {e}", parent=self.win)
+            logger.error(f"Error cargar_datos auditoria: {e}")
+            messagebox.showerror("Error", f"Ocurrió un error al cargar datos:\n{e}", parent=self.win)
+
+    def _prev_page_aud(self):
+        if self.pag_aud > 0:
+            self.pag_aud -= 1
+            self.cargar_datos()
+            
+    def _next_page_aud(self):
+        tot_pages = max(1, (self.total_aud + self.pag_size - 1) // self.pag_size)
+        if self.pag_aud < tot_pages - 1:
+            self.pag_aud += 1
+            self.cargar_datos()
 
     def mostrar_detalle_evento(self, event):
         item_id = self.tree.focus()
@@ -402,20 +439,86 @@ class InterfazAuditoria:
             if not todas_claves:
                 lineas.append("No hay detalles adicionales.")
             else:
+                map_id_to_user = {v: k for k, v in getattr(self, 'map_usuarios', {}).items()}
+                map_id_to_rol = {1: 'Administrador', 2: 'Vendedor', 3: 'Supervisor'}
+                
+                nombres_amigables = {
+                    "cerrado_por": "Cerrado por",
+                    "id_usuario": "Usuario",
+                    "abierto_por": "Abierto por",
+                    "autorizado_por": "Autorizado por",
+                    "motivo": "Motivo",
+                    "estado": "Estado",
+                    "monto": "Monto",
+                    "fecha_apertura": "Fecha de apertura",
+                    "fecha_cierre": "Fecha de cierre",
+                    "id_rol": "Rol",
+                    "id_producto": "Producto",
+                    "id_categoria": "Categoría",
+                    "limite_credito": "Límite de crédito",
+                    "precio_venta": "Precio de venta",
+                    "precio_compra": "Precio de compra",
+                    "stock_minimo": "Stock mínimo",
+                    "codigo_barras": "Código de barras",
+                    "descripcion": "Descripción"
+                }
+
+                def resolver_valor(clave, valor):
+                    if valor is None:
+                        return valor
+                    
+                    if clave in ("cerrado_por", "id_usuario", "abierto_por", "autorizado_por"):
+                        try:
+                            return map_id_to_user.get(int(valor), valor)
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    if clave in ("id_rol", "rol_id"):
+                        try:
+                            return map_id_to_rol.get(int(valor), valor)
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    if clave in ("id_producto", "producto_id"):
+                        try:
+                            p = self.backend.buscar_producto_por_id(int(valor))
+                            if p and p.get("nombre"):
+                                return p["nombre"]
+                        except Exception:
+                            pass
+                            
+                    if clave in ("id_categoria", "categoria_id"):
+                        try:
+                            c = self.backend.obtener_categoria_por_id(int(valor))
+                            if c and c.get("nombre"):
+                                return c["nombre"]
+                        except Exception:
+                            pass
+                    
+                    return valor
+
                 for k in sorted(todas_claves):
                     v_ant = d_ant.get(k)
                     v_nue = d_nue.get(k)
-                    k_amigable = k.replace('_', ' ').capitalize()
                     
-                    if v_ant != v_nue:
-                        if k in d_ant and k in d_nue:
-                            lineas.append(f"{k_amigable}:\n{v_ant} → {v_nue}\n")
-                        elif k in d_nue:
-                            lineas.append(f"{k_amigable}:\n(nuevo) → {v_nue}\n")
-                        elif k in d_ant:
-                            lineas.append(f"{k_amigable}:\n{v_ant} → (eliminado)\n")
-                    else:
-                        pass # No mostrar lo que no cambió
+                    v_ant_res = resolver_valor(k, v_ant)
+                    v_nue_res = resolver_valor(k, v_nue)
+                    
+                    k_amigable = nombres_amigables.get(k, k.replace('_', ' ').capitalize())
+                    
+                    if v_ant_res != v_nue_res:
+                        es_tecnico = k.startswith("id_") and k not in nombres_amigables
+                        es_sin_valor_ant = (k not in d_ant) or (v_ant_res is None or str(v_ant_res).strip() == "")
+                        es_sin_valor_nue = (k not in d_nue) or (v_nue_res is None or str(v_nue_res).strip() == "")
+                        
+                        if es_sin_valor_ant and es_tecnico:
+                            continue
+                            
+                        str_ant = "—" if es_sin_valor_ant else str(v_ant_res)
+                        str_nue = "—" if es_sin_valor_nue else str(v_nue_res)
+                        
+                        if str_ant != str_nue:
+                            lineas.append(f"{k_amigable}:\n{str_ant} → {str_nue}\n")
             
             txt_cambios.insert("1.0", "\n".join(lineas))
         except Exception as e:
@@ -426,33 +529,71 @@ class InterfazAuditoria:
         ctk.CTkButton(modal, text="Cerrar", command=modal.destroy, fg_color="#4b5563", hover_color="#374151", width=100).pack(pady=15)
 
     def exportar_csv(self):
-        items = self.tree.get_children()
-        if not items:
-            messagebox.showinfo("Exportar", "No hay datos para exportar.", parent=self.win)
-            return
+        usr_sel = self.combo_usuario.get()
+        acc_sel = self.combo_accion.get()
+        desde_str = self.entry_desde.get_date_str()
+        hasta_str = self.entry_hasta.get_date_str()
+        
+        id_user = self.map_usuarios.get(usr_sel) if usr_sel != "Todos" else None
+        accion_tecnica = None
+        if acc_sel != "Todas":
+            accion_tecnica = INV_MAPEO_ACCIONES.get(acc_sel, acc_sel)
             
+        try:
+            fecha_desde = self.validar_y_convertir_fecha(desde_str)
+            fecha_hasta = self.validar_y_convertir_fecha(hasta_str)
+        except ValueError as ve:
+            messagebox.showwarning("Error de Formato", str(ve), parent=self.win)
+            return
+
         filepath = filedialog.asksaveasfilename(
             parent=self.win,
-            title="Exportar CSV",
+            title="Exportar CSV Completo",
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"auditoria_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            initialfile=f"auditoria_completa_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
-        
         if not filepath: return
         
-        try:
-            with open(filepath, mode='w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Fecha", "Usuario", "Acción", "Entidad", "Resumen"])
+        def _do_export():
+            try:
+                registros = self.backend.obtener_bitacora_acciones(
+                    fecha_desde=fecha_desde, 
+                    fecha_hasta=fecha_hasta, 
+                    id_usuario=id_user, 
+                    accion=accion_tecnica,
+                    limit=100000, # Maximos registros exportables de un golpe
+                    offset=0
+                )
                 
-                for item in items:
-                    valores = self.tree.item(item, 'values')
-                    writer.writerow(valores)
+                if not registros:
+                    if self.win.winfo_exists():
+                        self.win.after(0, lambda: messagebox.showinfo("Exportar", "No hay datos para exportar con los filtros actuales.", parent=self.win))
+                    return
+
+                with open(filepath, mode='w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Fecha", "Usuario", "Acción", "Entidad", "Resumen"])
                     
-            messagebox.showinfo("Éxito", "Exportación completada correctamente.", parent=self.win)
-        except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un error al exportar: {e}", parent=self.win)
+                    for r in registros:
+                        fecha = str(r.get('fecha'))[:16]
+                        usr = r.get('usuario_nombre') or 'Sistema'
+                        acc = r.get('accion') or 'Desconocida'
+                        tabla = r.get('tabla_afectada') or ''
+                        id_reg = r.get('id_registro') or ''
+                        entidad = f"{tabla} #{id_reg}" if id_reg else tabla
+                        acc_amigable = MAPEO_ACCIONES.get(acc, acc)
+                        resumen = self.procesar_resumen(acc, r.get('datos_anteriores'), r.get('datos_nuevos'))
+                        writer.writerow([fecha, usr, acc_amigable, entidad, resumen])
+                        
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: messagebox.showinfo("Éxito", "Exportación completada correctamente.", parent=self.win))
+            except Exception as e:
+                if self.win.winfo_exists():
+                    self.win.after(0, lambda: messagebox.showerror("Error", f"Ocurrió un error al exportar:\n{e}", parent=self.win))
+
+        import threading
+        threading.Thread(target=_do_export, daemon=True).start()
 
 def ui_auditoria(parent, backend, usuario_actual):
     InterfazAuditoria(parent, backend, usuario_actual)

@@ -55,8 +55,14 @@ def ui_login(parent, backend):
         nonlocal usuario_logeado
         u = entry_usuario.get().strip()
         p = entry_contrasena.get().strip()
-        if not u or not p:
-            mostrar_advertencia("Credenciales Requeridas", "Por favor, ingresa tanto el usuario como la contraseña para iniciar sesión.")
+        
+        from app.frontend.validaciones_ui import ValidadorFormulario
+        ok, msg = ValidadorFormulario.validar_campos({
+            'Usuario': (u, None, True),
+            'Contraseña': (p, None, True)
+        })
+        if not ok:
+            mostrar_advertencia("Credenciales Requeridas", msg)
             entry_usuario.focus_set()
             return
         

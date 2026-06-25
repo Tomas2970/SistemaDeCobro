@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS Compra (
     estado VARCHAR(20) DEFAULT 'pendiente',
     numero_factura VARCHAR(50),
     medio_pago VARCHAR(50) DEFAULT 'efectivo',
+    id_session INT NULL,
     CHECK (total >= 0),
     CHECK (estado IN ('pendiente','recibida','cancelada')),
     CHECK (medio_pago IN ('efectivo','transferencia','cuenta_corriente','tarjeta','cheque')),
@@ -178,9 +179,13 @@ CREATE TABLE IF NOT EXISTS Compra (
     CONSTRAINT fk_compra_proveedor
         FOREIGN KEY (id_proveedor) REFERENCES Proveedor(id_proveedor)
         ON DELETE RESTRICT,
+    CONSTRAINT fk_compra_session
+        FOREIGN KEY (id_session) REFERENCES caja_session(id_session)
+        ON DELETE SET NULL,
     INDEX idx_compra_fecha (fecha),
     INDEX idx_compra_proveedor (id_proveedor),
-    INDEX idx_compra_estado (estado)
+    INDEX idx_compra_estado (estado),
+    INDEX idx_compra_session (id_session)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS PagoProveedor (
@@ -243,7 +248,7 @@ CREATE TABLE IF NOT EXISTS caja_session (
     diferencia DECIMAL(10,2) NULL,
     observaciones_cierre TEXT NULL,
     estado ENUM('abierta', 'cerrada') DEFAULT 'abierta',
-    tipo_caja ENUM('ventas', 'tesoreria') DEFAULT 'ventas',
+    tipo_caja ENUM('turno', 'administrativa') DEFAULT 'turno',
     FOREIGN KEY (id_usuario_apertura) REFERENCES Usuario(id_usuario),
     FOREIGN KEY (id_usuario_cierre) REFERENCES Usuario(id_usuario),
     INDEX idx_caja_estado (estado),
@@ -331,6 +336,7 @@ CREATE TABLE IF NOT EXISTS caja_movimiento (
         'transferencia_tesoreria_salida',
         'transferencia_tesoreria_entrada',
         'ingreso_extraordinario',
+        'ingreso_capital',
         'otro'
     ) NOT NULL,
     id_usuario INT NOT NULL,

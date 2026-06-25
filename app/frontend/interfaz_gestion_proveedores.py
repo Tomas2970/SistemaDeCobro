@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import ttk, Toplevel
 from app.frontend import custom_dialogs as messagebox
 from app.frontend.interfaz_crear_proveedor import ui_crear_proveedor
+from app.frontend.autorizacion import solicitar_autorizacion_supervisor
+from app.database.permisos import tiene_permiso
 
 try:
     from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
@@ -22,6 +24,9 @@ try:
 except ImportError:
     def preparar_ventana(w): pass
     def centrar_y_mostrar_ventana(w): pass
+
+# Monto máximo que un Supervisor puede pagar sin autorización de Admin
+UMBRAL_PAGO_SIN_AUTH: float = 50_000.00
 
 def _fmt_mon(val):
     try: return f"$ {float(val):,.2f}"
@@ -141,32 +146,70 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     def recargar_lista_callback():
         win.after(100, cargar_datos)
 
-    def accion_nuevo():
-        ui_crear_proveedor(win, backend, callback_on_save=recargar_lista_callback)
+    # =========================================================
+    # CREAR PROVEEDOR
+    # Admin → acceso directo.
+    # Supervisor → requiere autorización de Admin.
+    # =========================================================
+    def _ejecutar_crear_proveedor():
+        ui_crear_proveedor(
+            win, backend,
+            callback_on_save=recargar_lista_callback,
+            usuario_actual=usuario_actual
+        )
 
+    def accion_nuevo():
+        if not tiene_permiso(usuario_actual, 'crear_proveedores'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para crear empresas.", parent=win)
+            return
+
+        id_rol = usuario_actual.get('id_rol') if usuario_actual else 2
+        if id_rol == 1:
+            # Admin → acceso directo
+            _ejecutar_crear_proveedor()
+        else:
+            # Supervisor → requiere autorización de Admin
+            def on_autorizado(usr_autorizado):
+                _ejecutar_crear_proveedor()
+            solicitar_autorizacion_supervisor(
+                win, backend, usuario_actual,
+                callback_exito=on_autorizado,
+                roles_permitidos=(1,),
+                tipo_operacion="Crear Proveedor",
+                motivo="El Supervisor requiere autorización de Administrador para registrar un nuevo proveedor."
+            )
+
+    # =========================================================
+    # EDITAR PROVEEDOR
+    # =========================================================
     def abrir_editar_proveedor():
+        if not tiene_permiso(usuario_actual, 'editar_proveedores'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para editar empresas.", parent=win)
+            return
         sel = tree.selection()
         if not sel:
             messagebox.showwarning("Atención", "Seleccione una empresa.", parent=win)
             return
         item = tree.item(sel[0], "values")
-        ui_crear_proveedor(win, backend, id_proveedor_a_editar=int(item[0]), callback_on_save=recargar_lista_callback)
+        ui_crear_proveedor(
+            win, backend,
+            id_proveedor_a_editar=int(item[0]),
+            callback_on_save=recargar_lista_callback,
+            usuario_actual=usuario_actual
+        )
     
     tree.bind("<Double-1>", lambda e: abrir_editar_proveedor())
     
-    def abrir_pagar_deuda():
-        sel = tree.selection()
-        if not sel:
-            messagebox.showwarning("Atención", "Seleccione una empresa.", parent=win)
-            return
-        item_vals = tree.item(sel[0], "values")
-        id_prov = int(item_vals[0])
-        nombre_empresa = item_vals[1]
-        
+    # =========================================================
+    # PAGAR DEUDA AL PROVEEDOR
+    # Pagos <= UMBRAL_PAGO_SIN_AUTH → Supervisor directo.
+    # Pagos > UMBRAL_PAGO_SIN_AUTH → requiere autorización de Admin.
+    # =========================================================
+    def _ejecutar_pago(id_prov, nombre_empresa):
         pop = ctk.CTkToplevel(win)
         preparar_ventana(pop)
         pop.title(f"Registrar Pago a {nombre_empresa}")
-        pop.geometry("400x450")
+        pop.geometry("400x480")
         pop.transient(win)
         
         ctk.CTkLabel(pop, text=f"Empresa: {nombre_empresa}", font=("Segoe UI", 14, "bold")).pack(pady=20)
@@ -176,7 +219,15 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         ent_monto.pack(pady=5)
         ent_monto.focus_set()
         
-        ctk.CTkLabel(pop, text="Medio de Pago:", font=("Segoe UI", 12)).pack(pady=(10, 2))
+        lbl_umbral = ctk.CTkLabel(
+            pop,
+            text=f"⚠️ Pagos > $ {UMBRAL_PAGO_SIN_AUTH:,.0f} requieren autorización de Admin",
+            font=("Segoe UI", 10, "italic"),
+            text_color="#f59e0b"
+        )
+        lbl_umbral.pack(pady=(0, 6))
+        
+        ctk.CTkLabel(pop, text="Medio de Pago:", font=("Segoe UI", 12)).pack(pady=(6, 2))
         cb_medio = ctk.CTkOptionMenu(pop, values=["efectivo", "transferencia", "cheque"], width=180, height=35)
         cb_medio.set("efectivo")
         cb_medio.pack(pady=5)
@@ -184,16 +235,21 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         ctk.CTkLabel(pop, text="Observación:", font=("Segoe UI", 12)).pack(pady=(10, 2))
         ent_obs = ctk.CTkEntry(pop, width=250, height=35, placeholder_text="Opcional...")
         ent_obs.pack(pady=5)
-        
-        def confirmar_pago():
+
+        def _confirmar_pago_efectivo(monto_validado):
             try:
-                monto = float(ent_monto.get())
-                if monto <= 0: raise ValueError("Monto debe ser positivo")
+                monto = monto_validado
+                if monto <= 0: raise ValueError("Monto debe ser mayor a cero")
                 uid = usuario_actual['id_usuario'] if usuario_actual else 1
-                backend.registrar_pago_proveedor(id_prov, monto, cb_medio.get(), uid, ent_obs.get())
+                backend.registrar_pago_proveedor(
+                    id_prov, monto, cb_medio.get(), uid, ent_obs.get(),
+                    usuario_actual=usuario_actual
+                )
                 messagebox.showinfo("Éxito", "Pago registrado.", parent=pop)
                 pop.destroy()
                 cargar_datos()
+            except PermissionError as pe:
+                messagebox.showerror("Acceso Denegado", str(pe), parent=pop)
             except ValueError as ve:
                 if "CAJA_CERRADA" in str(ve):
                     messagebox.showerror(
@@ -206,6 +262,36 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
                     messagebox.showerror("Error", str(ve), parent=pop)
             except Exception as e:
                 messagebox.showerror("Error", str(e), parent=pop)
+
+        def confirmar_pago():
+            monto_str = ent_monto.get().strip()
+            from app.frontend.validaciones_ui import ValidadorFormulario
+            ok, msg = ValidadorFormulario.validar_campos({
+                'Monto a abonar': (monto_str, 'monto', True)
+            })
+            if not ok:
+                messagebox.showerror("Error", msg, parent=pop)
+                return
+            monto = float(monto_str)
+            if monto <= 0:
+                messagebox.showerror("Error", "El monto debe ser mayor a cero.", parent=pop)
+                return
+            
+            id_rol = usuario_actual.get('id_rol') if usuario_actual else 2
+            # Admin siempre puede pagar directamente
+            if id_rol == 1 or monto <= UMBRAL_PAGO_SIN_AUTH:
+                _confirmar_pago_efectivo(monto)
+            else:
+                # Supervisor con monto > umbral → requiere autorización Admin
+                def on_autorizado(usr_autorizado):
+                    _confirmar_pago_efectivo(monto)
+                solicitar_autorizacion_supervisor(
+                    pop, backend, usuario_actual,
+                    callback_exito=on_autorizado,
+                    roles_permitidos=(1,),
+                    tipo_operacion="Pago a Proveedor (Monto Elevado)",
+                    motivo=f"Pago de $ {monto:,.2f} a '{nombre_empresa}' supera el umbral de $ {UMBRAL_PAGO_SIN_AUTH:,.0f}. Requiere autorización de Administrador."
+                )
                 
         ctk.CTkButton(pop, text="✓ CONFIRMAR PAGO", command=confirmar_pago, fg_color="#10b981", hover_color="#059669", 
                       font=("Segoe UI", 13, "bold"), height=45).pack(pady=20, padx=40, fill="x")
@@ -213,7 +299,24 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         centrar_y_mostrar_ventana(pop)
         pop.grab_set()
 
+    def abrir_pagar_deuda():
+        if not tiene_permiso(usuario_actual, 'registrar_pagos_proveedores'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para registrar pagos a proveedores.", parent=win)
+            return
+        sel = tree.selection()
+        if not sel:
+            messagebox.showwarning("Atención", "Seleccione una empresa.", parent=win)
+            return
+        item_vals = tree.item(sel[0], "values")
+        _ejecutar_pago(int(item_vals[0]), item_vals[1])
+
+    # =========================================================
+    # ASIGNAR PRODUCTOS
+    # =========================================================
     def abrir_asignar_productos():
+        if not tiene_permiso(usuario_actual, 'asignar_productos_proveedor'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para asignar productos a proveedores.", parent=win)
+            return
         sel = tree.selection()
         if not sel:
             messagebox.showwarning("Atención", "Seleccione una empresa.", parent=win)
@@ -222,41 +325,90 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         if ui_asignar_productos:
             ui_asignar_productos(win, backend, int(item[0]), str(item[1]))
 
-    def desactivar_proveedor():
-        sel = tree.selection()
-        if not sel: return
-        item = tree.item(sel[0], "values")
+    # =========================================================
+    # DESACTIVAR PROVEEDOR
+    # Supervisor → requiere autorización Admin (ya estaba implementado).
+    # Admin → acceso directo.
+    # =========================================================
+    def _ejecutar_desactivar(item):
         if messagebox.askyesno("Confirmar", f"¿Desactivar la empresa '{item[1]}'?", parent=win):
             try:
-                if backend.eliminar_proveedor_logico(int(item[0])):
+                uid = usuario_actual['id_usuario'] if usuario_actual else None
+                if backend.eliminar_proveedor_logico(int(item[0]), id_usuario_admin=uid):
                     cargar_datos()
             except Exception as e:
                 messagebox.showerror("Error", f"{e}", parent=win)
 
+    def desactivar_proveedor():
+        if not tiene_permiso(usuario_actual, 'desactivar_proveedores'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para desactivar empresas.", parent=win)
+            return
+
+        sel = tree.selection()
+        if not sel: return
+        item = tree.item(sel[0], "values")
+
+        id_rol = usuario_actual.get('id_rol') if usuario_actual else 2
+        if id_rol == 1:
+            _ejecutar_desactivar(item)
+        else:
+            def on_autorizado(usr_autorizado):
+                _ejecutar_desactivar(item)
+            solicitar_autorizacion_supervisor(
+                win, backend, usuario_actual, 
+                callback_exito=on_autorizado, 
+                roles_permitidos=(1,),
+                tipo_operacion="Desactivar Proveedor",
+                motivo=f"Autorización requerida para desactivar proveedor {item[1]}"
+            )
+
+    # =========================================================
+    # ACTIVAR PROVEEDOR
+    # =========================================================
     def activar_proveedor():
+        if not tiene_permiso(usuario_actual, 'reactivar_proveedores'):
+            messagebox.showwarning("Acceso Denegado", "No tienes permisos para activar empresas.", parent=win)
+            return
+
         sel = tree.selection()
         if not sel: return
         item = tree.item(sel[0], "values")
         if messagebox.askyesno("Confirmar", f"¿Activar la empresa '{item[1]}'?", parent=win):
             try:
-                if backend.activar_proveedor_logico(int(item[0])):
+                uid = usuario_actual['id_usuario'] if usuario_actual else None
+                if backend.activar_proveedor_logico(int(item[0]), id_usuario_admin=uid):
                     cargar_datos()
             except Exception as e:
                 messagebox.showerror("Error", f"{e}", parent=win)
-
 
 
     ctk.CTkButton(frame_botones, text="➕ Nueva Empresa", command=accion_nuevo, fg_color="#16a34a", hover_color="#15803d", font=("Segoe UI", 13, "bold"), width=160, height=45).pack(side=tk.LEFT, padx=10)
     ctk.CTkButton(frame_botones, text="💳 PAGAR", command=abrir_pagar_deuda, fg_color="#0ea5e9", hover_color="#0284c7", font=("Segoe UI", 13, "bold"), width=120, height=45).pack(side=tk.LEFT, padx=5)
     ctk.CTkButton(frame_botones, text="📦 Productos", command=abrir_asignar_productos, fg_color="#7c3aed", hover_color="#6d28d9", font=("Segoe UI", 13), width=120, height=45).pack(side=tk.LEFT, padx=5)
     
+    btn_desactivar = ctk.CTkButton(frame_botones, text="🗑️ Desactivar", command=desactivar_proveedor, fg_color="#dc2626", hover_color="#b91c1c", font=("Segoe UI", 13, "bold"), width=130, height=45)
+    btn_desactivar.pack(side=tk.LEFT, padx=5)
+
+    btn_activar = ctk.CTkButton(frame_botones, text="✅ Activar", command=activar_proveedor, fg_color="#0ea5e9", hover_color="#0284c7", font=("Segoe UI", 13, "bold"), width=120, height=45)
+    
     # CHECKBOX, LIMPIAR Y CERRAR
-    ctk.CTkCheckBox(frame_botones, text="Ver Inactivas", variable=var_mostrar_inactivos, font=("Segoe UI", 12), command=cargar_datos).pack(side=tk.LEFT, padx=15)
+    def toggle_mostrar_inactivos():
+        cargar_datos()
+        if var_mostrar_inactivos.get():
+            btn_activar.pack(side=tk.LEFT, padx=5)
+            btn_desactivar.pack_forget()
+        else:
+            btn_activar.pack_forget()
+            btn_desactivar.pack(side=tk.LEFT, padx=5)
+
+    ctk.CTkCheckBox(frame_botones, text="Ver Inactivas", variable=var_mostrar_inactivos, font=("Segoe UI", 12), command=toggle_mostrar_inactivos).pack(side=tk.LEFT, padx=15)
 
     def limpiar_filtros():
         var_busqueda.set('')
         if var_mostrar_inactivos.get():
             var_mostrar_inactivos.set(False)
+            btn_activar.pack_forget()
+            btn_desactivar.pack(side=tk.LEFT, padx=5)
         cargar_datos()
 
     ctk.CTkButton(frame_botones, text="🧹 Limpiar", command=limpiar_filtros, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 11, "bold"), width=100, height=35).pack(side=tk.LEFT, padx=10)

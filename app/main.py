@@ -204,7 +204,9 @@ def run_app():
             # Verificar si el USUARIO tiene caja abierta
             caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
             
-            if caja_abierta and tiene_permiso(usuario, 'cerrar_caja'):
+            # 🔒 FIX: Los Administradores (rol 1) operan la Tesorería (Caja Maestra).
+            # Esta caja está diseñada para durar todo el día, NO deben ser forzados a cerrarla al salir.
+            if caja_abierta and tiene_permiso(usuario, 'cerrar_caja') and usuario.get('id_rol') != 1:
                 root_temp = tk.Tk()
                 root_temp.withdraw()
                 
@@ -223,10 +225,10 @@ def run_app():
                 if respuesta is None:  # Cancelar -> Volver al sistema (Login loop)
                     continue
                 elif respuesta:  # Sí -> Abrir ventana de cierre
-                    from app.frontend.interfaz_reportes import ui_reportes
+                    from app.frontend.interfaz_caja_operativa import ui_caja_operativa
                     root_cierre = tk.Tk()
                     root_cierre.withdraw()
-                    ui_reportes(parent=root_cierre, backend=backend, usuario=usuario)
+                    ui_caja_operativa(parent=root_cierre, backend=backend, usuario=usuario)
                     root_cierre.mainloop()
                     root_cierre.destroy()
                     continue # Volver al login

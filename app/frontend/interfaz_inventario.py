@@ -32,6 +32,11 @@ except ImportError:
     EntryDecimal = None  # Se resolverá al importar ctk dentro de __init__
 
 try:
+    from app.frontend.interfaz_ajuste_stock import ui_ajuste_stock
+except ImportError:
+    ui_ajuste_stock = None
+
+try:
     from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
 except ImportError:
     def preparar_ventana(w): pass
@@ -105,9 +110,26 @@ class UIInventario:
         # --- BOTONES DE ACCIÓN (A la derecha, empaquetados primero para garantizar espacio) ---
         frm_acciones = ctk.CTkFrame(frm_header, fg_color="transparent")
         frm_acciones.pack(side="right", padx=10)
-        
+
         ctk.CTkButton(frm_acciones, text="🧹 Limpiar", font=("Segoe UI", 13, "bold"), fg_color="#6b7280", hover_color="#4b5563", width=100, height=40, command=self._limpiar_filtros).pack(side="left", padx=5)
         ctk.CTkButton(frm_acciones, text="📊 Exportar CSV", font=("Segoe UI", 13, "bold"), fg_color="#f59e0b", hover_color="#d97706", width=140, height=40, command=self._exportar_csv).pack(side="left", padx=5)
+
+        # Botón de ajuste manual — visible solo para Admin/Supervisor
+        if self.can_ajustar_manual and ui_ajuste_stock is not None:
+            self.btn_ajustar = ctk.CTkButton(
+                frm_acciones,
+                text="📝 Ajustar Stock",
+                font=("Segoe UI", 13, "bold"),
+                fg_color="#4f46e5",
+                hover_color="#4338ca",
+                width=150,
+                height=40,
+                state="disabled",        # Se habilita al seleccionar una fila
+                command=self._abrir_ajuste_stock,
+            )
+            self.btn_ajustar.pack(side="left", padx=5)
+        else:
+            self.btn_ajustar = None
 
         # --- FILTROS (A la izquierda) ---
         frm_filtros = ctk.CTkFrame(frm_header, fg_color="transparent")
@@ -161,6 +183,7 @@ class UIInventario:
 
         self.tree.tag_configure('bajo', foreground='#f87171') # Solo texto rojo claro, sin fondo blanco
         self.tree.bind("<Double-1>", self._on_doble_clic)
+        self.tree.bind("<<TreeviewSelect>>", self._on_seleccion_cambio)
 
     def _cargar_categorias_para_filtro(self):
         try:
@@ -297,7 +320,54 @@ class UIInventario:
 
 
     # 🔥 ELIMINAMOS _mostrar_stock_bajo (La funcionalidad es ahora _filtrar_lista con checkbox)
-    # 🔥 ELIMINAMOS _aplicar_ajuste (Funcionalidad eliminada)
+    # ✅ _aplicar_ajuste fue rediseñado como módulo independiente (interfaz_ajuste_stock.py)
+
+    def _on_seleccion_cambio(self, event=None):
+        """Habilita o deshabilita el botón de ajuste según si hay fila seleccionada."""
+        if self.btn_ajustar is None:
+            return
+        if self.tree.selection():
+            self.btn_ajustar.configure(state="normal")
+        else:
+            self.btn_ajustar.configure(state="disabled")
+
+    def _abrir_ajuste_stock(self):
+        """Abre el diálogo de ajuste manual de stock para el producto seleccionado."""
+        if not ui_ajuste_stock:
+            messagebox.showerror("Error", "Módulo de ajuste de stock no disponible.", parent=self.win)
+            return
+
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showwarning("Sin selección", "Seleccione un producto de la lista antes de ajustar.", parent=self.win)
+            return
+
+        item = sel[0]
+        values = self.tree.item(item, "values")
+        id_prod_str = values[0]
+
+        try:
+            id_prod = int(id_prod_str)
+        except (ValueError, IndexError):
+            messagebox.showwarning("Error", "Selección inválida.", parent=self.win)
+            return
+
+        # Buscar el producto completo en el cache para tener stock y es_pesable
+        producto_data = next(
+            (p for p in self.productos_cache if p.get('id_producto') == id_prod),
+            None
+        )
+        if not producto_data:
+            messagebox.showwarning("Error", "No se encontró el producto seleccionado.", parent=self.win)
+            return
+
+        ui_ajuste_stock(
+            parent=self.win,
+            backend=self.backend,
+            usuario=self.usuario,
+            producto=producto_data,
+            callback_on_save=self.cargar_todo,
+        )
 
     def _exportar_csv(self):
         try:
