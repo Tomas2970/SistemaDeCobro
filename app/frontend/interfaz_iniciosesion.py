@@ -71,7 +71,12 @@ def ui_login(parent, backend):
         
         try:
             udb = backend.verificar_contraseña(u, p)
-            if udb:
+            if udb and "error" in udb and udb["error"] == "SESION_ACTIVA":
+                mostrar_error("Sesión Activa", "Este usuario ya tiene una sesión abierta en otro dispositivo. Cerrá esa sesión antes de ingresar.")
+                entry_contrasena.delete(0, 'end')
+                entry_usuario.focus_set()
+                btn_login.configure(state="normal", text="Ingresar al Sistema")
+            elif udb:
                 usuario_logeado = udb
                 win.quit()
             else:

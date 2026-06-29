@@ -81,11 +81,14 @@ def ui_crear_cliente(parent, backend, id_cliente_a_editar=None, callback_on_save
 
         if label == "Dirección":
             # Dirección no tiene validación lógica, solo feedback estático opcional
-            lbl_fb.configure(text="⚪ Opcional", text_color="#6b7280")
-            e.bind('<KeyRelease>', lambda ev: lbl_fb.configure(
-                text="✓ Válido" if e.get().strip() else "⚪ Opcional",
-                text_color="#10b981" if e.get().strip() else "#6b7280"
-            ))
+            def _actualizar_dir(ev=None):
+                tiene_texto = bool(e.get().strip())
+                lbl_fb.configure(
+                    text="✓ Válido" if tiene_texto else "⚪ Opcional",
+                    text_color="#10b981" if tiene_texto else "#6b7280"
+                )
+            _actualizar_dir()
+            e.bind('<KeyRelease>', _actualizar_dir)
         elif tipo_val:
             conectar_validacion_ctk(e, lbl_fb, tipo_val, win)
 

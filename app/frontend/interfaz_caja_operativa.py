@@ -245,13 +245,12 @@ def _construir_panel_caja(win, backend, usuario):
     def iniciar_cierre():
         if not puede_gestionar: return
         
-        data = backend.obtener_resumen_cierre(session_actual['id_session'])
-        esperado = data['efectivo_esperado']
-        medios_pago = data.get('medios_pago', {'tarjetas': 0.0, 'transferencias': 0.0, 'cuenta_corriente': 0.0})
-        ingresos_efectivo = data.get('total_ingresos', 0.0)
-        # 🔥 CORRECCIÓN: El total recaudado (liquidez) NO debe incluir ventas a crédito (Cta. Cte.)
-        # Solo sumamos lo que entró efectivamente al sistema: Efectivo + Tarjetas + Transferencias.
-        total_general = ingresos_efectivo + medios_pago.get('tarjetas', 0.0) + medios_pago.get('transferencias', 0.0)
+        # Variables que se llenarán dinámicamente
+        data = {}
+        esperado = 0.0
+        medios_pago = {}
+        ingresos_efectivo = 0.0
+        total_general = 0.0
         
         d = ctk.CTkToplevel(win)
         d.title("📋 Cierre de Caja Completo")
@@ -283,27 +282,29 @@ def _construir_panel_caja(win, backend, usuario):
         fr_efectivo = ctk.CTkFrame(fr_main, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
         fr_efectivo.pack(fill="x", pady=(0, 5), ipadx=5, ipady=5)
 
-        monto_ini = data.get('monto_inicial', 0.0)
-        egresos = data.get('total_egresos', 0.0)
-
         # Desglose de efectivo - COMPACTO
-        def crear_item_arqueo(txt, val, color=None):
+        lbls_arqueo = {}
+        def crear_item_arqueo(key, txt, color=None):
             f = ctk.CTkFrame(fr_efectivo, fg_color="transparent")
             f.pack(fill="x", padx=15, pady=0) # Sin pady
             ctk.CTkLabel(f, text=txt, font=("Segoe UI", 10), text_color=win.col_text).pack(side="left")
-            ctk.CTkLabel(f, text=_fmt(val), font=("Segoe UI", 10, "bold"), text_color=color or win.col_text).pack(side="right")
+            lbl = ctk.CTkLabel(f, text="$ 0.00", font=("Segoe UI", 10, "bold"), text_color=color or win.col_text)
+            lbl.pack(side="right")
+            lbls_arqueo[key] = lbl
 
         # 🔒 CIERRE CIEGO: Frames que se ocultan/muestran según rol
         # Contenedor para la info financiera sensible (desglose + medios + total)
         fr_info_sensible = ctk.CTkFrame(fr_main, fg_color="transparent")
         
+        lbl_esperado = None
         if not es_vendedor:
             # Admin/Supervisor: Mostrar todo el desglose normalmente
-            crear_item_arqueo("Saldo Inicial:", monto_ini)
-            crear_item_arqueo("(+) Ingresos (Efectivo):", ingresos_efectivo, "#10b981")
-            crear_item_arqueo("(-) Egresos (Efectivo):", egresos, "#ef4444")
+            crear_item_arqueo("inicial", "Saldo Inicial:")
+            crear_item_arqueo("ingresos", "(+) Ingresos (Efectivo):", "#10b981")
+            crear_item_arqueo("egresos", "(-) Egresos (Efectivo):", "#ef4444")
             
-            ctk.CTkLabel(fr_efectivo, text=f"Efectivo Esperado: {_fmt(esperado)}", font=("Segoe UI", 12, "bold"), text_color="#3b82f6").pack(anchor="w", padx=10, pady=1)
+            lbl_esperado = ctk.CTkLabel(fr_efectivo, text="Efectivo Esperado: $ 0.00", font=("Segoe UI", 12, "bold"), text_color="#3b82f6")
+            lbl_esperado.pack(anchor="w", padx=10, pady=1)
         else:
             # 🔒 Vendedor: Solo mensaje de instrucción, sin desglose
             ctk.CTkLabel(fr_efectivo, text="🔒 Cierre Ciego", font=("Segoe UI", 14, "bold"), text_color="#f59e0b").pack(anchor="w", padx=15, pady=(5, 2))
@@ -332,35 +333,30 @@ def _construir_panel_caja(win, backend, usuario):
         fr_medios = ctk.CTkFrame(fr_info_sensible, fg_color=win.col_card, corner_radius=10, border_color=win.col_border, border_width=1)
         fr_medios.pack(fill="x", pady=(0, 2), ipadx=5, ipady=2)
         
-        def crear_linea_medio(parent, icono, texto, monto, color="#10b981"):
+        lbls_medios = {}
+        def crear_linea_medio(key, parent, icono, texto, color="#10b981"):
             fr = ctk.CTkFrame(parent, fg_color="transparent")
             fr.pack(fill="x", pady=0, padx=10)
             ctk.CTkLabel(fr, text=f"{icono} {texto}:", font=("Segoe UI", 11), text_color=win.col_text, width=200, anchor="w").pack(side="left")
-            ctk.CTkLabel(fr, text=_fmt(monto), font=("Segoe UI", 12, "bold"), text_color=color).pack(side="right")
-
-        tar_ing = medios_pago.get('tarjetas', 0)
-        tra_ing = medios_pago.get('transferencias', 0)
-        cc_ing  = medios_pago.get('cuenta_corriente', 0)
-        tra_egr = data.get('total_egresos_transferencia', 0.0)
-        tar_egr = data.get('total_egresos_tarjeta', 0.0)
+            lbl = ctk.CTkLabel(fr, text="$ 0.00", font=("Segoe UI", 12, "bold"), text_color=color)
+            lbl.pack(side="right")
+            lbls_medios[key] = lbl
 
         ctk.CTkLabel(fr_medios, text="📥 INGRESOS (No Efectivo)", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(anchor="w", padx=10, pady=(2, 2))
-        crear_linea_medio(fr_medios, "💳", "Tarjetas", tar_ing)
-        crear_linea_medio(fr_medios, "🏦", "Transferencias", tra_ing)
-        crear_linea_medio(fr_medios, "📋", "Crédito (A Cobrar C.C.)", cc_ing, "#f59e0b") # Color ámbar para deuda
+        crear_linea_medio("tar_ing", fr_medios, "💳", "Tarjetas")
+        crear_linea_medio("tra_ing", fr_medios, "🏦", "Transferencias")
+        crear_linea_medio("cc_ing", fr_medios, "📋", "Crédito (A Cobrar C.C.)", "#f59e0b")
 
-        if tra_egr > 0 or tar_egr > 0:
-            ctk.CTkLabel(fr_medios, text="----------------------------------------------------------------", text_color=win.col_border).pack(fill="x", padx=10, pady=2)
-            ctk.CTkLabel(fr_medios, text="📤 EGRESOS (No Efectivo)", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(anchor="w", padx=10, pady=2)
-            if tar_egr > 0:
-                crear_linea_medio(fr_medios, "💳", "Tarjetas (pagos)", tar_egr, "#ef4444")
-            if tra_egr > 0:
-                crear_linea_medio(fr_medios, "🏦", "Transferencias (pagos)", tra_egr, "#ef4444")
+        ctk.CTkLabel(fr_medios, text="----------------------------------------------------------------", text_color=win.col_border).pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(fr_medios, text="📤 EGRESOS (No Efectivo)", font=("Segoe UI", 12, "bold"), text_color=win.col_text).pack(anchor="w", padx=10, pady=2)
+        crear_linea_medio("tar_egr", fr_medios, "💳", "Tarjetas (pagos)", "#ef4444")
+        crear_linea_medio("tra_egr", fr_medios, "🏦", "Transferencias (pagos)", "#ef4444")
         
         fr_total = ctk.CTkFrame(fr_info_sensible, fg_color="#e0f2fe" if ctk.get_appearance_mode()=="Light" else "#1e3a8a", corner_radius=10, border_color="#bae6fd" if ctk.get_appearance_mode()=="Light" else "#1d4ed8", border_width=1)
         fr_total.pack(fill="x", pady=(0, 5), ipadx=5, ipady=5)
         ctk.CTkLabel(fr_total, text="📈 TOTAL RECAUDADO", font=("Segoe UI", 11, "bold"), text_color="#0369a1" if ctk.get_appearance_mode()=="Light" else "#bfdbfe").pack(pady=(2, 0))
-        ctk.CTkLabel(fr_total, text=_fmt(total_general), font=("Segoe UI", 18, "bold"), text_color="#0284c7" if ctk.get_appearance_mode()=="Light" else "#e0f2fe").pack(pady=(0, 2))
+        lbl_total_general = ctk.CTkLabel(fr_total, text="$ 0.00", font=("Segoe UI", 18, "bold"), text_color="#0284c7" if ctk.get_appearance_mode()=="Light" else "#e0f2fe")
+        lbl_total_general.pack(pady=(0, 2))
         
         # 🔒 CIERRE CIEGO: Controlar visibilidad de la info sensible
         if not es_vendedor:
@@ -393,8 +389,32 @@ def _construir_panel_caja(win, backend, usuario):
                 lbl_dif.configure(text=f"Diferencia: {'' if dif < 0 else '+'}{_fmt(dif)}", text_color=col)
             except: pass
         
+        def forzar_calculo_totales():
+            nonlocal data, esperado, medios_pago, ingresos_efectivo, total_general
+            data = backend.obtener_resumen_cierre(session_actual['id_session'])
+            esperado = data.get('efectivo_esperado', 0.0)
+            medios_pago = data.get('medios_pago', {'tarjetas': 0.0, 'transferencias': 0.0, 'cuenta_corriente': 0.0})
+            ingresos_efectivo = data.get('total_ingresos', 0.0)
+            total_general = ingresos_efectivo + medios_pago.get('tarjetas', 0.0) + medios_pago.get('transferencias', 0.0)
+            
+            if not es_vendedor:
+                lbls_arqueo["inicial"].configure(text=_fmt(data.get('monto_inicial', 0.0)))
+                lbls_arqueo["ingresos"].configure(text=_fmt(ingresos_efectivo))
+                lbls_arqueo["egresos"].configure(text=_fmt(data.get('total_egresos', 0.0)))
+                if lbl_esperado:
+                    lbl_esperado.configure(text=f"Efectivo Esperado: {_fmt(esperado)}")
+            
+            lbls_medios["tar_ing"].configure(text=_fmt(medios_pago.get('tarjetas', 0.0)))
+            lbls_medios["tra_ing"].configure(text=_fmt(medios_pago.get('transferencias', 0.0)))
+            lbls_medios["cc_ing"].configure(text=_fmt(medios_pago.get('cuenta_corriente', 0.0)))
+            lbls_medios["tar_egr"].configure(text=_fmt(data.get('total_egresos_tarjeta', 0.0)))
+            lbls_medios["tra_egr"].configure(text=_fmt(data.get('total_egresos_transferencia', 0.0)))
+            
+            lbl_total_general.configure(text=_fmt(total_general))
+            calc_diff()
+
         e_real.bind("<KeyRelease>", calc_diff)
-        calc_diff()
+        d.after(100, forzar_calculo_totales)
         
         def confirmar():
             try:
@@ -497,7 +517,7 @@ def _construir_panel_caja(win, backend, usuario):
             configurar_navegacion_ventana(top)
             top.grab_set()
 
-        solicitar_autorizacion_supervisor(win, backend, usuario, on_autorizado, motivo="Autorización para Transferir a Tesorería")
+        solicitar_autorizacion_supervisor(win, backend, usuario, on_autorizado, roles_permitidos=(1, 3), motivo="Autorización para Transferir a Tesorería")
 
     ctk.CTkButton(fr_ops, text="🏦 TRANSFERIR A TESORERÍA", command=iniciar_transferencia_tesoreria, fg_color="#059669", hover_color="#047857", font=("Segoe UI", 13, "bold"), height=40).pack(side="left", padx=10)
 
@@ -529,23 +549,28 @@ def _construir_panel_caja(win, backend, usuario):
             def save():
                 try:
                     m = float(e_m.get())
-                    if m <= 0: raise ValueError
+                    if m <= 0: raise ValueError("Monto inválido")
+                except ValueError:
+                    messagebox.showerror("Error", "Monto inválido", parent=top)
+                    return
+                
+                try:
                     motivo_seleccionado = cb_mot.get()
                     motivo_key = motivos_dict[motivo_seleccionado]
                     
                     if tipo == 'egreso':
-                        data_c = backend.obtener_resumen_cierre(session_actual['id_session'])
-                        if m > data_c.get('efectivo_esperado', 0.0):
-                            messagebox.showerror("Saldo Insuficiente", "No hay suficiente efectivo en la caja para realizar este egreso.", parent=top)
-                            return
-                        
                         if motivo_key == 'retiro_caja' and not txt_obs_mov.get("1.0", tk.END).strip():
                             messagebox.showerror("Campo Obligatorio", "La observación es obligatoria para registrar un retiro de dinero.", parent=top)
                             return
 
                     backend.registrar_movimiento_manual(session_actual['id_session'], tipo, m, motivo_key, txt_obs_mov.get("1.0", tk.END).strip(), usuario['id_usuario'])
-                    top.destroy(); actualizar_dashboard(); messagebox.showinfo("Éxito", "Movimiento registrado exitosamente.", parent=win)
-                except ValueError: messagebox.showerror("Error", "Monto inválido", parent=top)
+                    top.destroy()
+                    actualizar_dashboard()
+                    messagebox.showinfo("Éxito", "Movimiento registrado exitosamente.", parent=win)
+                except ValueError as ve:
+                    messagebox.showerror("Error", str(ve), parent=top)
+                except Exception as e:
+                    messagebox.showerror("Error", str(e), parent=top)
             
             btn_frm = ctk.CTkFrame(top, fg_color="transparent")
             btn_frm.pack(fill="x", side="bottom", padx=20, pady=(0, 20))

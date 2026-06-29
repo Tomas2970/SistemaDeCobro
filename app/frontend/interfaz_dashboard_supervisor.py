@@ -24,6 +24,7 @@ ui_gestion_proveedores = _safe_import("app.frontend.interfaz_gestion_proveedores
 ui_caja_router       = _safe_import("app.frontend.interfaz_caja", "ui_caja_router")
 ui_compra            = _safe_import("app.frontend.interfaz_compra", "ui_compra")
 ui_historiales       = _safe_import("app.frontend.interfaz_historiales", "ui_historiales")
+ui_cuenta_corriente  = _safe_import("app.frontend.interfaz_cuenta_corriente", "ui_cuenta_corriente")
 
 def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     if not callable(fn):
@@ -55,6 +56,10 @@ def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     hijos_despues = set(root.winfo_children())
     for hijo in (hijos_despues - hijos_antes):
         if isinstance(hijo, (tk.Toplevel, ctk.CTkToplevel)):
+            try:
+                hijo.transient(root)
+            except Exception:
+                pass
             root._ventanas_modulos[nombre] = hijo
             break
 
@@ -85,22 +90,30 @@ class InterfazDashboardSupervisor:
                     for ventana in self.win._ventanas_modulos.values():
                         if ventana and ventana.winfo_exists():
                             ventana.lift()
+                            try:
+                                ventana.focus_force()
+                            except Exception:
+                                pass
         self.win.bind("<FocusIn>", on_main_focus)
 
         # ====== SIDEBAR ======
-        color_sidebar = "#1e3a8a"
-        sidebar = ctk.CTkFrame(self.win, width=260, fg_color=color_sidebar, corner_radius=0)
+        sidebar = ctk.CTkFrame(self.win, width=250, fg_color="#1e3a8a", corner_radius=0)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
-        ctk.CTkLabel(sidebar, text="👁️", font=("Segoe UI", 60), text_color="white").pack(pady=(30, 0))
-        ctk.CTkLabel(sidebar, text="Encargado de Turno", font=("Segoe UI", 16, "bold"), text_color="white").pack()
+        # Empaquetamos el botón de cerrar sesión primero (side="bottom") para que siempre esté visible
+        ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
+                      font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=20)
+
+        ctk.CTkLabel(sidebar, text="🛡️", font=("Segoe UI", 50), text_color="white").pack(pady=(30, 0))
+        ctk.CTkLabel(sidebar, text="Panel de Supervisor", font=("Segoe UI", 16, "bold"), text_color="white").pack()
         ctk.CTkLabel(sidebar, text=f"👤 {self.usuario.get('nombre')}", font=("Segoe UI", 14), text_color="#bfdbfe").pack(pady=(5, 30))
 
         # Módulos permitidos explícitos
         modulos = [
             ("📦 Inventario",          "ver_inventario",   ui_inventario,          {}),
             ("🛒 Registrar Compra",     "registrar_compras",ui_compra,              {}),
+            ("📚 Cuenta Corriente",    "gestionar_cuenta_corriente", ui_cuenta_corriente, {}),
             ("👥 Clientes",             'ver_clientes',     ui_gestion_clientes,    {}),
             ("🚚 Proveedores",          'ver_proveedores',  ui_gestion_proveedores, {}),
             ("📊 Reportes del Día",     'ver_reportes',     ui_reportes,            {'modo_vista': 'reportes'}),
@@ -109,14 +122,11 @@ class InterfazDashboardSupervisor:
             ("🧾 Historial (7 días)",   'ver_ventas',       ui_historiales,         {'max_dias_atras': 7}),
         ]
 
-        for texto, permiso, fn, kw in modulos:
+        for texto, permiso, fn, kwargs in modulos:
             if tiene_permiso(self.usuario, permiso):
-                cmd = lambda t=texto, f=fn, k=kw: _abrir_seguro(self.win, self.backend, self.usuario, f, t, **k)
+                cmd = lambda t=texto, f=fn, kw=kwargs: _abrir_seguro(self.win, self.backend, self.usuario, f, t, **kw)
                 ctk.CTkButton(sidebar, text=texto, fg_color="transparent", hover_color="#2563eb",
                               font=("Segoe UI", 13, "bold"), anchor="w", height=40, command=cmd).pack(fill="x", padx=10, pady=2)
-
-        ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
-                      font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=20)
 
 
         # ====== CONTENEDOR PRINCIPAL ======

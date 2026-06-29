@@ -13,6 +13,7 @@ THEME_COLORS = {
     
     "accent_primary": "#3b82f6",   # Azul brillante (Acción)
     "accent_hover": "#2563eb",     # Azul hover
+    "secondary": "#10b981",
     
     "button_primary": "#3b82f6",
     "button_primary_hover": "#2563eb",

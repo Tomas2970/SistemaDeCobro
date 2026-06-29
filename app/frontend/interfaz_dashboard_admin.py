@@ -6,6 +6,7 @@ import logging
 from app.frontend.theme_config import get_color
 from app.frontend import custom_dialogs as messagebox
 from app.database.permisos import tiene_permiso
+from app.frontend.validaciones_ui import registrar_validadores_teclado_ctk
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ ui_gestion_usuarios  = _safe_import("app.frontend.interfaz_gestion_usuarios", "u
 ui_auditoria         = _safe_import("app.frontend.interfaz_auditoria", "ui_auditoria")
 ui_tesoreria         = _safe_import("app.frontend.interfaz_tesoreria", "ui_tesoreria")
 ui_compra            = _safe_import("app.frontend.interfaz_compra", "ui_compra")
+ui_cuenta_corriente  = _safe_import("app.frontend.interfaz_cuenta_corriente", "ui_cuenta_corriente")
+ui_categorias        = _safe_import("app.frontend.interfaz_categorias", "ui_categorias")
 
 def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     if not callable(fn):
@@ -68,6 +71,10 @@ def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     hijos_despues = set(root.winfo_children())
     for hijo in (hijos_despues - hijos_antes):
         if isinstance(hijo, (tk.Toplevel, ctk.CTkToplevel)):
+            try:
+                hijo.transient(root)
+            except Exception:
+                pass
             root._ventanas_modulos[nombre] = hijo
             break
 
@@ -160,6 +167,10 @@ class InterfazDashboardAdmin:
                     for ventana in self.win._ventanas_modulos.values():
                         if ventana and ventana.winfo_exists():
                             ventana.lift()
+                            try:
+                                ventana.focus_force()
+                            except Exception:
+                                pass
         self.win.bind("<FocusIn>", on_main_focus)
 
         # ====== SIDEBAR ======
@@ -167,6 +178,10 @@ class InterfazDashboardAdmin:
         sidebar = ctk.CTkFrame(self.win, width=260, fg_color=color_sidebar, corner_radius=0)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
+
+        # Empaquetamos el botón de cerrar sesión primero (side="bottom") para que siempre esté visible
+        ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
+                      font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=20)
 
         ctk.CTkLabel(sidebar, text="👑", font=("Segoe UI", 60), text_color="white").pack(pady=(30, 0))
         ctk.CTkLabel(sidebar, text="Administrador Global", font=("Segoe UI", 16, "bold"), text_color="white").pack()
@@ -177,8 +192,10 @@ class InterfazDashboardAdmin:
             ("🏦 Tesorería", 'ver_tesoreria', ui_tesoreria, {}),
             ("📦 Inventario", "ver_inventario", ui_inventario, {}),
             ("🛒 Registrar Compra", "registrar_compras", ui_compra, {}),
+            ("📚 Cuenta Corriente", 'gestionar_cuenta_corriente', ui_cuenta_corriente, {}),
             ("👥 Clientes", 'ver_clientes', ui_gestion_clientes, {}),
             ("🚚 Proveedores", 'ver_proveedores', ui_gestion_proveedores, {}),
+            ("🔖 Categorías", 'gestionar_categorias', ui_categorias, {}),
             ("📊 Reportes", 'ver_reportes', ui_reportes, {'modo_vista': 'reportes'}),
             ("🧾 Historiales", 'ver_ventas', ui_historiales, {}),
             ("⚙️ Usuarios", 'ver_usuarios', ui_gestion_usuarios, {}),
@@ -195,10 +212,6 @@ class InterfazDashboardAdmin:
             ctk.CTkFrame(sidebar, fg_color="#3b82f6", height=1).pack(fill="x", padx=20, pady=10)
             ctk.CTkButton(sidebar, text="💰 Ingreso de Capital", fg_color="#10b981", hover_color="#059669",
                           font=("Segoe UI", 13, "bold"), height=40, command=self._abrir_ingreso_capital).pack(fill="x", padx=10, pady=2)
-
-        ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
-                      font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=20)
-
 
         # ====== CONTENEDOR PRINCIPAL ======
         main_container = ctk.CTkFrame(self.win, fg_color="transparent")
@@ -249,14 +262,14 @@ class InterfazDashboardAdmin:
                                         border_color="#e2e8f0" if ctk.get_appearance_mode()=="Light" else "#1e293b", border_width=1)
         self.frm_derecha.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         
-        # Contenedor de Alertas del Dashboard
-        self.container_alertas_admin = ctk.CTkFrame(self.frm_derecha, fg_color="transparent")
-        self.container_alertas_admin.pack(fill="x", padx=10, pady=(10, 0))
-        
-        # Header Derecho
+        # Header Derecho (Primero para que no sea empujado hacia abajo por las alertas)
         fr_header_feed = ctk.CTkFrame(self.frm_derecha, fg_color="transparent")
         fr_header_feed.pack(fill="x", padx=15, pady=(10, 5))
         ctk.CTkLabel(fr_header_feed, text="🔴 Live Feed", font=("Segoe UI", 18, "bold"), text_color=get_color("text_primary")).pack(side="left")
+        
+        # Contenedor de Alertas del Dashboard (Debajo del header)
+        self.container_alertas_admin = ctk.CTkFrame(self.frm_derecha, fg_color="transparent")
+        self.container_alertas_admin.pack(fill="x", padx=10, pady=(0, 5))
 
         # --- FILTRO POR USUARIO ---
         self.var_filtro_usuario = tk.StringVar(value="Todos los usuarios")
@@ -274,72 +287,26 @@ class InterfazDashboardAdmin:
         
         self.fr_busqueda_usr_feed = ctk.CTkFrame(fr_header_feed, fg_color="transparent")
         
-        self.var_busqueda_feed = tk.StringVar()
-        self.ent_busqueda_feed = ctk.CTkEntry(self.fr_busqueda_usr_feed, textvariable=self.var_busqueda_feed, font=("Segoe UI", 12), placeholder_text="Buscar usuario...", width=160, height=28)
-        self.ent_busqueda_feed.pack(side="top", fill="x")
+        self.lbl_usuario_feed = ctk.CTkLabel(self.fr_busqueda_usr_feed, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        self.lbl_usuario_feed.pack(side="left", padx=(0, 5))
         
-        self.fr_lista_feed = ctk.CTkFrame(self.fr_busqueda_usr_feed, fg_color="transparent")
-        self.listbox_feed = tk.Listbox(self.fr_lista_feed, font=("Segoe UI", 11), height=4)
-        self.listbox_feed.pack(fill="both", expand=True)
+        self.sel_usuario_feed = {"id": 0, "nombre": "(Todos)"}
         
-        def actualizar_lista_feed(*_):
-            q = self.var_busqueda_feed.get().strip().lower()
-            self.listbox_feed.delete(0, tk.END)
-            
-            if not q and not self.ent_busqueda_feed.focus_get() == self.ent_busqueda_feed:
-                self.fr_lista_feed.pack_forget()
-                return
-                
-            self.fr_lista_feed.pack(fill="x", pady=(0, 2))
-            
-            usuarios_activos = []
-            try:
-                if hasattr(self.backend, "obtener_usuarios_actividad_hoy"):
-                    usuarios_activos = self.backend.obtener_usuarios_actividad_hoy()
-            except Exception:
-                pass
-                
-            coincidencias = []
-            for d in usuarios_activos:
-                id_v = str(d.get('id_usuario', '')).lower()
-                nom_v = str(d.get('nombre', '')).lower()
-                if q in id_v or q in nom_v:
-                    coincidencias.append(d)
-                    
-            if not coincidencias:
-                self.listbox_feed.insert(tk.END, "No se encontraron usuarios")
-                self.listbox_feed.configure(state="disabled")
-            else:
-                self.listbox_feed.configure(state="normal")
-                for c in coincidencias:
-                    self.listbox_feed.insert(tk.END, f"{c.get('nombre', '')} (ID: {c.get('id_usuario', '')})")
-                    
-        self.var_busqueda_feed.trace_add("write", actualizar_lista_feed)
-        
-        def enfocar_feed(e):
-            actualizar_lista_feed()
-            
-        self.ent_busqueda_feed.bind("<FocusIn>", enfocar_feed)
-        
-        def seleccionar_feed(event=None):
-            if self.listbox_feed.cget("state") == "disabled": return
-            sel = self.listbox_feed.curselection()
-            if not sel: return
-            val = self.listbox_feed.get(sel[0])
-            if "No se encontraron" in val: return
-            
-            import re
-            m = re.search(r"\(ID: (\d+)\)$", val)
-            if m:
-                uid = int(m.group(1))
-                self.var_usuario_feed_id.set(uid)
-                self.ent_busqueda_feed.delete(0, tk.END)
-                self.ent_busqueda_feed.insert(0, val)
-                
-            self.fr_lista_feed.pack_forget()
+        def _on_seleccionar_feed():
+            self.var_usuario_feed_id.set(self.sel_usuario_feed["id"])
             self._actualizar_live_feed()
             
-        self.listbox_feed.bind("<<ListboxSelect>>", seleccionar_feed)
+        def _abrir_buscador_feed():
+            usuarios_activos_feed = []
+            try:
+                if hasattr(self.backend, "obtener_usuarios_actividad_hoy"):
+                    usuarios_activos_feed = self.backend.obtener_usuarios_actividad_hoy()
+            except Exception:
+                pass
+            self._abrir_selector_entidad("Usuario", self.sel_usuario_feed, usuarios_activos_feed, self.lbl_usuario_feed, _on_seleccionar_feed)
+            
+        btn_usuario_feed = ctk.CTkButton(self.fr_busqueda_usr_feed, text="🔍", width=35, height=30, fg_color="#3b82f6", command=_abrir_buscador_feed)
+        btn_usuario_feed.pack(side="left")
 
         # Scroll del Live Feed
         self.scroll_feed = ctk.CTkScrollableFrame(self.frm_derecha, fg_color="transparent")
@@ -381,64 +348,17 @@ class InterfazDashboardAdmin:
         fr_busqueda_usr = ctk.CTkFrame(fr_zona_envio, fg_color="transparent")
         var_usuario_seleccionado_id = tk.IntVar(value=0)
         
-        var_busqueda_usr = tk.StringVar()
-        ent_busqueda_usr = ctk.CTkEntry(fr_busqueda_usr, textvariable=var_busqueda_usr, font=("Segoe UI", 12), placeholder_text="Buscar usuario...", height=32)
-        ent_busqueda_usr.pack(side="top", fill="x")
+        lbl_usuario_broadcast = ctk.CTkLabel(fr_busqueda_usr, text="(Todos)", font=("Segoe UI", 12), text_color=get_color("text_secondary"), anchor="w")
+        lbl_usuario_broadcast.pack(side="left", padx=(0, 5))
         
-        fr_lista_usr = ctk.CTkFrame(fr_busqueda_usr, fg_color="transparent")
-        listbox_usr = tk.Listbox(fr_lista_usr, font=("Segoe UI", 11), height=4)
-        listbox_usr.pack(fill="both", expand=True)
+        sel_usuario_broadcast = {"id": 0, "nombre": "(Todos)"}
         
-        def actualizar_lista_usr(*_):
-            q = var_busqueda_usr.get().strip().lower()
-            listbox_usr.delete(0, tk.END)
+        def _on_seleccionar_broadcast():
+            var_usuario_seleccionado_id.set(sel_usuario_broadcast["id"])
             
-            if not q and not ent_busqueda_usr.focus_get() == ent_busqueda_usr:
-                fr_lista_usr.pack_forget()
-                return
-                
-            fr_lista_usr.pack(fill="x", pady=(0, 2))
-            
-            coincidencias = []
-            for d in usuarios_activos:
-                id_v = str(d.get('id_usuario', '')).lower()
-                nom_v = str(d.get('nombre', '')).lower()
-                if q in id_v or q in nom_v:
-                    coincidencias.append(d)
-                    
-            if not coincidencias:
-                listbox_usr.insert(tk.END, "No se encontraron usuarios")
-                listbox_usr.configure(state="disabled")
-            else:
-                listbox_usr.configure(state="normal")
-                for c in coincidencias:
-                    listbox_usr.insert(tk.END, f"{c.get('nombre', '')} (ID: {c.get('id_usuario', '')})")
-                    
-        var_busqueda_usr.trace_add("write", actualizar_lista_usr)
-        
-        def enfocar_usr(e):
-            actualizar_lista_usr()
-            
-        ent_busqueda_usr.bind("<FocusIn>", enfocar_usr)
-        
-        def seleccionar_usr(event=None):
-            if listbox_usr.cget("state") == "disabled": return
-            sel = listbox_usr.curselection()
-            if not sel: return
-            val = listbox_usr.get(sel[0])
-            if "No se encontraron" in val: return
-            
-            import re
-            m = re.search(r"\(ID: (\d+)\)$", val)
-            if m:
-                uid = int(m.group(1))
-                var_usuario_seleccionado_id.set(uid)
-                ent_busqueda_usr.delete(0, tk.END)
-                ent_busqueda_usr.insert(0, val)
-                
-            fr_lista_usr.pack_forget()
-            
-        listbox_usr.bind("<<ListboxSelect>>", seleccionar_usr)
+        btn_usuario_broadcast = ctk.CTkButton(fr_busqueda_usr, text="🔍", width=35, height=30, fg_color="#3b82f6", 
+                                     command=lambda: self._abrir_selector_entidad("Usuario", sel_usuario_broadcast, usuarios_activos, lbl_usuario_broadcast, _on_seleccionar_broadcast))
+        btn_usuario_broadcast.pack(side="left")
 
         # 3. Campo de texto y botón enviar (Abajo)
         fr_broadcast = ctk.CTkFrame(fr_zona_envio, fg_color="transparent")
@@ -454,7 +374,9 @@ class InterfazDashboardAdmin:
             else:
                 fr_busqueda_usr.pack_forget()
                 var_usuario_seleccionado_id.set(0)
-                var_busqueda_usr.set("")
+                sel_usuario_broadcast["id"] = 0
+                sel_usuario_broadcast["nombre"] = "(Todos)"
+                lbl_usuario_broadcast.configure(text="(Todos)")
                 
         combo_destinatario.configure(command=_on_cambio_destinatario)
         
@@ -530,6 +452,7 @@ class InterfazDashboardAdmin:
         
         ctk.CTkLabel(frm_inputs, text="Monto ($):", font=("Segoe UI", 13, "bold")).pack(anchor="w")
         ent_monto = ctk.CTkEntry(frm_inputs, font=("Segoe UI", 14), placeholder_text="0.00")
+        registrar_validadores_teclado_ctk(ent_monto, 'decimal', dlg)
         ent_monto.pack(fill="x", pady=(5, 15))
         
         ctk.CTkLabel(frm_inputs, text="Observación / Motivo:", font=("Segoe UI", 13, "bold")).pack(anchor="w")
@@ -737,7 +660,10 @@ class InterfazDashboardAdmin:
         else:
             self.fr_busqueda_usr_feed.pack_forget()
             self.var_usuario_feed_id.set(0)
-            self.var_busqueda_feed.set("")
+            if hasattr(self, 'sel_usuario_feed'):
+                self.sel_usuario_feed = {"id": 0, "nombre": "(Todos)"}
+            if hasattr(self, 'lbl_usuario_feed'):
+                self.lbl_usuario_feed.configure(text="(Todos)")
             self._actualizar_live_feed()
 
     def _actualizar_live_feed(self):
@@ -833,6 +759,110 @@ class InterfazDashboardAdmin:
                     crear_alerta("💳", f"{len(clientes_deuda)} clientes con deuda activa.", "#fffbeb" if ctk.get_appearance_mode()=="Light" else "#78350f", "#d97706" if ctk.get_appearance_mode()=="Light" else "#fcd34d", on_double_click=cmd_deuda)
         except Exception as e:
             logger.error(f"Error cargando alertas dashboard admin (deuda): {e}")
+
+    def _abrir_selector_entidad(self, tipo: str, var_seleccion: dict, lista_datos: list, label_update: ctk.CTkLabel, on_select_callback=None):
+        popup = ctk.CTkToplevel(self.win)
+        try:
+            from app.frontend.theme_config import preparar_ventana, centrar_y_mostrar_ventana
+            preparar_ventana(popup)
+        except:
+            pass
+        
+        popup.title(f"Seleccionar {tipo}")
+        popup.geometry("500x550")
+        
+        try:
+            from app.frontend.navegacion_teclado_comun import configurar_navegacion_ventana
+            configurar_navegacion_ventana(popup)
+        except:
+            pass
+
+        var_pat = tk.StringVar()
+        ctk.CTkLabel(popup, text=f"Buscar {tipo} (ID/Nombre):", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).pack(pady=(15,5), padx=15, anchor="w")
+        ent = ctk.CTkEntry(popup, textvariable=var_pat, font=("Segoe UI", 13), height=40, placeholder_text="Nombre o ID...")
+        ent.pack(fill="x", padx=15, pady=5)
+        
+        frame_list = ctk.CTkFrame(popup, fg_color=get_color("bg_surface"), corner_radius=10, border_color=get_color("border_color") if hasattr(get_color, '__call__') else "#e2e8f0", border_width=1)
+        frame_list.pack(expand=True, fill="both", padx=15, pady=10)
+        
+        from tkinter import ttk
+        cols = ("ID", "Nombre")
+        tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
+        
+        sc = ctk.CTkScrollbar(frame_list, command=tree_sel.yview)
+        sc.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        tree_sel.configure(yscrollcommand=sc.set)
+        tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        
+        tree_sel.column("ID", width=70, anchor="center")
+        tree_sel.column("Nombre", width=350, anchor="w")
+        tree_sel.heading("ID", text="ID")
+        tree_sel.heading("Nombre", text="Nombre")
+        
+        tree_sel.insert("", "end", iid="opt_all", values=["-", "(Todos)"])
+
+        def render(filas):
+            for i in tree_sel.get_children(): 
+                if i != "opt_all": tree_sel.delete(i)
+            for c in filas:
+                id_val = c.get('id_usuario') or c.get('id_cliente') or c.get('id_proveedor') or c.get('id')
+                nombre_val = c.get('nombre') or c.get('razon_social') or "-"
+                tree_sel.insert("", "end", values=[id_val, nombre_val])
+
+        render(lista_datos)
+        
+        def filtrar(*_):
+            q = var_pat.get().strip().lower()
+            if not q:
+                render(lista_datos)
+                return
+            filas_filtradas = []
+            for d in lista_datos:
+                id_v = str(d.get('id_usuario') or d.get('id_cliente') or d.get('id_proveedor') or d.get('id') or '').lower()
+                nom_v = str(d.get('nombre') or d.get('razon_social') or '').lower()
+                if q in id_v or q in nom_v:
+                    filas_filtradas.append(d)
+            render(filas_filtradas)
+
+        var_pat.trace_add("write", filtrar)
+
+        def tomar(event=None): 
+            sel_id = tree_sel.focus()
+            if not sel_id: return 
+            if sel_id == "opt_all":
+                var_seleccion["id"] = 0
+                var_seleccion["nombre"] = "(Todos)"
+            else:
+                vals = tree_sel.item(sel_id, "values")
+                if not vals: return
+                try:
+                    var_seleccion["id"] = int(vals[0])
+                except:
+                    var_seleccion["id"] = vals[0]
+                var_seleccion["nombre"] = vals[1]
+            label_update.configure(text=var_seleccion["nombre"], text_color=get_color("text_primary"), font=("Segoe UI", 12, "bold"))
+            popup.destroy()
+            
+            if on_select_callback:
+                on_select_callback()
+
+        tree_sel.bind("<Double-1>", tomar)
+        tree_sel.bind("<Return>", tomar)
+
+        btn_frm = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_frm.pack(fill="x", side="bottom", padx=15, pady=(5, 15))
+        
+        ctk.CTkButton(btn_frm, text="Cancelar", command=popup.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
+        ctk.CTkButton(btn_frm, text="✓ Seleccionar", command=tomar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), width=180, height=45).pack(side="right", padx=10)
+        popup.after(100, lambda: ent.focus_set())
+        
+        try:
+            centrar_y_mostrar_ventana(popup)
+        except:
+            pass
+        popup.grab_set()
+        popup.transient(self.win)
+        self.win.wait_window(popup)
 
 def ui_dashboard_admin(parent, backend, usuario):
     InterfazDashboardAdmin(parent, backend, usuario)

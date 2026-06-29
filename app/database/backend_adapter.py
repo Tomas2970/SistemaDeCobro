@@ -65,6 +65,20 @@ class BackendAdapter:
     def verificar_contraseña(self, usuario: str, contraseña: str) -> dict | None:
         return DB.verificar_contraseña(usuario, contraseña)
 
+    def buscar_usuario_por_codigo(self, codigo_barras: str) -> dict | None:
+        fn = getattr(DB, "buscar_usuario_por_codigo", None)
+        return fn(codigo_barras) if callable(fn) else None
+
+    def cerrar_sesion_usuario(self, id_usuario: int) -> bool:
+        return DB.cerrar_sesion_usuario(id_usuario)
+
+    def forzar_cierre_sesion(self, id_usuario: int) -> bool:
+        return DB.forzar_cierre_sesion(id_usuario)
+
+    def obtener_usuario_por_id(self, id_usuario: int) -> dict | None:
+        fn = getattr(DB, "obtener_usuario_por_id", None)
+        return fn(id_usuario) if callable(fn) else None
+
     # ---------- Clientes (Firmas Actualizadas con CUIT) ----------
     def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
         try:
@@ -646,17 +660,68 @@ class BackendAdapter:
                 return fn(id_usuario, id_proveedor, items, medio_pago)
             else:
                 return fn(id_usuario, id_proveedor)
-        except TypeError:
-            # Fallback por si DB no se actualizó
-            if items is not None:
-                return fn(id_usuario, id_proveedor, items)
-            return fn(id_usuario, id_proveedor)
+        except TypeError as te:
+            # Fallback solo si es un error de firma de función
+            if "positional" in str(te) or "keyword" in str(te) or "argument" in str(te):
+                if items is not None:
+                    return fn(id_usuario, id_proveedor, items)
+                return fn(id_usuario, id_proveedor)
+            raise
 
     def insertar_compra(self, id_usuario: int, id_proveedor: int, items: list[dict] | None = None,
                          medio_pago: str = 'efectivo',
                          usuario_actual: dict | None = None) -> int | None:
         """DEPRECATED: Usar registrar_compra()."""
         return self.registrar_compra(id_usuario, id_proveedor, items, medio_pago, usuario_actual)
+
+    def registrar_compra_mixta(self, id_usuario: int, id_proveedor: int, items: list[dict], medio_real: str, monto_efectivo: float = 0.0, usuario_actual: dict | None = None) -> dict:
+        """
+        Registra compra según el medio real:
+        - efectivo: genera deuda (cuenta_corriente) e intenta saldarla.
+        - tarjeta/transferencia: registra pago instantáneo no-efectivo sin deuda.
+        - cuenta_corriente: registra deuda pura sin pago.
+        """
+        total_compra = sum(float(item['cant']) * float(item['costo']) for item in items)
+        
+        if medio_real in ['tarjeta', 'transferencia', 'cheque']:
+            # Pago instantáneo no-efectivo, NO es deuda.
+            id_compra = self.registrar_compra(id_usuario, id_proveedor, items, medio_pago=medio_real, usuario_actual=usuario_actual)
+            return {"id_compra": id_compra, "pago_exitoso": True, "mensaje_error_pago": None}
+            
+        elif medio_real == 'cuenta_corriente':
+            # Deuda pura, sin pago inicial
+            id_compra = self.registrar_compra(id_usuario, id_proveedor, items, medio_pago='cuenta_corriente', usuario_actual=usuario_actual)
+            return {"id_compra": id_compra, "pago_exitoso": True, "mensaje_error_pago": None}
+            
+        elif medio_real == 'efectivo':
+            # Si no envían monto parcial, se asume pago total
+            if monto_efectivo <= 0:
+                monto_efectivo = total_compra
+            elif monto_efectivo > total_compra:
+                raise ValueError("El monto en efectivo no puede superar el total de la compra.")
+                
+            # 1. Registrar deuda para dejar la traza
+            id_compra = self.registrar_compra(id_usuario, id_proveedor, items, medio_pago='cuenta_corriente', usuario_actual=usuario_actual)
+            
+            pago_exitoso = False
+            mensaje_error_pago = None
+            
+            # 2. Intentar pagar con efectivo
+            try:
+                self.registrar_pago_proveedor(id_proveedor, monto_efectivo, 'efectivo', id_usuario, obs=f"Pago por compra #{id_compra}", usuario_actual=usuario_actual)
+                pago_exitoso = True
+            except ValueError as ve:
+                mensaje_error_pago = str(ve)
+            except Exception as e:
+                mensaje_error_pago = str(e)
+                
+            return {
+                "id_compra": id_compra,
+                "pago_exitoso": pago_exitoso,
+                "mensaje_error_pago": mensaje_error_pago
+            }
+        else:
+            raise ValueError(f"Medio de pago no soportado: {medio_real}")
 
 
     # ---------- Historiales (Venta/Compra) ----------
@@ -975,6 +1040,11 @@ class BackendAdapter:
         """Obtiene la sesión de Tesorería activa (única)."""
         fn = getattr(DB, "obtener_tesoreria_activa", None)
         return fn() if callable(fn) else None
+        
+    def obtener_session_por_id(self, id_session: int) -> dict | None:
+        """Obtiene una sesión por su ID"""
+        fn = getattr(DB, "obtener_session_por_id", None)
+        return fn(id_session) if callable(fn) else None
     
     def abrir_caja_session(self, id_usuario: int, monto_inicial: float, tipo_caja: str = 'turno') -> bool:
         fn = getattr(DB, "abrir_caja_session", None)

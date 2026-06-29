@@ -33,6 +33,16 @@ MAPEO_ACCIONES = {
     "CIERRE_CAJA_SUPERVISOR": "🔒 Cierre forzado de caja",
     "CIERRE_CAJA": "🔒 Cierre de caja",
     "EXPORTAR_HISTORIAL": "📤 Exportación de historial",
+    "DESACTIVAR_CATEGORIA": "❌ Categoría desactivada",
+    "REACTIVAR_CATEGORIA": "♻️ Categoría reactivada",
+    "CREAR_TESORERIA_AUTOMATICA": "🏦 Tesorería del día creada automáticamente",
+    "APROBACION_TRANSFERENCIA": "✅ Transferencia a Tesorería autorizada",
+    "ANULAR_VENTA": "🚫 Venta anulada",
+    "ANULAR_COMPRA": "🚫 Compra anulada",
+    "APERTURA_CAJA": "🔓 Apertura de caja",
+    "TRANSFERENCIA_CAJA": "🔄 Transferencia entre cajas",
+    "TRANSFERENCIA_TESORERIA": "🏦 Transferencia a Tesorería",
+    "EDITAR_PROVEEDOR": "✏️ Proveedor modificado"
 }
 
 INV_MAPEO_ACCIONES = {v: k for k, v in MAPEO_ACCIONES.items()}
@@ -250,24 +260,66 @@ class InterfazAuditoria:
                 return "Datos de producto modificados"
                 
             if accion == "AJUSTE_STOCK_MANUAL":
-                cant_ant = d_ant.get('cantidad', 0)
-                cant_nue = d_nue.get('cantidad', 0)
-                diff = cant_nue - cant_ant
-                signo = "+" if diff > 0 else ""
-                return f"Stock: {cant_ant} → {cant_nue} ({signo}{diff})"
+                cant_ant = d_ant.get('stock', d_ant.get('cantidad', 0))
+                cant_nue = d_nue.get('stock', d_nue.get('cantidad', 0))
+                id_prod = d_nue.get('id_producto')
+                nombre_prod = "Producto"
+                if id_prod:
+                    try:
+                        prod = self.backend.buscar_producto_por_id(int(id_prod))
+                        if prod and prod.get("nombre"):
+                            nombre_prod = prod["nombre"]
+                    except:
+                        pass
+                return f"Stock de {nombre_prod}: {cant_ant} → {cant_nue}"
                 
             if accion == "CREAR_USUARIO":
-                return f"Rol asignado: #{d_nue.get('id_rol', '?')}"
+                return f"Usuario creado con Rol #{d_nue.get('id_rol', '?')}"
                 
             if accion == "RESETEAR_PASSWORD":
                 return "Contraseña restablecida"
                 
             if accion == "MODIFICAR_USUARIO":
-                rol_o = d_ant.get('id_rol')
-                rol_n = d_nue.get('id_rol')
-                if rol_o != rol_n:
-                    return f"Rol: {rol_o} → {rol_n}"
+                cambios_usr = []
+                for k, v in d_nue.items():
+                    if k in d_ant and str(d_ant[k]) != str(v):
+                        k_amigable = k.replace('_', ' ').capitalize()
+                        if k == 'id_rol':
+                            k_amigable = "Rol"
+                        cambios_usr.append(f"{k_amigable}: {d_ant[k]} → {v}")
+                if cambios_usr:
+                    return " | ".join(cambios_usr)
                 return "Datos de usuario modificados"
+
+            if accion in ("TRANSFERENCIA_CAJA", "TRANSFERENCIA_TESORERIA", "APROBACION_TRANSFERENCIA"):
+                monto = d_nue.get('monto', 0)
+                origen = d_nue.get('origen', d_nue.get('id_session_origen', '?'))
+                destino = d_nue.get('destino', d_nue.get('id_session_destino', '?'))
+                
+                # Intentar resolver nombres de caja
+                def resolver_caja(id_caja):
+                    if str(id_caja) == '?': return "Caja Desconocida"
+                    try:
+                        sess = self.backend.obtener_session_por_id(int(id_caja))
+                        if sess:
+                            if sess.get('tipo_caja') == 'administrativa':
+                                return "Tesorería"
+                            id_u = sess.get('id_usuario')
+                            if id_u:
+                                for u in getattr(self, 'map_usuarios', {}).items():
+                                    if u[1] == id_u:
+                                        return f"Caja de {u[0]}"
+                        return f"Caja #{id_caja}"
+                    except:
+                        return f"Caja #{id_caja}"
+                
+                nom_origen = resolver_caja(origen)
+                nom_destino = resolver_caja(destino)
+                
+                if accion == "APROBACION_TRANSFERENCIA":
+                    return f"Transferencia de ${float(monto):,.2f} de {nom_origen} a {nom_destino}"
+                else:
+                    return f"Transferencia de ${float(monto):,.2f} a {nom_destino}"
 
             if accion in ("CIERRE_CAJA", "CIERRE_CAJA_SUPERVISOR"):
                 if 'diferencia' in d_nue and 'contado' in d_nue:
@@ -308,6 +360,44 @@ class InterfazAuditoria:
             return dt.strftime("%Y-%m-%d")
         except ValueError:
             raise ValueError(f"Formato de fecha inválido: {fecha_str}. Use dd/mm/aaaa.")
+
+    def resolver_entidad(self, tabla: str, id_reg: str) -> str:
+        if not id_reg:
+            return tabla
+            
+        try:
+            id_num = int(id_reg)
+        except ValueError:
+            return f"{tabla} #{id_reg}"
+
+        if tabla in ("Inventario", "Producto"):
+            try:
+                prod = self.backend.buscar_producto_por_id(id_num)
+                if prod and prod.get("nombre"):
+                    return f"Producto: {prod['nombre']}"
+            except Exception:
+                pass
+
+        elif tabla == "Usuario":
+            for nombre, id_u in getattr(self, 'map_usuarios', {}).items():
+                if id_u == id_num:
+                    return f"Usuario: {nombre}"
+
+        elif tabla == "caja_session":
+            try:
+                sess = self.backend.obtener_session_por_id(id_num)
+                if sess:
+                    if sess.get('tipo_caja') == 'administrativa':
+                        return "Tesorería"
+                    id_u = sess.get('id_usuario')
+                    if id_u:
+                        for nombre, id_u_map in getattr(self, 'map_usuarios', {}).items():
+                            if id_u_map == id_u:
+                                return f"Caja de {nombre}"
+            except Exception:
+                pass
+
+        return f"{tabla} #{id_num}"
 
     def cargar_datos(self):
         for i in self.tree.get_children():
@@ -350,7 +440,7 @@ class InterfazAuditoria:
                 acc = r.get('accion') or 'Desconocida'
                 tabla = r.get('tabla_afectada') or ''
                 id_reg = r.get('id_registro') or ''
-                entidad = f"{tabla} #{id_reg}" if id_reg else tabla
+                entidad = self.resolver_entidad(tabla, id_reg) if id_reg else tabla
                 
                 acc_amigable = MAPEO_ACCIONES.get(acc, acc)
                 resumen = self.procesar_resumen(acc, r.get('datos_anteriores'), r.get('datos_nuevos'))
@@ -447,6 +537,8 @@ class InterfazAuditoria:
                     "id_usuario": "Usuario",
                     "abierto_por": "Abierto por",
                     "autorizado_por": "Autorizado por",
+                    "id_autorizador": "Autorizado por",
+                    "id_cajero": "Cajero",
                     "motivo": "Motivo",
                     "estado": "Estado",
                     "monto": "Monto",
@@ -460,14 +552,18 @@ class InterfazAuditoria:
                     "precio_compra": "Precio de compra",
                     "stock_minimo": "Stock mínimo",
                     "codigo_barras": "Código de barras",
-                    "descripcion": "Descripción"
+                    "descripcion": "Descripción",
+                    "origen": "Origen",
+                    "destino": "Destino",
+                    "id_session_origen": "Origen",
+                    "id_session_destino": "Destino"
                 }
 
                 def resolver_valor(clave, valor):
                     if valor is None:
                         return valor
                     
-                    if clave in ("cerrado_por", "id_usuario", "abierto_por", "autorizado_por"):
+                    if clave in ("cerrado_por", "id_usuario", "abierto_por", "autorizado_por", "id_autorizador", "id_cajero"):
                         try:
                             return map_id_to_user.get(int(valor), valor)
                         except (ValueError, TypeError):
@@ -494,6 +590,21 @@ class InterfazAuditoria:
                                 return c["nombre"]
                         except Exception:
                             pass
+                            
+                    if clave in ("origen", "destino", "id_session_origen", "id_session_destino"):
+                        try:
+                            sess = self.backend.obtener_session_por_id(int(valor))
+                            if sess:
+                                if sess.get('tipo_caja') == 'administrativa':
+                                    return "Tesorería"
+                                id_u = sess.get('id_usuario')
+                                if id_u:
+                                    for u in getattr(self, 'map_usuarios', {}).items():
+                                        if u[1] == id_u:
+                                            return f"Caja de {u[0]}"
+                            return f"Caja #{valor}"
+                        except Exception:
+                            return f"Caja #{valor}"
                     
                     return valor
 
@@ -513,12 +624,15 @@ class InterfazAuditoria:
                         
                         if es_sin_valor_ant and es_tecnico:
                             continue
-                            
-                        str_ant = "—" if es_sin_valor_ant else str(v_ant_res)
-                        str_nue = "—" if es_sin_valor_nue else str(v_nue_res)
+                        
+                        str_ant = "Sin valor previo" if es_sin_valor_ant else str(v_ant_res)
+                        str_nue = "Sin valor" if es_sin_valor_nue else str(v_nue_res)
                         
                         if str_ant != str_nue:
-                            lineas.append(f"{k_amigable}:\n{str_ant} → {str_nue}\n")
+                            if es_sin_valor_ant:
+                                lineas.append(f"{k_amigable}: {str_nue}")
+                            else:
+                                lineas.append(f"{k_amigable}:\n{str_ant} → {str_nue}\n")
             
             txt_cambios.insert("1.0", "\n".join(lineas))
         except Exception as e:
@@ -581,7 +695,7 @@ class InterfazAuditoria:
                         acc = r.get('accion') or 'Desconocida'
                         tabla = r.get('tabla_afectada') or ''
                         id_reg = r.get('id_registro') or ''
-                        entidad = f"{tabla} #{id_reg}" if id_reg else tabla
+                        entidad = self.resolver_entidad(tabla, id_reg) if id_reg else tabla
                         acc_amigable = MAPEO_ACCIONES.get(acc, acc)
                         resumen = self.procesar_resumen(acc, r.get('datos_anteriores'), r.get('datos_nuevos'))
                         writer.writerow([fecha, usr, acc_amigable, entidad, resumen])

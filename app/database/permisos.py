@@ -149,8 +149,8 @@ PERMISOS = {
         
         # Clientes (OPCIÓN A - SOLO CONSULTA)
         'ver_clientes',  # ← Solo puede VER/BUSCAR clientes
+        'gestionar_cuenta_corriente',  # Puede cobrar
         # NO: crear_clientes, editar_clientes, eliminar_clientes
-        # NO: gestionar_cuenta_corriente (no puede cobrar)
         
         # Caja (Individual, sin movimientos manuales)
         'abrir_caja',
@@ -341,10 +341,10 @@ VENDEDOR - Solo Ventas y Consultas
 • Consultar productos, inventario y precios
 • Consultar lista de clientes (solo búsqueda)
 • Abrir y cerrar su propia caja (sin movimientos manuales)
+• Cobrar cuenta corriente de clientes
 • ❌ NO puede crear/editar/eliminar clientes
 • ❌ NO puede modificar precios ni productos
 • ❌ NO puede ajustar stock manualmente
-• ❌ NO puede cobrar cuenta corriente
 • ❌ NO puede procesar devoluciones
 • ❌ NO puede hacer retiros/ingresos de caja
         """

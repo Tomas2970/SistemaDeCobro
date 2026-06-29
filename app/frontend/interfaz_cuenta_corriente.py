@@ -124,7 +124,24 @@ class CuentaCorriente:
         sel = self.tree_deudores.selection()
         if not sel: return
         item = self.tree_deudores.item(sel[0], "values")
-        self.abrir_ventana_pago(int(item[0]))
+        id_cliente = int(item[0])
+        
+        if self.usuario.get('id_rol') not in (1, 3):
+            from app.frontend.autorizacion import solicitar_autorizacion_supervisor
+            def on_autorizado(autorizador):
+                self.abrir_ventana_pago(id_cliente)
+            
+            solicitar_autorizacion_supervisor(
+                parent=self.win,
+                backend=self.backend,
+                usuario_actual=self.usuario,
+                callback_exito=on_autorizado,
+                roles_permitidos=(1, 3),
+                tipo_operacion="Acceso a Cobro",
+                motivo="Autorización requerida para procesar el pago."
+            )
+        else:
+            self.abrir_ventana_pago(id_cliente)
 
     def cargar_deudores(self):
         try:
@@ -254,13 +271,23 @@ class CuentaCorriente:
                 self.entry_monto.delete(0, tk.END)
                 self.entry_monto.insert(0, f"{self._deuda_maxima:.2f}")
                 return
-
-            uid = self.usuario['id_usuario']
-            id_cuenta = self.cuenta_seleccionada.get('id_cuenta')
             
             # Mapear el valor visual del OptionMenu al valor SQL
             metodo_sql = self.mapa_metodos.get(self.cb_metodo.get(), "efectivo")
             
+            self._ejecutar_pago(monto, metodo_sql)
+                
+        except ValueError as ve:
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(ve, parent=self.win_pago, contexto="monto")
+        except Exception as e:
+            from app.frontend.manejador_errores import ManejadorErroresUI
+            ManejadorErroresUI.manejar_error(e, parent=self.win_pago, contexto="pago")
+
+    def _ejecutar_pago(self, monto, metodo_sql):
+        try:
+            uid = self.usuario['id_usuario']
+            id_cuenta = self.cuenta_seleccionada.get('id_cuenta')
             resultado = self.backend.registrar_pago_cuenta_corriente(id_cuenta, monto, metodo_sql, uid)
             if resultado:
                 messagebox.showinfo("Éxito", "El pago de cuenta corriente fue registrado correctamente.", parent=self.win_pago)
@@ -272,10 +299,6 @@ class CuentaCorriente:
                     ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el pago."), parent=self.win_pago, contexto="pago")
                 else:
                     ManejadorErroresUI.manejar_error(Exception("No se pudo registrar el pago. Asegúrate de que la caja de cobros esté abierta."), parent=self.win_pago, contexto="caja")
-                
-        except ValueError as ve:
-            from app.frontend.manejador_errores import ManejadorErroresUI
-            ManejadorErroresUI.manejar_error(ve, parent=self.win_pago, contexto="monto")
         except Exception as e:
             from app.frontend.manejador_errores import ManejadorErroresUI
             ManejadorErroresUI.manejar_error(e, parent=self.win_pago, contexto="pago")

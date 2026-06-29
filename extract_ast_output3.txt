@@ -1,0 +1,227 @@
+--- obtener_productos in app/database/DB.py ---
+def obtener_productos() -> list[dict]:
+    return buscar_producto_por_nombre("")
+
+--- obtener_clientes_con_saldos in app/database/DB.py ---
+def obtener_clientes_con_saldos(incluir_inactivos: bool = False) -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        sql = """
+            SELECT 
+                c.id_cliente, c.nombre, c.dni, c.direccion, c.telefono, c.email, c.activo,
+                cc.saldo, 
+                cc.limite_credito
+            FROM Cliente c
+            LEFT JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
+        """
+        if not incluir_inactivos:
+            sql += " WHERE c.activo=1"
+        sql += " ORDER BY c.nombre"
+        cur.execute(sql)
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_clientes_con_saldos: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+--- obtener_cuenta_por_cliente in app/database/DB.py ---
+def obtener_cuenta_por_cliente(id_cliente: int) -> Optional[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM CuentaCorriente WHERE id_cliente = %s", (id_cliente,))
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"obtener_cuenta_por_cliente: {e}")
+        return None
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+--- obtener_clientes_con_deuda in app/database/DB.py ---
+def obtener_clientes_con_deuda() -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM vista_clientes_deuda ORDER BY saldo ASC")
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_clientes_con_deuda: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+--- obtener_resumen_cierre in app/database/DB.py ---
+def obtener_resumen_cierre(id_session: int) -> dict:
+    """Calcula todos los totales para el arqueo. Blindado para que la UI nunca quede en blanco."""
+    conn = cur = None
+    resumen = {
+        'monto_inicial': 0.0, 'ventas_efectivo': 0.0, 'cobros_ctacte': 0.0,
+        'otros_ingresos': 0.0, 'pagos_proveedores': 0.0, 'retiros': 0.0,
+        'gastos_varios': 0.0, 'otros_egresos': 0.0,
+        'total_ingresos': 0.0,   # solo ingresos de efectivo real
+        'total_egresos': 0.0,    # solo egresos de efectivo real
+        'total_egresos_transferencia': 0.0,  # egresos pagados por transferencia
+        'total_egresos_tarjeta': 0.0,        # egresos pagados por tarjeta
+        'efectivo_esperado': 0.0, 'fecha_apertura': '-',
+        'usuario_apertura': '-',
+        'medios_pago': {'tarjetas': 0.0, 'transferencias': 0.0, 'cuenta_corriente': 0.0}
+    }
+
+    # Motivos que mueven efectivo físico real en caja
+    MOTIVOS_EFECTIVO_INGRESO = {
+        'venta_efectivo',
+        'cobro_cuenta_corriente',       # cobros de deuda en efectivo
+        'ajuste_positivo',
+        'transferencia_tesoreria_entrada',
+        'ingreso_extraordinario',
+        'ingreso_capital',
+    }
+    MOTIVOS_EFECTIVO_EGRESO = {
+        'pago_proveedor',
+        'retiro_caja',
+        'gasto_vario',
+        'devolucion_efectivo',
+        'ajuste_negativo',
+        'transferencia_tesoreria_salida',
+    }
+    # Motivos que NO mueven caja física (solo registro informativo)
+    MOTIVOS_NO_EFECTIVO = {
+        'venta_tarjeta',
+        'venta_transferencia',
+        'venta_cuenta_corriente',
+        'cobro_cuenta_corriente',       # si el medio no es efectivo
+    }
+
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT cs.*, u.nombre as usuario_apertura_nombre 
+            FROM caja_session cs
+            LEFT JOIN Usuario u ON cs.id_usuario_apertura = u.id_usuario
+            WHERE cs.id_session = %s
+        """, (id_session,))
+        session = cur.fetchone()
+        if not session: return resumen
+
+        resumen['monto_inicial'] = float(session['monto_apertura'] or 0.0)
+        resumen['fecha_apertura'] = str(session['fecha_apertura'])
+        resumen['usuario_apertura'] = session['usuario_apertura_nombre'] or str(session['id_usuario_apertura'])
+
+        # CORRECCIÓN: filtrar por medio='efectivo' para ingresos y egresos reales
+        # Así tarjeta/transferencia/cuenta_corriente no inflan el efectivo esperado
+        movimientos = _obtener_totales_movimientos(cur, id_session)
+
+        for r in movimientos:
+            m    = float(r['total'])
+            mot  = r['motivo']
+            tipo = r['tipo']
+            medio = r['medio']
+
+            if tipo == 'ingreso':
+                if mot == 'apertura_caja':
+                    continue  # el monto inicial ya está en monto_inicial, no sumar
+
+                # Solo contar como ingreso de efectivo si el medio es efectivo
+                if medio == 'efectivo':
+                    resumen['total_ingresos'] += m
+                    if mot == 'venta_efectivo':
+                        resumen['ventas_efectivo'] += m
+                    elif mot in ('cobro_cuenta_corriente', 'pago_cuenta_corriente_efectivo'):
+                        resumen['cobros_ctacte'] += m
+                    else:
+                        resumen['otros_ingresos'] += m
+                # Si el medio NO es efectivo, solo va a medios_pago (abajo), no suma al esperado
+
+            else:  # egreso
+                # Solo egresos EN EFECTIVO afectan el efectivo esperado
+                if medio == 'efectivo':
+                    resumen['total_egresos'] += m
+                    if mot == 'pago_proveedor':
+                        resumen['pagos_proveedores'] += m
+                    elif mot in ('retiro_caja', 'transferencia_tesoreria_salida'):
+                        resumen['retiros'] += m
+                    elif mot == 'gasto_vario':
+                        resumen['gastos_varios'] += m
+                    else:
+                        resumen['otros_egresos'] += m
+                elif medio == 'transferencia':
+                    resumen['total_egresos_transferencia'] += m
+                elif medio in ('tarjeta', 'debito'):
+                    resumen['total_egresos_tarjeta'] += m
+
+        # Medios electrónicos: leer directo de caja_movimiento filtrando por medio
+        # (más preciso que leer de Venta.tipo_pago, captura también cobros cta.cte.)
+        cur.execute("""
+            SELECT medio, SUM(monto) as total
+            FROM caja_movimiento
+            WHERE id_session = %s
+              AND tipo = 'ingreso'
+              AND medio IN ('tarjeta', 'transferencia', 'cuenta_corriente')
+            GROUP BY medio
+        """, (id_session,))
+        for rv in cur.fetchall():
+            med = rv['medio']
+            val = float(rv['total'])
+            if med == 'tarjeta':
+                resumen['medios_pago']['tarjetas'] = val
+            elif med == 'transferencia':
+                resumen['medios_pago']['transferencias'] = val
+            elif med == 'cuenta_corriente':
+                resumen['medios_pago']['cuenta_corriente'] = val
+
+        # CORRECCIÓN: efectivo_esperado solo usa ingresos/egresos de efectivo real
+        # El monto_inicial NO se suma al total_recaudado del ticket (es plata que ya estaba)
+        resumen['efectivo_esperado'] = (
+            resumen['monto_inicial']
+            + resumen['total_ingresos']
+            - resumen['total_egresos']
+        )
+        return resumen
+
+    except Exception as e:
+        logger.error(f"Error resumen: {e}")
+        return resumen
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+--- obtener_proveedores in app/database/DB.py ---
+def obtener_proveedores(incluir_inactivos=False):
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        sql = "SELECT id_proveedor, nombre, empresa, cuit, dni, telefono, email, direccion, saldo, activo FROM Proveedor"
+        if not incluir_inactivos:
+            sql += " WHERE activo=1"
+        sql += " ORDER BY nombre"
+        cur.execute(sql)
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_proveedores: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+

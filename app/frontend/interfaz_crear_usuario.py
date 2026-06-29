@@ -181,6 +181,12 @@ class CrearEditarUsuario:
         try:
             if self.usuario_existente:
                 id_usuario = self.usuario_existente.get('id_usuario')
+                rol_actual_nombre = self.usuario_existente.get('rol_nombre')
+                
+                if rol_nombre != rol_actual_nombre:
+                    msg = "Este usuario podría tener una sesión activa. Si cambiás su rol ahora, su sesión se invalidará y perderá cualquier operación en curso. ¿Querés continuar?"
+                    if not messagebox.askyesno("Advertencia de Cambio de Rol", msg, parent=self.win):
+                        return
                 
                 ok_rol_nombre = self.backend.actualizar_rol_usuario(
                     id_usuario, 

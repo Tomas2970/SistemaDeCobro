@@ -114,8 +114,9 @@ class Historiales:
         preparar_ventana(self.win)
         self.win.title("📋 Historiales del Sistema")
         
-        altura = 720 
+        altura = 600 
         self.win.geometry(f"1300x{altura}")
+        self.win.minsize(1000, 500)
         
         style = ttk.Style()
         try:
@@ -125,10 +126,7 @@ class Historiales:
 
         configurar_estilo_treeview()
 
-        frm_header = ctk.CTkFrame(self.win, fg_color=get_color("accent_primary"), corner_radius=0)
-        frm_header.pack(fill="x")
-        ctk.CTkLabel(frm_header, text="HISTORIALES DEL SISTEMA", font=("Segoe UI", 18, "bold"), text_color="white").pack(pady=15)
-
+        # Se eliminó la barra azul superior (frm_header) para ganar espacio visible.
         # Banner de restricción — visible solo para Supervisores
         if self._fecha_minima is not None:
             frm_banner = ctk.CTkFrame(self.win, fg_color="#1e3a8a", corner_radius=0)
@@ -192,7 +190,10 @@ class Historiales:
         self.btn_anular.pack(side=tk.LEFT)
         
         if not tiene_permiso(self.usuario, 'cancelar_ventas'):
-            self.btn_anular.configure(state="disabled", fg_color="gray")
+            if self.usuario.get('id_rol') == 2:
+                self.btn_anular.configure(text="⚠️ Solic. Devolución", fg_color="#f59e0b", hover_color="#d97706")
+            else:
+                self.btn_anular.configure(state="disabled", fg_color="gray")
 
         ctk.CTkButton(frm_footer, text="Cerrar", command=self.win.destroy, fg_color=get_color("button_secondary"), hover_color=get_color("button_secondary_hover"), font=("Segoe UI", 13, "bold"), width=120).pack(side=tk.RIGHT, pady=10)
 
@@ -210,10 +211,11 @@ class Historiales:
             getattr(self, attr).pack(fill="both", expand=True)
         
         self.notebook.add(self.tab_ventas, text="🛒 Ventas")
-        self.notebook.add(self.tab_compras, text="📦 Compras")
+        if self.usuario.get('id_rol') != 2:
+            self.notebook.add(self.tab_compras, text="📦 Compras")
         self.notebook.add(self.tab_pagos, text="💰 Pagos Cta. Cte.")
 
-        if tiene_permiso(usuario, 'ver_historial_movimientos'):
+        if tiene_permiso(usuario, 'ver_historial_movimientos') or usuario.get('id_rol') == 2:
             self.tab_caja = ttk.Frame(self.notebook)
             self.bg_caja = ctk.CTkFrame(self.tab_caja, fg_color=get_color("bg_root"), corner_radius=0)
             self.bg_caja.pack(fill="both", expand=True)
@@ -579,13 +581,20 @@ class Historiales:
         tab_text = self.notebook.tab(idx, "text")
         
         # Ocultar o deshabilitar botón Anular según pestaña
-        if "Ventas" in tab_text or "Compras" in tab_text:
+        if "Ventas" in tab_text:
             if tiene_permiso(self.usuario, 'cancelar_ventas'):
-                self.btn_anular.configure(state="normal", fg_color="#ef4444")
+                self.btn_anular.configure(state="normal", fg_color="#ef4444", hover_color="#dc2626", text="🗑️ Anular")
+            elif self.usuario.get('id_rol') == 2:
+                self.btn_anular.configure(state="normal", fg_color="#f59e0b", hover_color="#d97706", text="⚠️ Solic. Devolución")
             else:
-                self.btn_anular.configure(state="disabled", fg_color="gray")
+                self.btn_anular.configure(state="disabled", fg_color="gray", text="🗑️ Anular")
+        elif "Compras" in tab_text:
+            if tiene_permiso(self.usuario, 'cancelar_ventas'):
+                self.btn_anular.configure(state="normal", fg_color="#ef4444", hover_color="#dc2626", text="🗑️ Anular")
+            else:
+                self.btn_anular.configure(state="disabled", fg_color="gray", text="🗑️ Anular")
         else:
-            self.btn_anular.configure(state="disabled", fg_color="gray")
+            self.btn_anular.configure(state="disabled", fg_color="gray", text="🗑️ Anular")
         
         if "Ventas" in tab_text: 
             self.pag_ventas = 0
@@ -681,7 +690,7 @@ class Historiales:
         frm_maestro_v_cont = ctk.CTkFrame(self.bg_ventas, fg_color="transparent")
         frm_maestro_v_cont.pack(fill="both", expand=True, padx=10, pady=5)
         
-        self.tree_maestro_v = ttk.Treeview(frm_maestro_v_cont, columns=cols, show="headings", height=5, style="Modern.Treeview") 
+        self.tree_maestro_v = ttk.Treeview(frm_maestro_v_cont, columns=cols, show="headings", height=4, style="Modern.Treeview") 
         ys_maestro_v = ctk.CTkScrollbar(frm_maestro_v_cont, command=self.tree_maestro_v.yview)
         ys_maestro_v.pack(side="right", fill="y")
         try:
@@ -717,7 +726,7 @@ class Historiales:
         frm_detalle_v_cont = ctk.CTkFrame(self.bg_ventas, fg_color="transparent")
         frm_detalle_v_cont.pack(fill="both", expand=True, padx=10, pady=(0,10))
         
-        self.tree_detalle_v = ttk.Treeview(frm_detalle_v_cont, columns=cols_d, show="headings", height=8, style="Modern.Treeview") 
+        self.tree_detalle_v = ttk.Treeview(frm_detalle_v_cont, columns=cols_d, show="headings", height=4, style="Modern.Treeview") 
         ys_detalle_v = ctk.CTkScrollbar(frm_detalle_v_cont, command=self.tree_detalle_v.yview)
         ys_detalle_v.pack(side="right", fill="y")
         try:
@@ -742,6 +751,7 @@ class Historiales:
             return
 
         id_venta = int(vals[0])
+        fecha_str = vals[1]
         estado = vals[5]
         total = vals[4]
 
@@ -749,27 +759,40 @@ class Historiales:
             messagebox.showwarning("Atención", "Esta venta ya se encuentra anulada/cancelada.", parent=self.win)
             return
 
+        tiene_perm_anular = tiene_permiso(self.usuario, 'cancelar_ventas')
+        es_vendedor = self.usuario.get('id_rol') == 2
+        
+        if not tiene_perm_anular:
+            if not es_vendedor:
+                messagebox.showwarning("Sin permisos", "No tiene permisos para anular ventas.", parent=self.win)
+                return
+            fecha_hoy = date.today().strftime("%d/%m/%Y")
+            if not fecha_str.startswith(fecha_hoy):
+                messagebox.showwarning("No permitido", "Solo puede solicitar devolución de ventas del día actual.", parent=self.win)
+                return
+
         # --- Diálogo de motivo + confirmación ---
         motivo_resultado = {"valor": None, "confirmado": False}
 
         dlg = ctk.CTkToplevel(self.win)
         preparar_ventana(dlg)
-        dlg.title("Confirmar Anulación de Venta")
-        dlg.geometry("520x330")
+        dlg.title("Confirmar Anulación" if tiene_perm_anular else "Solicitar Devolución")
+        dlg.geometry("520x340")
         dlg.grab_set()
         dlg.transient(self.win)
 
-        # Encabezado
-        frm_header_dlg = ctk.CTkFrame(dlg, fg_color="#ef4444", corner_radius=0)
+        color_header = "#ef4444" if tiene_perm_anular else "#f59e0b"
+        texto_header = "⚠️  ANULAR VENTA  ⚠️" if tiene_perm_anular else "⚠️  SOLICITAR DEVOLUCIÓN  ⚠️"
+        
+        frm_header_dlg = ctk.CTkFrame(dlg, fg_color=color_header, corner_radius=0)
         frm_header_dlg.pack(fill="x")
         ctk.CTkLabel(
             frm_header_dlg,
-            text="⚠️  ANULAR VENTA  ⚠️",
+            text=texto_header,
             font=("Segoe UI", 16, "bold"),
             text_color="white"
         ).pack(pady=12)
 
-        # Cuerpo
         frm_body = ctk.CTkFrame(dlg, fg_color="transparent")
         frm_body.pack(fill="both", expand=True, padx=20, pady=10)
 
@@ -788,24 +811,32 @@ class Historiales:
             text_color=get_color("text_secondary"),
             justify="left",
             wraplength=460
-        ).pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(0, 5))
+        
+        if not tiene_perm_anular:
+            ctk.CTkLabel(
+                frm_body,
+                text="NOTA: Requerirá autorización de un Supervisor o Administrador.",
+                font=("Segoe UI", 11, "bold"),
+                text_color="#f59e0b",
+                justify="left"
+            ).pack(anchor="w", pady=(0, 5))
 
         ctk.CTkLabel(
             frm_body,
             text="Motivo de anulación (obligatorio):",
             font=("Segoe UI", 12, "bold"),
             text_color=get_color("text_primary")
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(5,0))
 
         entry_motivo = ctk.CTkEntry(
             frm_body,
             font=("Segoe UI", 12),
             height=36,
-            placeholder_text="Ej: Error de carga, doble cobro, pedido cliente..."
+            placeholder_text="Ej: Error de carga, pedido cliente..."
         )
         entry_motivo.pack(fill="x", pady=(4, 0))
 
-        # Botones
         frm_btns = ctk.CTkFrame(dlg, fg_color="transparent")
         frm_btns.pack(fill="x", padx=20, pady=(0, 15))
 
@@ -829,9 +860,10 @@ class Historiales:
             font=("Segoe UI", 13, "bold"), width=150, height=38
         ).pack(side="left", padx=(0, 10))
 
+        texto_btn_conf = "✓ Confirmar Anulación" if tiene_perm_anular else "✓ Solicitar Autorización"
         ctk.CTkButton(
-            frm_btns, text="✓ Confirmar Anulación", command=_confirmar,
-            fg_color="#ef4444", hover_color="#dc2626",
+            frm_btns, text=texto_btn_conf, command=_confirmar,
+            fg_color=color_header, hover_color="#dc2626" if tiene_perm_anular else "#d97706",
             font=("Segoe UI", 13, "bold"), width=200, height=38
         ).pack(side="right")
 
@@ -845,25 +877,44 @@ class Historiales:
         if not motivo_resultado["confirmado"]:
             return
 
-        # --- Ejecutar anulación ---
-        try:
-            exito = self.backend.anular_venta(
-                id_venta,
-                self.usuario['id_usuario'],
-                motivo_resultado["valor"]
-            )
-            if exito:
-                messagebox.showinfo(
-                    "Éxito",
-                    f"La Venta #{id_venta} ha sido anulada correctamente.\n"
-                    "El stock fue restituido y la cuenta corriente fue revertida si correspondía.",
-                    parent=self.win
+        def _ejecutar_anulacion(autorizador=None):
+            id_actor = self.usuario['id_usuario']
+            motivo_final = motivo_resultado["valor"]
+            if autorizador:
+                motivo_final += f" (Autorizado por: {autorizador.get('nombre')})"
+            
+            try:
+                exito = self.backend.anular_venta(
+                    id_venta,
+                    id_actor,
+                    motivo_final
                 )
-                self.buscar_ventas()
-        except ValueError as ve:
-            messagebox.showwarning("No se pudo anular", str(ve), parent=self.win)
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo anular la venta:\n{e}", parent=self.win)
+                if exito:
+                    messagebox.showinfo(
+                        "Éxito",
+                        f"La Venta #{id_venta} ha sido anulada correctamente.\n"
+                        "El stock fue restituido y la cuenta corriente fue revertida si correspondía.",
+                        parent=self.win
+                    )
+                    self.buscar_ventas()
+            except ValueError as ve:
+                messagebox.showwarning("No se pudo anular", str(ve), parent=self.win)
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo anular la venta:\n{e}", parent=self.win)
+
+        if not tiene_perm_anular:
+            from app.frontend.autorizacion import solicitar_autorizacion_supervisor
+            solicitar_autorizacion_supervisor(
+                self.win, 
+                self.backend, 
+                self.usuario, 
+                callback_exito=_ejecutar_anulacion, 
+                roles_permitidos=(1, 3), 
+                tipo_operacion="Devolución", 
+                motivo=f"Devolución de venta #{id_venta}"
+            )
+        else:
+            _ejecutar_anulacion()
 
 
 
@@ -1075,7 +1126,7 @@ class Historiales:
         frm_maestro_c_cont = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
         frm_maestro_c_cont.pack(fill="both", expand=True, padx=10, pady=5)
         
-        self.tree_maestro_c = ttk.Treeview(frm_maestro_c_cont, columns=cols, show="headings", height=5, style="Modern.Treeview")
+        self.tree_maestro_c = ttk.Treeview(frm_maestro_c_cont, columns=cols, show="headings", height=4, style="Modern.Treeview")
         ys_maestro_c = ctk.CTkScrollbar(frm_maestro_c_cont, command=self.tree_maestro_c.yview)
         ys_maestro_c.pack(side="right", fill="y")
         try:
@@ -1115,7 +1166,7 @@ class Historiales:
         frm_detalle_c_cont = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
         frm_detalle_c_cont.pack(fill="both", expand=True, padx=10, pady=(0,10))
         
-        self.tree_detalle_c = ttk.Treeview(frm_detalle_c_cont, columns=cols_d, show="headings", height=8, style="Modern.Treeview")
+        self.tree_detalle_c = ttk.Treeview(frm_detalle_c_cont, columns=cols_d, show="headings", height=4, style="Modern.Treeview")
         ys_detalle_c = ctk.CTkScrollbar(frm_detalle_c_cont, command=self.tree_detalle_c.yview)
         ys_detalle_c.pack(side="right", fill="y")
         try:
@@ -1289,7 +1340,7 @@ class Historiales:
         frm_pagos_cont = ctk.CTkFrame(self.bg_pagos, fg_color="transparent")
         frm_pagos_cont.pack(fill="both", expand=True, padx=10, pady=5)
         
-        self.tree_pagos = ttk.Treeview(frm_pagos_cont, columns=cols, show="headings", height=15, style="Modern.Treeview")
+        self.tree_pagos = ttk.Treeview(frm_pagos_cont, columns=cols, show="headings", height=10, style="Modern.Treeview")
         ys_pagos = ctk.CTkScrollbar(frm_pagos_cont, command=self.tree_pagos.yview)
         ys_pagos.pack(side="right", fill="y")
         try:
@@ -1454,11 +1505,16 @@ class Historiales:
         self.cb_filtro_rapido_cj.grid(row=0, column=7, padx=3, sticky="ew")
 
         # 4.5. Selector Tipo de Caja
-        ctk.CTkLabel(frm, text="Caja:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
+        self.lbl_tipo_caja = ctk.CTkLabel(frm, text="Caja:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary"))
+        self.lbl_tipo_caja.grid(row=0, column=8, padx=(10, 3), sticky="e")
         self.cb_tipo_caja = ctk.CTkOptionMenu(frm, values=["Ambas", "Cajas de turno", "Tesorería"], width=130,
                                               fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        self.cb_tipo_caja.set("Ambas")
+        self.cb_tipo_caja.set("Cajas de turno" if self.usuario.get('id_rol') == 2 else "Ambas")
         self.cb_tipo_caja.grid(row=0, column=9, padx=3, sticky="ew")
+        
+        if self.usuario.get('id_rol') == 2:
+            self.lbl_tipo_caja.grid_remove()
+            self.cb_tipo_caja.grid_remove()
 
         # 5. Selector Usuario (Refactored to Advanced Search with Lupa for consistency)
         ctk.CTkLabel(frm, text="Usuario:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=10, padx=(10, 3), sticky="e")
@@ -1496,7 +1552,7 @@ class Historiales:
         frm_caja_cont = ctk.CTkFrame(self.bg_caja, fg_color="transparent")
         frm_caja_cont.pack(fill="both", expand=True, padx=10, pady=10)
         
-        self.tree_caja = ttk.Treeview(frm_caja_cont, columns=cols, show="headings", height=10, style="Modern.Treeview")
+        self.tree_caja = ttk.Treeview(frm_caja_cont, columns=cols, show="headings", height=7, style="Modern.Treeview")
         ys_caja = ctk.CTkScrollbar(frm_caja_cont, command=self.tree_caja.yview)
         ys_caja.pack(side="right", fill="y")
         try:

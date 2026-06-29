@@ -3,11 +3,14 @@
 -- Versión: 3.1 - INTEGRACIÓN id_session EN Venta
 -- =========================================================
 
+SET FOREIGN_KEY_CHECKS=0;
+
 CREATE DATABASE IF NOT EXISTS supermercado_don_atilio
 CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 
 USE supermercado_don_atilio;
+
 
 -- =========================================================
 -- 1) Seguridad / Usuarios / Roles
@@ -481,3 +484,5 @@ FROM Cliente c
 JOIN CuentaCorriente cc ON c.id_cliente = cc.id_cliente
 WHERE cc.saldo < 0 AND c.activo = 1
 ORDER BY cc.saldo ASC;
+
+SET FOREIGN_KEY_CHECKS=1;

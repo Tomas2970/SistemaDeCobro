@@ -244,6 +244,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     actions.pack(fill="x", side="bottom", padx=15, pady=(5, 15)) 
     
     def limpiar():
+        var_token.set("")
         var_id.set(""); var_nombre.set(""); var_precio.set("0.00")
         var_stock.set("0"); var_stock_min.set("5"); var_cod.set("")
         var_es_pesable.set(False); chk_pesable.configure(state="normal") 
@@ -327,7 +328,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
             mostrar_toast_centrado(win, f"✅ Producto '{nombre}' guardado correctamente.")
             stock_events.notificar_cambio_stock()
             if res_id and var_asignar_prov.get(): abrir_popup_asignacion(res_id, nombre)
-            if es_creacion: limpiar()
+            limpiar()
             if callback_on_save: callback_on_save()
         except Exception as e: messagebox.showerror("Error", str(e), parent=win)
             

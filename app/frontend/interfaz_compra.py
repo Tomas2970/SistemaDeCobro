@@ -230,6 +230,7 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         entry.focus_set()
 
         def confirmar_y_saltar(e=None):
+            if not entry.winfo_exists(): return
             try:
                 val = float(entry.get().replace(",", "."))
                 if val < 0: raise ValueError
@@ -249,7 +250,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                             win.after(10, lambda: editar_celda(str(int(row_id) + 1), '#2'))
                 except: pass
             except:
-                entry.focus_set()
+                if entry.winfo_exists():
+                    entry.focus_set()
 
         entry.bind("<Return>", confirmar_y_saltar)
         entry.bind("<Tab>", confirmar_y_saltar)
@@ -364,7 +366,37 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         frm_btns = ctk.CTkFrame(dialog, fg_color="transparent")
         frm_btns.pack(fill="x", padx=40, pady=10)
 
-        def set_pago(tipo): seleccion["valor"] = tipo; dialog.destroy()
+        def set_pago(tipo): 
+            if tipo == "efectivo":
+                pedir_monto_parcial()
+            else:
+                seleccion["valor"] = (tipo, 0.0)
+                dialog.destroy()
+                
+        def pedir_monto_parcial():
+            frm_btns.pack_forget()
+            frm_parcial = ctk.CTkFrame(dialog, fg_color="transparent")
+            frm_parcial.pack(fill="x", padx=40, pady=10)
+            
+            ctk.CTkLabel(frm_parcial, text="¿Cuánto va a abonar en efectivo?", font=("Segoe UI", 14), text_color=col_text).pack(pady=5)
+            ent_monto = ctk.CTkEntry(frm_parcial, font=("Segoe UI", 16), justify="center")
+            ent_monto.pack(fill="x", pady=10)
+            ent_monto.insert(0, str(total_pago))
+            ent_monto.focus_set()
+            
+            def confirmar_parcial(event=None):
+                try:
+                    m = float(ent_monto.get().replace(',', '.'))
+                    if m < 0: raise ValueError
+                    seleccion["valor"] = ("efectivo", m)
+                    dialog.destroy()
+                except ValueError:
+                    messagebox.showerror("Error", "Ingrese un monto válido", parent=dialog)
+            
+            ent_monto.bind("<Return>", confirmar_parcial)
+            ctk.CTkButton(frm_parcial, text="Confirmar", command=confirmar_parcial, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 14, "bold"), height=40).pack(pady=10, fill="x")
+            
+            btn_cancel.configure(text="Volver", command=lambda: [frm_parcial.pack_forget(), frm_btns.pack(fill="x", padx=40, pady=10), btn_cancel.configure(text="Cancelar", command=dialog.destroy)])
 
         opts = [("💵 Efectivo", "efectivo", "#dcfce7", "#065f46", "#bbf7d0"), 
                 ("🏦 Transferencia/Tarjeta", "transferencia", "#dbeafe", "#1e3a8a", "#bfdbfe"),
@@ -373,7 +405,8 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         for txt, val, bgc, fgc, hov in opts:
             ctk.CTkButton(frm_btns, text=txt, fg_color=bgc, hover_color=hov, text_color=fgc, command=lambda v=val: set_pago(v), font=("Segoe UI", 14, "bold"), height=45).pack(pady=5, fill="x")
 
-        ctk.CTkButton(dialog, text="Cancelar", command=dialog.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), height=40).pack(pady=15)
+        btn_cancel = ctk.CTkButton(dialog, text="Cancelar", command=dialog.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), height=40)
+        btn_cancel.pack(pady=15)
         win.wait_window(dialog); return seleccion["valor"]
 
     def _pedir_revision_precios(items_con_cambio: list[dict]) -> list[int]:
@@ -404,7 +437,7 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         # Encabezado
         hdr = ctk.CTkFrame(frm_tabla, fg_color="#1e3a8a", corner_radius=6)
         hdr.pack(fill="x", padx=8, pady=(8, 4))
-        for txt, w in [("✓", 40), ("Producto", 280), ("Precio Actual", 140), ("Precio Nuevo", 140), ("Δ", 80)]:
+        for txt, w in [("✓", 40), ("Producto", 220), ("Precio Actual", 110), ("Precio Nuevo", 110), ("Δ", 70)]:
             ctk.CTkLabel(hdr, text=txt, font=("Segoe UI", 11, "bold"),
                          text_color="white", width=w, anchor="w").pack(side="left", padx=4, pady=6)
 
@@ -426,16 +459,16 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
             ctk.CTkCheckBox(fila, text="", variable=var, width=40,
                              fg_color="#10b981", hover_color="#059669").pack(side="left", padx=4)
             ctk.CTkLabel(fila, text=it['nombre'], font=("Segoe UI", 12),
-                          text_color=col_text, width=280, anchor="w").pack(side="left", padx=4)
+                          text_color=col_text, width=220, anchor="w").pack(side="left", padx=4)
             ctk.CTkLabel(fila, text=f"$ {it['precio_actual']:,.2f}",
                           font=("Segoe UI", 12), text_color="#9ca3af",
-                          width=140, anchor="e").pack(side="left", padx=4)
+                          width=110, anchor="e").pack(side="left", padx=4)
             ctk.CTkLabel(fila, text=f"$ {it['precio_venta']:,.2f}",
                           font=("Segoe UI", 12, "bold"), text_color=col_text,
-                          width=140, anchor="e").pack(side="left", padx=4)
+                          width=110, anchor="e").pack(side="left", padx=4)
             ctk.CTkLabel(fila, text=f"{signo}{delta:,.2f}",
                           font=("Segoe UI", 11, "bold"), text_color=color_delta,
-                          width=80, anchor="e").pack(side="left", padx=4)
+                          width=70, anchor="e").pack(side="left", padx=4)
 
         resultado = {"ids": []}
 
@@ -481,23 +514,34 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
         if not proveedor_sel or not carrito: 
             messagebox.showwarning("Aviso", "Añada productos al carrito antes de confirmar.", parent=win)
             return
-        medio = pedir_medio_pago()
-        if not medio: return
+        res_pago = pedir_medio_pago()
+        if not res_pago: return
+        medio, monto_ef = res_pago
+        
         try:
-            id_compra = backend.insertar_compra(
+            res = backend.registrar_compra_mixta(
                 usuario['id_usuario'],
                 proveedor_sel['id_proveedor'],
                 carrito,
-                medio_pago=medio,
+                medio_real=medio,
+                monto_efectivo=monto_ef,
                 usuario_actual=usuario
             )
+            
+            id_compra = res.get("id_compra")
+            pago_exitoso = res.get("pago_exitoso")
+            mensaje_error = res.get("mensaje_error_pago")
+            
             if id_compra:
                 # Construir lista de productos con cambio de precio para revisión
                 items_revision = []
                 for item in carrito:
                     try:
                         prod = backend.buscar_producto_por_id(item['id'])
-                        precio_actual = float(prod.get('precio_venta', 0.0)) if prod else 0.0
+                        if prod:
+                            precio_actual = float(prod.get('precio_venta') or prod.get('precio') or 0.0)
+                        else:
+                            precio_actual = 0.0
                     except Exception:
                         precio_actual = 0.0
                     precio_nuevo = round(item['precio_venta'], 2)
@@ -517,24 +561,32 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
                     if nuevo_precio is not None:
                         backend.actualizar_precio_producto(id_prod, nuevo_precio, id_usuario=usuario['id_usuario'])
 
-                messagebox.showinfo("Éxito", "Compra registrada correctamente.", parent=win)
+                if not pago_exitoso and mensaje_error:
+                    messagebox.showwarning("Pago Fallido", f"La compra se registró correctamente (Deuda), pero el pago falló:\n\n{mensaje_error}", parent=win)
+                else:
+                    messagebox.showinfo("Éxito", f"Compra #{id_compra} registrada correctamente.", parent=win)
+                
+                carrito.clear()
+                proveedor_sel.clear()
+                lbl_proveedor.configure(text="(Ninguno seleccionado)", text_color="#6b7280")
+                repintar_tabla()
                 stock_events.notificar_cambio_stock(); win.destroy()
+            else:
+                messagebox.showerror("Error", "No se pudo registrar la compra.", parent=win)
+                
         except PermissionError as pe:
             messagebox.showerror("Acceso Denegado", str(pe), parent=win)
         except ValueError as ve:
             if "CAJA_CERRADA" in str(ve) or "TESORERIA_CERRADA" in str(ve):
-                if usuario.get('id_rol') in (1, 3):
-                    pass # En roles administrativos esto no bloquea, auto-crea la tesorería
-                else:
-                    messagebox.showerror(
-                        "⚠️ Caja Cerrada", 
-                        "No se puede procesar la compra porque la caja está cerrada.\n\n"
-                        "Por favor, abra la caja antes de continuar.", 
-                        parent=win
-                    )
+                messagebox.showerror(
+                    "⚠️ Caja Cerrada", 
+                    "No se puede procesar el pago porque la caja está cerrada.\n\n"
+                    "Por favor, abra la caja antes de continuar.", 
+                    parent=win
+                )
             else:
                 messagebox.showerror("Error", str(ve), parent=win)
-        except Exception as e: 
+        except Exception as e:
             messagebox.showerror("Error", str(e), parent=win)
 
     win.bind("<F2>", lambda e: btn_add_prod.invoke())

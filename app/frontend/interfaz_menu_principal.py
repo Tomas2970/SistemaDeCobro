@@ -60,6 +60,10 @@ def _abrir_seguro(root, backend, usuario, fn, nombre, **kwargs):
     hijos_despues = set(root.winfo_children())
     for hijo in (hijos_despues - hijos_antes):
         if isinstance(hijo, (tk.Toplevel, ctk.CTkToplevel)):
+            try:
+                hijo.transient(root)
+            except Exception:
+                pass
             root._ventanas_modulos[nombre] = hijo
             break
 
@@ -100,6 +104,10 @@ def ui_menu_principal(parent, backend, usuario):
                 for ventana in win._ventanas_modulos.values():
                     if ventana and ventana.winfo_exists():
                         ventana.lift()
+                        try:
+                            ventana.focus_force()
+                        except Exception:
+                            pass
     win.bind("<FocusIn>", on_main_focus)
 
 
@@ -116,6 +124,20 @@ def ui_menu_principal(parent, backend, usuario):
     sidebar = ctk.CTkFrame(win, width=260, fg_color=color_sidebar, corner_radius=0)
     sidebar.pack(side="left", fill="y")
     sidebar.pack_propagate(False)
+
+    # Botón de cerrar sesión al fondo
+    def cerrar_sesion(*_):
+        caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
+        if caja_abierta:
+            mostrar_advertencia("Caja Abierta", "Debes cerrar tu caja antes de salir.")
+            return
+        if mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
+            stock_events.desuscribir(check_stock)
+            detener_polling_broadcast(win)
+            win.quit()
+
+    ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
+                  font=("Segoe UI", 13, "bold"), height=40, command=cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=30)
 
     ctk.CTkLabel(sidebar, text="🛒", font=("Segoe UI", 72), text_color="white").pack(pady=(40, 5))
     ctk.CTkLabel(sidebar, text="Sistema de Cobros", font=("Segoe UI", 18, "bold"), text_color="white").pack()
@@ -165,20 +187,6 @@ def ui_menu_principal(parent, backend, usuario):
     stock_events.suscribir(check_stock)
     check_stock()
     
-    def cerrar_sesion(*_):
-        caja_abierta = backend.obtener_session_abierta(id_usuario=usuario['id_usuario'])
-        if caja_abierta:
-            mostrar_advertencia("Caja Abierta", "Debes cerrar tu caja antes de salir.")
-            return
-        if mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
-            stock_events.desuscribir(check_stock)
-            detener_polling_broadcast(win)
-            win.quit()
-
-    ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
-                  font=("Segoe UI", 13, "bold"), height=40, command=cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=30)
-
-
     # ==========================================
     # MAIN AREA (Panel Derecho)
     # ==========================================
@@ -256,11 +264,22 @@ def ui_menu_principal(parent, backend, usuario):
                     rol_modificado = user_db.get('id_rol') != usuario.get('id_rol')
                     cuenta_desactivada = user_db.get('activo', 1) == 0
                     
-                    if rol_modificado or cuenta_desactivada:
+                    token_db = user_db.get('token_sesion')
+                    token_local = usuario.get('token_sesion')
+                    sesion_invalida = (token_local and token_db != token_local)
+                    
+                    if rol_modificado or cuenta_desactivada or sesion_invalida:
                         stock_events.desuscribir(check_stock)
+                        if rol_modificado:
+                            mensaje = "Tu rol fue modificado por un administrador. Por favor iniciá sesión nuevamente."
+                        elif cuenta_desactivada:
+                            mensaje = "Tu cuenta fue desactivada. Por favor contactá a un administrador."
+                        else:
+                            mensaje = "Tu sesión ha expirado o iniciaste sesión en otro dispositivo."
+                        
                         mostrar_advertencia(
                             "Sesión Expirada", 
-                            "Tus permisos han sido modificados o tu cuenta fue desactivada.\nPor seguridad, debes iniciar sesión nuevamente.",
+                            mensaje,
                             parent=win
                         )
                         win.quit()

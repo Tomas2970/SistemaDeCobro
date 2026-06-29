@@ -5,6 +5,10 @@ import bcrypt
 import mysql.connector 
 from typing import Optional
 
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
+
 # ==========================================
 # CONFIGURACIÓN DE CONEXIÓN
 # ==========================================
@@ -153,10 +157,10 @@ def ensure_categorias(cur) -> None:
             cur.execute(
                 """
                 INSERT INTO Categoria 
-                (id_categoria, nombre, margen_ganancia, activa) 
-                VALUES (%s, %s, %s, 1)
+                (nombre, margen_ganancia, activa) 
+                VALUES (%s, %s, 1)
                 """,
-                (cat_id, nombre, margen)
+                (nombre, margen)
             )
             print(f"   ✓ {nombre} (margen: {margen}%)")
             categorias_insertadas += 1

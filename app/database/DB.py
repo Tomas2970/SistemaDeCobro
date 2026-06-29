@@ -4,7 +4,8 @@ import os
 import logging 
 from typing import Any, Optional
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+import pytz
 
 import bcrypt
 import mysql.connector
@@ -162,7 +163,7 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            "SELECT id_usuario, nombre, contraseña, id_rol, activo FROM Usuario WHERE nombre=%s",
+            "SELECT id_usuario, nombre, contraseña, id_rol, activo, token_sesion, token_timestamp FROM Usuario WHERE nombre=%s",
             (usuario,),
         )
         row = cur.fetchone()
@@ -170,21 +171,28 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
         if not row or not row["activo"]:
             return None
             
+        if row.get("token_sesion"):
+            from datetime import datetime
+            if row.get("token_timestamp"):
+                time_diff = datetime.now() - row["token_timestamp"]
+                if time_diff.total_seconds() < 12 * 3600:
+                    return {"error": "SESION_ACTIVA"}
+            
         hashed = row["contraseña"].encode("utf-8")
         
         if bcrypt.checkpw(contraseña.encode("utf-8"), hashed):
-            # 🔥 CORRECCIÓN: Registramos el acceso en la base de datos
+            import uuid
+            nuevo_token = str(uuid.uuid4())
             try:
                 cur.execute(
-                    "UPDATE Usuario SET ultimo_acceso = NOW() WHERE id_usuario = %s",
-                    (row["id_usuario"],)
+                    "UPDATE Usuario SET ultimo_acceso = NOW(), token_sesion = %s, token_timestamp = NOW() WHERE id_usuario = %s",
+                    (nuevo_token, row["id_usuario"])
                 )
                 conn.commit()
             except Exception as e_upd:
-                logger.error(f"Error actualizando ultimo_acceso: {e_upd}")
-                # No retornamos None acá para que el usuario pueda entrar igual aunque falle la fecha
+                logger.error(f"Error actualizando ultimo_acceso y token: {e_upd}")
 
-            return {"id_usuario": row["id_usuario"], "nombre": row["nombre"], "id_rol": row["id_rol"]}
+            return {"id_usuario": row["id_usuario"], "nombre": row["nombre"], "id_rol": row["id_rol"], "token_sesion": nuevo_token}
             
         return None
         
@@ -197,6 +205,28 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
             if conn: conn.close()
         except Exception:
             pass
+
+def cerrar_sesion_usuario(id_usuario: int) -> bool:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor()
+        cur.execute("UPDATE Usuario SET token_sesion = NULL, token_timestamp = NULL WHERE id_usuario = %s", (id_usuario,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"cerrar_sesion_usuario: {e}")
+        return False
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+def forzar_cierre_sesion(id_usuario: int) -> bool:
+    return cerrar_sesion_usuario(id_usuario)
+
 # ======================================================
 # CLIENTES
 # ======================================================
@@ -1312,24 +1342,15 @@ def registrar_pago_proveedor(id_proveedor: int, monto: float, medio_pago: str, i
             
             # 🔥 VALIDAR SALDO SUFICIENTE
             if saldo_caja_actual < monto:
-                if tipo_caja == 'administrativa':
-                    logger.warning(f"Tesoreria queda en saldo negativo: {saldo_caja_actual - monto}")
-                    cur.execute(
-                        "INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, datos_anteriores, datos_nuevos) VALUES (%s, %s, %s, %s, %s)",
-                        (id_usuario, "TESORERIA_SALDO_NEGATIVO", "caja_session", 
-                         json.dumps({"saldo_anterior": saldo_caja_actual, "monto_movimiento": monto}),
-                         json.dumps({"saldo_resultante": saldo_caja_actual - monto}))
-                    )
-                else:
-                    raise ValueError(
-                        f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
-                        f"Disponible: ${saldo_caja_actual:,.2f}\n"
-                        f"Intentas pagar: ${monto:,.2f}\n"
-                        f"Faltante: ${(monto - saldo_caja_actual):,.2f}\n\n"
-                        f"💡 Opciones:\n"
-                        f"• Paga con Transferencia o Cheque\n"
-                        f"• Realiza pagos parciales"
-                    )
+                raise ValueError(
+                    f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
+                    f"Disponible: ${saldo_caja_actual:,.2f}\n"
+                    f"Intentas pagar: ${monto:,.2f}\n"
+                    f"Faltante: ${(monto - saldo_caja_actual):,.2f}\n\n"
+                    f"💡 Opciones:\n"
+                    f"• Paga con Transferencia o Cheque\n"
+                    f"• Realiza pagos parciales"
+                )
 
         # 2. Guardar el Registro del Pago (Historial)
         cur.execute(
@@ -1735,25 +1756,16 @@ def registrar_compra(id_usuario: int, id_proveedor: int, items: list[dict], medi
             
             # 🔥 VALIDAR SALDO SUFICIENTE
             if saldo_caja_actual < total_compra_estimado:
-                if tipo_caja == 'administrativa':
-                    logger.warning(f"Tesoreria queda en saldo negativo: {saldo_caja_actual - total_compra_estimado}")
-                    cur.execute(
-                        "INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, datos_anteriores, datos_nuevos) VALUES (%s, %s, %s, %s, %s)",
-                        (id_usuario, "TESORERIA_SALDO_NEGATIVO", "caja_session", 
-                         json.dumps({"saldo_anterior": saldo_caja_actual, "monto_movimiento": total_compra_estimado}),
-                         json.dumps({"saldo_resultante": saldo_caja_actual - total_compra_estimado}))
-                    )
-                else:
-                    raise ValueError(
-                        f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
-                        f"Disponible: ${saldo_caja_actual:,.2f}\n"
-                        f"Total compra: ${total_compra_estimado:,.2f}\n"
-                        f"Faltante: ${(total_compra_estimado - saldo_caja_actual):,.2f}\n\n"
-                        f"💡 Opciones:\n"
-                        f"• Paga con Transferencia o Tarjeta\n"
-                        f"• Usa Cuenta Corriente\n"
-                        f"• Realiza un depósito en caja"
-                    )
+                raise ValueError(
+                    f"❌ SALDO INSUFICIENTE EN CAJA\n\n"
+                    f"Disponible: ${saldo_caja_actual:,.2f}\n"
+                    f"Total compra: ${total_compra_estimado:,.2f}\n"
+                    f"Faltante: ${(total_compra_estimado - saldo_caja_actual):,.2f}\n\n"
+                    f"💡 Opciones:\n"
+                    f"• Paga con Transferencia o Tarjeta\n"
+                    f"• Usa Cuenta Corriente\n"
+                    f"• Realiza un depósito en caja"
+                )
 
         # Insertar la compra
         cur.execute("INSERT INTO Compra (id_usuario, id_proveedor, estado, medio_pago) VALUES (%s, %s, 'recibida', %s)", (id_usuario, id_proveedor, medio_pago))
@@ -2926,6 +2938,7 @@ def obtener_usuario_por_id(id_usuario: int) -> Optional[dict]:
                 u.activo, 
                 u.fecha_creacion, 
                 u.ultimo_acceso,
+                u.token_sesion,
                 r.nombre AS rol_nombre 
             FROM Usuario u 
             LEFT JOIN Rol r ON u.id_rol = r.id_rol 
@@ -3039,14 +3052,24 @@ def actualizar_rol_usuario(id_usuario: int, id_rol_nuevo: int, nuevo_nombre: str
         
         cur.execute("SELECT id_rol FROM Usuario WHERE id_usuario = %s", (id_usuario,))
         row = cur.fetchone()
-        if row and row[0] == 1 and int(id_rol_nuevo) != 1:
+        id_rol_actual = row[0] if row else None
+        
+        if id_rol_actual == 1 and int(id_rol_nuevo) != 1:
             if obtener_cantidad_administradores_activos() <= 1:
                 raise ValueError("No se puede cambiar el rol del último administrador del sistema.")
                 
+        rol_modificado = (id_rol_actual is not None) and (int(id_rol_actual) != int(id_rol_nuevo))
+                
         if nuevo_nombre is not None:
-            cur.execute("UPDATE Usuario SET id_rol=%s, nombre=%s, codigo_barras=%s WHERE id_usuario=%s", (id_rol_nuevo, nuevo_nombre.strip(), codigo_barras, id_usuario))
+            if rol_modificado:
+                cur.execute("UPDATE Usuario SET id_rol=%s, nombre=%s, codigo_barras=%s, token_sesion=NULL, token_timestamp=NULL WHERE id_usuario=%s", (id_rol_nuevo, nuevo_nombre.strip(), codigo_barras, id_usuario))
+            else:
+                cur.execute("UPDATE Usuario SET id_rol=%s, nombre=%s, codigo_barras=%s WHERE id_usuario=%s", (id_rol_nuevo, nuevo_nombre.strip(), codigo_barras, id_usuario))
         else:
-            cur.execute("UPDATE Usuario SET id_rol=%s, codigo_barras=%s WHERE id_usuario=%s", (id_rol_nuevo, codigo_barras, id_usuario))
+            if rol_modificado:
+                cur.execute("UPDATE Usuario SET id_rol=%s, codigo_barras=%s, token_sesion=NULL, token_timestamp=NULL WHERE id_usuario=%s", (id_rol_nuevo, codigo_barras, id_usuario))
+            else:
+                cur.execute("UPDATE Usuario SET id_rol=%s, codigo_barras=%s WHERE id_usuario=%s", (id_rol_nuevo, codigo_barras, id_usuario))
         conn.commit()
         return cur.rowcount > 0
     except ValueError:
@@ -3354,13 +3377,28 @@ def obtener_session_activa() -> dict | None:
         if cur: cur.close()
         if conn: conn.close()
 
+def obtener_session_por_id(id_session: int) -> dict | None:
+    """Retorna una sesión de caja por su ID."""
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM caja_session WHERE id_session = %s", (id_session,))
+        return cur.fetchone()
+    except Exception as e:
+        logger.error(f"Error obtener_session_por_id: {e}")
+        return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
 def obtener_tesoreria_activa() -> dict | None:
     """Retorna la sesión de Tesorería abierta (máximo 1)."""
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM caja_session WHERE tipo_caja = 'tesoreria' AND estado = 'abierta' LIMIT 1")
+        cur.execute("SELECT * FROM caja_session WHERE tipo_caja = 'administrativa' AND estado = 'abierta' LIMIT 1")
         return cur.fetchone()
     except Exception as e:
         logger.error(f"Error tesorería activa: {e}"); return None
@@ -3372,13 +3410,15 @@ def abrir_caja_session(id_usuario: int, monto_inicial: float, tipo_caja: str = '
     """Abre una nueva sesión de caja (Ventas o Tesorería)."""
     if monto_inicial < 0:
         raise ValueError("El monto inicial no puede ser negativo.")
+    if tipo_caja == 'tesoreria':
+        tipo_caja = 'administrativa'
 
     conn = cur = None
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         
-        if tipo_caja == 'tesoreria':
+        if tipo_caja == 'administrativa':
             # Validar que no haya ninguna tesorería abierta (sin importar fecha)
             tesoreria = _obtener_tesoreria_activa(cur)
             if tesoreria:
@@ -3425,6 +3465,25 @@ def registrar_movimiento_manual(id_session: int, tipo: str, monto: float, motivo
     try:
         conn = conectar()
         cur = conn.cursor()
+        
+        if tipo == 'egreso':
+            # Validar saldo disponible de efectivo
+            cur.execute("SELECT monto_apertura FROM caja_session WHERE id_session = %s", (id_session,))
+            row_caja = cur.fetchone()
+            if not row_caja:
+                raise ValueError("Caja no existe.")
+                
+            cur.execute("""
+                SELECT SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE -monto END)
+                FROM caja_movimiento
+                WHERE id_session = %s AND medio = 'efectivo' AND motivo != 'apertura_caja'
+            """, (id_session,))
+            row_movs = cur.fetchone()
+            
+            saldo_actual = float(row_caja[0] or 0.0) + float(row_movs[0] or 0.0)
+            if monto > saldo_actual:
+                raise ValueError(f"Saldo insuficiente para el retiro. Disponible: ${saldo_actual:,.2f}")
+
         cur.execute(
             """
             INSERT INTO caja_movimiento (id_session, tipo, monto, medio, motivo, id_usuario, descripcion)
@@ -3914,12 +3973,16 @@ def obtener_sesiones_abiertas_con_totales(tipo_caja: str = None) -> list[dict]:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         
+        tz_ar = pytz.timezone('America/Argentina/Buenos_Aires')
+        ahora = datetime.now(tz_ar)
+        inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+
         # Auto-cerrar tesorerías de días anteriores (Cierre automático)
         cur.execute("""
             UPDATE caja_session 
             SET estado='cerrada', fecha_cierre=NOW(), observaciones_cierre='Cierre automático por cambio de día' 
-            WHERE estado='abierta' AND tipo_caja='administrativa' AND DATE(fecha_apertura) < CURDATE()
-        """)
+            WHERE estado='abierta' AND tipo_caja='administrativa' AND fecha_apertura < %s
+        """, (inicio_dia,))
         
         query = '''
             SELECT 
@@ -3961,20 +4024,25 @@ def obtener_kpis_admin() -> dict:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
         
+        tz_ar = pytz.timezone('America/Argentina/Buenos_Aires')
+        ahora = datetime.now(tz_ar)
+        inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+        fin_dia = inicio_dia + timedelta(days=1)
+        
         # 1. Ventas Totales del Día
         cur.execute("""
             SELECT COALESCE(SUM(total), 0) as ventas_dia, COUNT(*) as tickets 
             FROM Venta 
-            WHERE DATE(fecha) = CURDATE() AND estado = 'completada'
-        """)
+            WHERE fecha >= %s AND fecha < %s AND estado = 'completada'
+        """, (inicio_dia, fin_dia))
         ventas_data = cur.fetchone() or {'ventas_dia': 0.0, 'tickets': 0}
         
         # 2. Efectivo Total Sucursal del Día (Todas las sesiones)
         cur.execute("""
             SELECT COALESCE(SUM(monto_apertura), 0) as total_apertura 
             FROM caja_session 
-            WHERE DATE(fecha_apertura) = CURDATE()
-        """)
+            WHERE fecha_apertura >= %s AND fecha_apertura < %s
+        """, (inicio_dia, fin_dia))
         row_apertura = cur.fetchone()
         monto_apertura = float(row_apertura['total_apertura']) if row_apertura else 0.0
         
@@ -3983,8 +4051,8 @@ def obtener_kpis_admin() -> dict:
                 COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) as ingresos,
                 COALESCE(SUM(CASE WHEN tipo = 'egreso' THEN monto ELSE 0 END), 0) as egresos
             FROM caja_movimiento
-            WHERE DATE(fecha_hora) = CURDATE() AND medio = 'efectivo' AND motivo != 'apertura_caja'
-        """)
+            WHERE fecha_hora >= %s AND fecha_hora < %s AND medio = 'efectivo' AND motivo != 'apertura_caja'
+        """, (inicio_dia, fin_dia))
         movs = cur.fetchone() or {'ingresos': 0.0, 'egresos': 0.0}
         ingresos = float(movs['ingresos'])
         egresos = float(movs['egresos'])
@@ -4011,17 +4079,22 @@ def obtener_usuarios_actividad_hoy() -> list[dict]:
     try:
         conn = conectar()
         cur = conn.cursor(dictionary=True)
+        tz_ar = pytz.timezone('America/Argentina/Buenos_Aires')
+        ahora = datetime.now(tz_ar)
+        inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+        fin_dia = inicio_dia + timedelta(days=1)
+
         sql = """
             SELECT DISTINCT u.id_usuario, u.nombre
             FROM (
-                SELECT id_usuario FROM caja_movimiento WHERE DATE(fecha_hora) = CURDATE() AND id_usuario IS NOT NULL
+                SELECT id_usuario FROM caja_movimiento WHERE fecha_hora >= %s AND fecha_hora < %s AND id_usuario IS NOT NULL
                 UNION
-                SELECT id_usuario_cierre AS id_usuario FROM caja_session WHERE DATE(fecha_cierre) = CURDATE() AND id_usuario_cierre IS NOT NULL
+                SELECT id_usuario_cierre AS id_usuario FROM caja_session WHERE fecha_cierre >= %s AND fecha_cierre < %s AND id_usuario_cierre IS NOT NULL
             ) AS activos
             JOIN Usuario u ON activos.id_usuario = u.id_usuario
             ORDER BY u.nombre
         """
-        cur.execute(sql)
+        cur.execute(sql, (inicio_dia, fin_dia, inicio_dia, fin_dia))
         return list(cur.fetchall() or [])
     except Exception as e:
         logger.error(f"obtener_usuarios_actividad_hoy: {e}")
@@ -4045,6 +4118,11 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
             sql_cond_cm = " AND cm.id_usuario = %s"
             sql_cond_cs = " AND cs.id_usuario_cierre = %s"
 
+        tz_ar = pytz.timezone('America/Argentina/Buenos_Aires')
+        ahora = datetime.now(tz_ar)
+        inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+        fin_dia = inicio_dia + timedelta(days=1)
+
         sql = f"""
             SELECT 
                 cm.fecha_hora,
@@ -4060,7 +4138,7 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
                 'venta_efectivo', 'venta_tarjeta', 'venta_transferencia', 'venta_cuenta_corriente',
                 'retiro_caja', 
                 'devolucion_efectivo', 'ajuste_negativo'
-            ) AND DATE(cm.fecha_hora) = CURDATE(){sql_cond_cm}
+            ) AND cm.fecha_hora >= %s AND cm.fecha_hora < %s{sql_cond_cm}
             UNION ALL
             SELECT
                 cs.fecha_cierre as fecha_hora,
@@ -4071,14 +4149,14 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
                 'cierre' as origen
             FROM caja_session cs
             LEFT JOIN Usuario u ON cs.id_usuario_cierre = u.id_usuario
-            WHERE cs.fecha_cierre IS NOT NULL AND DATE(cs.fecha_cierre) = CURDATE(){sql_cond_cs}
+            WHERE cs.fecha_cierre IS NOT NULL AND cs.fecha_cierre >= %s AND cs.fecha_cierre < %s{sql_cond_cs}
             ORDER BY fecha_hora DESC
             LIMIT %s
         """
         if id_usuario is not None:
-            cur.execute(sql, (id_usuario, id_usuario, limit))
+            cur.execute(sql, (inicio_dia, fin_dia, id_usuario, inicio_dia, fin_dia, id_usuario, limit))
         else:
-            cur.execute(sql, (limit,))
+            cur.execute(sql, (inicio_dia, fin_dia, inicio_dia, fin_dia, limit))
         filas = cur.fetchall() or []
         
         eventos = []

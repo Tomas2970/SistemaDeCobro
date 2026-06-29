@@ -196,6 +196,23 @@ def ui_gestion_usuarios(parent: tk.Misc, backend, usuario_actual: dict = None):
 
     ctk.CTkButton(frame_botones, text="🗑️ Desactivar", command=accion_desactivar, fg_color="#dc2626", hover_color="#b91c1c", font=("Segoe UI", 12, "bold"), width=130, height=45).pack(side=tk.LEFT, padx=5)
     
+    def accion_forzar_cierre():
+        sel = tree.selection()
+        if not sel: 
+            messagebox.showwarning("Atención", "Seleccione un usuario.", parent=win)
+            return
+        item = tree.item(sel[0], "values")
+        if messagebox.askyesno("Confirmar", f"¿Forzar el cierre de sesión del usuario {item[1]}?", parent=win):
+            try:
+                if backend.forzar_cierre_sesion(int(item[0])):
+                    messagebox.showinfo("Éxito", "Sesión cerrada correctamente.", parent=win)
+                else:
+                    messagebox.showerror("Error", "No se pudo cerrar la sesión.", parent=win)
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=win)
+
+    ctk.CTkButton(frame_botones, text="🔓 Forzar Cierre", command=accion_forzar_cierre, fg_color="#f59e0b", hover_color="#d97706", font=("Segoe UI", 12, "bold"), width=130, height=45).pack(side=tk.LEFT, padx=5)
+    
     # CHECKBOX Y CERRAR
     ctk.CTkCheckBox(frame_botones, text="Inactivos", variable=var_mostrar_inactivos, font=("Segoe UI", 11), command=cargar_datos, width=100).pack(side=tk.LEFT, padx=10)
     

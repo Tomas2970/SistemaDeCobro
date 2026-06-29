@@ -125,7 +125,7 @@ class InterfazTesoreria:
         monto = float(monto_str)
 
         try:
-            if self.backend.abrir_caja_session(self.usuario['id_usuario'], monto, tipo_caja='tesoreria'):
+            if self.backend.abrir_caja_session(self.usuario['id_usuario'], monto, tipo_caja='administrativa'):
                 messagebox.mostrar_exito("Éxito", "Tesorería abierta correctamente.", parent=self.win)
                 self.actualizar_estado()
             else:

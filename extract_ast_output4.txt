@@ -1,0 +1,13 @@
+--- obtener_roles in app/database/DB.py ---
+def obtener_roles() -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT id_rol, nombre FROM Rol ORDER BY nombre")
+        return list(cur.fetchall() or [])
+    except Exception: return []
+    finally: 
+        if cur: cur.close() 
+        if conn: conn.close()
+

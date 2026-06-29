@@ -494,7 +494,9 @@ def registrar_validadores_teclado_ctk(entry_ctk, tipo_validacion: str, ventana) 
     mapa = {
         'dni':             ValidadoresTeclado.dni,
         'cuit':            ValidadoresTeclado.cuit,
+        'cuit_obligatorio':ValidadoresTeclado.cuit,
         'telefono':        ValidadoresTeclado.telefono,
+        'telefono_obligatorio': ValidadoresTeclado.telefono,
         'solo_numeros':    ValidadoresTeclado.solo_numeros,
         'solo_letras':     ValidadoresTeclado.solo_letras,
         'letras_y_numeros':ValidadoresTeclado.letras_y_numeros,
@@ -502,6 +504,7 @@ def registrar_validadores_teclado_ctk(entry_ctk, tipo_validacion: str, ventana) 
         'monto':           ValidadoresTeclado.decimal,
         'email':           ValidadoresTeclado.email,
         'nombre':          ValidadoresTeclado.solo_letras,
+        'nombre_empresa':  None, # Sin restricción de teclado, validación visual
     }
     validador = mapa.get(tipo_validacion)
     if validador:

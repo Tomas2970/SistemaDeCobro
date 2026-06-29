@@ -91,65 +91,32 @@ if not MODO_SEED:
 # 🌱 FUNCIÓN DE SEED (Usada solo por el instalador)
 # =========================================================
 def seed_database():
-    """Ejecuta la carga de datos iniciales (roles, admin, categorías)"""
+    """Ejecuta la carga demo completa usada por el instalador."""
     print("\n" + "="*70)
-    print("  🌱 CARGA DE DATOS INICIALES - Sistema Don Atilio")
+    print("  CARGA DEMO COMPLETA - Sistema Don Atilio")
     print("="*70 + "\n")
-    
+
     try:
-        import bcrypt
-        import mysql.connector
-        from dotenv import load_dotenv
-        
-        load_dotenv()
-        DB_HOST = os.getenv("DB_HOST", "localhost")
-        DB_PORT = int(os.getenv("DB_PORT", "3307"))
-        DB_USER = os.getenv("DB_USER", "root")
-        DB_PASSWORD = os.getenv("DB_PASSWORD", "")
-        DB_NAME = os.getenv("DB_NAME", "supermercado_don_atilio")
-        
-        print(f"📡 Conectando a {DB_HOST}:{DB_PORT}...")
-        
-        conn = mysql.connector.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, database=DB_NAME,
-            autocommit=False
-        )
-        cur = conn.cursor(buffered=True)
-        
-        # 1. Roles
-        print("📋 Cargando roles...")
-        cur.execute("INSERT IGNORE INTO Rol (id_rol, nombre, descripcion) VALUES (1, 'admin', 'Administrador'), (2, 'vendedor', 'Vendedor'), (3, 'supervisor', 'Supervisor')")
-        
-        # 2. Admin
-        print("👤 Verificando admin...")
-        cur.execute("SELECT 1 FROM Usuario WHERE nombre='admin'")
-        if not cur.fetchone():
-            hashed = bcrypt.hashpw("admin123".encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
-            cur.execute("INSERT INTO Usuario (nombre, contraseña, id_rol, activo) VALUES (%s, %s, 1, 1)", ("admin", hashed))
-            print("   ✓ Usuario 'admin' creado.")
-        
-        # 3. Categorías Básicas
-        print("🏷️ Cargando categorías...")
-        categorias = [
-            (1, 'Bebidas', 30.00), (2, 'Almacén', 30.00), (3, 'Lácteos', 25.00),
-            (4, 'Carnes', 35.00), (5, 'Limpieza', 30.00), (6, 'Panadería', 40.00),
-            (7, 'Congelados', 30.00), (8, 'Golosinas', 40.00), (9, 'Verdulería', 35.00),
-            (99, 'Varios', 30.00)
-        ]
-        for cid, nom, mar in categorias:
-            cur.execute(
-                "INSERT IGNORE INTO Categoria (id_categoria, nombre, margen_ganancia, activa) VALUES (%s, %s, %s, 1)",
-                (cid, nom, mar)
-            )
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("\n✅ Carga inicial exitosa.")
+        from app.tools.demo_seed import run_demo_seed
+
+        print("ADVERTENCIA: esta operacion limpia la base operativa y recrea datos demo.")
+        resumen = run_demo_seed()
+        print("\nCarga demo exitosa.")
+        print("\nResumen:")
+        for clave, valor in resumen.items():
+            print(f"   - {clave}: {valor}")
+        print("\nCredenciales demo:")
+        print("   - admin / admin123")
+        print("   - supervisor / super123")
+        print("   - lucia / lucia123")
+        print("   - martin / martin123")
+        print("   - sofia / sofia123")
         return True
-        
+
     except Exception as e:
-        print(f"\n❌ ERROR SEED: {e}")
+        print(f"\nERROR SEED DEMO: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # =========================================================
@@ -194,6 +161,14 @@ def run_app():
         # Dashboard Principal
         ui_menu_principal(parent=root_app, backend=backend, usuario=usuario)
         
+        # -------------------------------------------------------------
+        # AL CERRAR SESIÓN: Limpiar Token de Sesión Única
+        # -------------------------------------------------------------
+        try:
+            backend.cerrar_sesion_usuario(usuario['id_usuario'])
+        except Exception as e_sesion:
+            logging.error(f"Error limpiando token de sesión: {e_sesion}")
+
         # -------------------------------------------------------------
         # AL CERRAR SESIÓN: Lógica de Caja Abierta (RECUPERADA)
         # -------------------------------------------------------------

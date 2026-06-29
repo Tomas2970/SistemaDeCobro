@@ -208,6 +208,39 @@ def ejecutar_migraciones():
                 ) ENGINE=InnoDB
             """)
 
+        # 0g. mensajes_broadcast
+        cursor.execute("SHOW TABLES LIKE 'mensajes_broadcast'")
+        if not cursor.fetchone():
+            logger.info("🔧 Creando tabla mensajes_broadcast...")
+            _ejecutar_paso(cursor, "crear mensajes_broadcast", """
+                CREATE TABLE IF NOT EXISTS mensajes_broadcast (
+                    id_mensaje INT AUTO_INCREMENT PRIMARY KEY,
+                    contenido TEXT,
+                    id_admin INT,
+                    destinatario_tipo ENUM('todos', 'rol', 'usuario'),
+                    destinatario_id INT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    leido BOOLEAN DEFAULT FALSE,
+                    FOREIGN KEY (id_admin) REFERENCES Usuario(id_usuario) ON DELETE SET NULL
+                ) ENGINE=InnoDB
+            """)
+
+        # 0h. Proveedor_Producto
+        cursor.execute("SHOW TABLES LIKE 'Proveedor_Producto'")
+        if not cursor.fetchone():
+            logger.info("🔧 Creando tabla Proveedor_Producto...")
+            _ejecutar_paso(cursor, "crear Proveedor_Producto", """
+                CREATE TABLE IF NOT EXISTS Proveedor_Producto (
+                    id_proveedor INT NOT NULL,
+                    id_producto INT NOT NULL,
+                    PRIMARY KEY (id_proveedor, id_producto),
+                    CONSTRAINT fk_pp_proveedor
+                        FOREIGN KEY (id_proveedor) REFERENCES Proveedor(id_proveedor) ON DELETE CASCADE,
+                    CONSTRAINT fk_pp_producto
+                        FOREIGN KEY (id_producto) REFERENCES Producto(id_producto) ON DELETE CASCADE
+                ) ENGINE=InnoDB
+            """)
+
         conn.commit()
 
         # ============================================================
@@ -323,13 +356,18 @@ def ejecutar_migraciones():
         _ejecutar_paso(cursor, "crear idx_session_fecha_cierre", "CREATE INDEX idx_session_fecha_cierre ON caja_session (fecha_cierre)")
         _ejecutar_paso(cursor, "crear idx_auditoria_fecha", "CREATE INDEX idx_auditoria_fecha ON AuditoriaAcciones (fecha)")
 
-        # 10. USUARIO (codigo_barras)
+        # 10. USUARIO (codigo_barras, token_sesion, token_timestamp)
         cursor.execute("DESCRIBE Usuario")
         cols_usuario = [row[0] for row in cursor.fetchall()]
         if "codigo_barras" not in cols_usuario:
             logger.info("🔧 Migrando: Agregando codigo_barras a Usuario")
             _ejecutar_paso(cursor, "usuario.codigo_barras", "ALTER TABLE Usuario ADD COLUMN codigo_barras VARCHAR(100) UNIQUE NULL")
-
+        if "token_sesion" not in cols_usuario:
+            logger.info("🔧 Migrando: Agregando token_sesion a Usuario")
+            _ejecutar_paso(cursor, "usuario.token_sesion", "ALTER TABLE Usuario ADD COLUMN token_sesion VARCHAR(36) NULL")
+        if "token_timestamp" not in cols_usuario:
+            logger.info("🔧 Migrando: Agregando token_timestamp a Usuario")
+            _ejecutar_paso(cursor, "usuario.token_timestamp", "ALTER TABLE Usuario ADD COLUMN token_timestamp DATETIME NULL")
         conn.commit()
         logger.info("✅ Auto-migración completada exitosamente.")
 
