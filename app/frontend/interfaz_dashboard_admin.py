@@ -228,16 +228,17 @@ class InterfazDashboardAdmin:
         self.kpi_tickets_var = tk.StringVar(value="0")
         self.kpi_cajas_var = tk.StringVar(value="0")
         
-        def crear_tarjeta_kpi(parent_frame, col, titulo, var, color):
-            card = ctk.CTkFrame(parent_frame, fg_color=get_color("bg_surface"), corner_radius=10, border_width=1, border_color="#e5e7eb" if ctk.get_appearance_mode()=="Light" else "#374151")
+        def crear_tarjeta_kpi(parent_frame, col, titulo, var, color, emoji, border_color):
+            card = ctk.CTkFrame(parent_frame, fg_color="#0f172a", corner_radius=10, border_width=1, border_color=border_color)
             card.grid(row=0, column=col, sticky="nsew", padx=5)
-            ctk.CTkLabel(card, text=titulo, font=("Segoe UI", 13), text_color=get_color("text_secondary")).pack(pady=(15, 0))
-            ctk.CTkLabel(card, textvariable=var, font=("Segoe UI", 22, "bold"), text_color=color).pack(pady=(5, 15))
+            ctk.CTkLabel(card, text=emoji, font=("Segoe UI", 22)).pack(pady=(12, 0))
+            ctk.CTkLabel(card, text=titulo, font=("Segoe UI", 11), text_color="#94a3b8").pack(pady=(2, 0))
+            ctk.CTkLabel(card, textvariable=var, font=("Segoe UI", 20, "bold"), text_color=color).pack(pady=(4, 14))
         
-        crear_tarjeta_kpi(self.fr_kpis, 0, "Ventas del Día", self.kpi_ventas_var, "#10b981")
-        crear_tarjeta_kpi(self.fr_kpis, 1, "Efectivo Sucursal", self.kpi_efectivo_var, "#3b82f6")
-        crear_tarjeta_kpi(self.fr_kpis, 2, "Tickets Emitidos", self.kpi_tickets_var, get_color("text_primary"))
-        crear_tarjeta_kpi(self.fr_kpis, 3, "Cajas Activas", self.kpi_cajas_var, "#8b5cf6")
+        crear_tarjeta_kpi(self.fr_kpis, 0, "Ventas del Día",    self.kpi_ventas_var,   "#10b981", "💵", "#10b981")
+        crear_tarjeta_kpi(self.fr_kpis, 1, "Efectivo Sucursal", self.kpi_efectivo_var, "#3b82f6", "🏦", "#3b82f6")
+        crear_tarjeta_kpi(self.fr_kpis, 2, "Tickets Emitidos",  self.kpi_tickets_var,  "#f8fafc", "🧾", "#475569")
+        crear_tarjeta_kpi(self.fr_kpis, 3, "Cajas Activas",     self.kpi_cajas_var,    "#8b5cf6", "📊", "#8b5cf6")
 
         # DOS COLUMNAS (60/40) para el resto del contenido
         content_container = ctk.CTkFrame(main_container, fg_color="transparent")

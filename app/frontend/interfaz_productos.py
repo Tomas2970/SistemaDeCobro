@@ -335,7 +335,7 @@ def ui_productos(parent: tk.Misc, backend, usuario: dict, id_producto_a_cargar: 
     ctk.CTkButton(frm_busqueda, text="🔍 Buscar", command=buscar, font=("Segoe UI", 12, "bold"), width=100, height=35).pack(side="left", padx=10)
     ctk.CTkButton(frm_busqueda, text="Nuevo", command=limpiar, fg_color="#6b7280", font=("Segoe UI", 12, "bold"), width=100, height=35).pack(side="left", padx=5)
     
-    ctk.CTkButton(actions, text="Cancelar", command=win.destroy, fg_color="#ef4444", hover_color="#dc2626", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
+    ctk.CTkButton(actions, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 13, "bold"), width=150, height=45).pack(side="left", padx=10)
     ctk.CTkButton(actions, text="✓ Guardar", command=guardar, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 15, "bold"), width=200, height=45).pack(side="right", padx=10)
 
     cargar_categorias_memoria()

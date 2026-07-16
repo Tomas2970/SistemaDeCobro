@@ -148,16 +148,57 @@ class InterfazDashboardSupervisor:
         self.container_tarjetas_cajas = ctk.CTkFrame(self.frm_cajas, fg_color="transparent")
         self.container_tarjetas_cajas.pack(fill="both", expand=True, padx=10)
 
-        # --- SECCIÓN DERECHA: ALERTAS ---
+        # --- SECCIÓN DERECHA: MÉTRICAS + ALERTAS ---
         frm_derecha = ctk.CTkFrame(main_container, fg_color="transparent")
         frm_derecha.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         frm_derecha.grid_columnconfigure(0, weight=1)
-        frm_derecha.grid_rowconfigure(0, weight=1) # 100% Alertas
+        frm_derecha.grid_rowconfigure(0, weight=0) # Métricas (tamaño fijo)
+        frm_derecha.grid_rowconfigure(1, weight=1) # Alertas (expansible)
+
+        # 1. PANEL DE MÉTRICAS DEL TURNO
+        frm_metricas = ctk.CTkFrame(frm_derecha, fg_color=get_color("bg_surface"), corner_radius=15,
+                                    border_color="#e2e8f0" if ctk.get_appearance_mode()=="Light" else "#1e293b", border_width=1)
+        frm_metricas.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        ctk.CTkLabel(frm_metricas, text="📊 Pulso del Turno", font=("Segoe UI", 16, "bold"),
+                     text_color=get_color("text_primary")).pack(anchor="w", padx=15, pady=(12, 8))
+
+        frm_cards_row = ctk.CTkFrame(frm_metricas, fg_color="transparent")
+        frm_cards_row.pack(fill="x", padx=10, pady=(0, 12))
+        frm_cards_row.grid_columnconfigure(0, weight=1)
+        frm_cards_row.grid_columnconfigure(1, weight=1)
+        frm_cards_row.grid_columnconfigure(2, weight=1)
+
+        border_col = "#e2e8f0" if ctk.get_appearance_mode() == "Light" else "#1e293b"
+
+        # Tarjeta: Total Facturado
+        frm_c1 = ctk.CTkFrame(frm_cards_row, fg_color="#0f172a", corner_radius=10, border_color="#3b82f6", border_width=1)
+        frm_c1.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        ctk.CTkLabel(frm_c1, text="💵", font=("Segoe UI", 22)).pack(pady=(10, 0))
+        ctk.CTkLabel(frm_c1, text="Total Facturado", font=("Segoe UI", 10), text_color="#94a3b8").pack()
+        self.lbl_total_facturado = ctk.CTkLabel(frm_c1, text="$0", font=("Segoe UI", 16, "bold"), text_color="#34d399")
+        self.lbl_total_facturado.pack(pady=(2, 10))
+
+        # Tarjeta: Operaciones
+        frm_c2 = ctk.CTkFrame(frm_cards_row, fg_color="#0f172a", corner_radius=10, border_color="#3b82f6", border_width=1)
+        frm_c2.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
+        ctk.CTkLabel(frm_c2, text="🛒", font=("Segoe UI", 22)).pack(pady=(10, 0))
+        ctk.CTkLabel(frm_c2, text="Operaciones", font=("Segoe UI", 10), text_color="#94a3b8").pack()
+        self.lbl_operaciones = ctk.CTkLabel(frm_c2, text="0", font=("Segoe UI", 16, "bold"), text_color="#60a5fa")
+        self.lbl_operaciones.pack(pady=(2, 10))
+
+        # Tarjeta: Devoluciones/Anulaciones
+        frm_c3 = ctk.CTkFrame(frm_cards_row, fg_color="#0f172a", corner_radius=10, border_color="#ef4444", border_width=1)
+        frm_c3.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
+        ctk.CTkLabel(frm_c3, text="🛑", font=("Segoe UI", 22)).pack(pady=(10, 0))
+        ctk.CTkLabel(frm_c3, text="Anulaciones", font=("Segoe UI", 10), text_color="#94a3b8").pack()
+        self.lbl_devoluciones = ctk.CTkLabel(frm_c3, text="0", font=("Segoe UI", 16, "bold"), text_color="#f87171")
+        self.lbl_devoluciones.pack(pady=(2, 10))
 
         # 2. PANEL DE ALERTAS
         self.frm_alertas = ctk.CTkScrollableFrame(frm_derecha, fg_color=get_color("bg_surface"), corner_radius=15,
                                                   border_color="#e2e8f0" if ctk.get_appearance_mode()=="Light" else "#1e293b", border_width=1)
-        self.frm_alertas.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        self.frm_alertas.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
         
         ctk.CTkLabel(self.frm_alertas, text="🔔 Alertas del Turno", font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(anchor="w", padx=15, pady=(15, 10))
         self.container_alertas = ctk.CTkFrame(self.frm_alertas, fg_color="transparent")
@@ -199,8 +240,42 @@ class InterfazDashboardSupervisor:
 
     def refresh_dashboard(self):
         self._actualizar_cajas()
+        self._actualizar_metricas()
         self._actualizar_alertas()
         self._polling_job = self.win.after(10000, self.refresh_dashboard)
+
+    def _actualizar_metricas(self):
+        """Actualiza las 3 tarjetas de métricas del turno consultando datos reales."""
+        try:
+            hoy = datetime.now().strftime("%Y-%m-%d")
+
+            # Total facturado y operaciones del día (ventas completadas)
+            total_facturado = 0.0
+            operaciones = 0
+            if hasattr(self.backend, "obtener_resumen_diario"):
+                resumen = self.backend.obtener_resumen_diario(hoy)
+                total_facturado = float(resumen.get("monto_total") or 0.0)
+                operaciones = int(resumen.get("total_ventas") or 0)
+
+            # Anulaciones del día (movimientos de tipo devolucion o ajuste negativo)
+            cant_anulaciones = 0
+            if hasattr(self.backend, "obtener_historial_movimientos_caja"):
+                movs = self.backend.obtener_historial_movimientos_caja(hoy, hoy)
+                cant_anulaciones = sum(
+                    1 for m in movs
+                    if m.get("motivo") in ("devolucion_efectivo", "ajuste_negativo")
+                )
+
+            # Actualizar labels
+            self.lbl_total_facturado.configure(
+                text=f"${total_facturado:,.0f}" if total_facturado < 1_000_000 else f"${total_facturado/1_000_000:.1f}M"
+            )
+            self.lbl_operaciones.configure(text=str(operaciones))
+            color_anul = "#f87171" if cant_anulaciones > 0 else "#34d399"
+            self.lbl_devoluciones.configure(text=str(cant_anulaciones), text_color=color_anul)
+
+        except Exception as e:
+            logger.error(f"Error actualizando métricas supervisor: {e}")
 
     def _actualizar_cajas(self):
         try:
@@ -331,19 +406,6 @@ class InterfazDashboardSupervisor:
                     ult_dev = devoluciones[-1]
                     crear_alerta("🔄", f"Devolución reciente: ${ult_dev.get('monto', 0)} ({ult_dev.get('descripcion', '')})", "#fffbeb" if ctk.get_appearance_mode()=="Light" else "#78350f", "#d97706" if ctk.get_appearance_mode()=="Light" else "#fcd34d")
             
-            if hasattr(self.backend, "obtener_sesiones_abiertas_con_totales"):
-                sesiones = self.backend.obtener_sesiones_abiertas_con_totales(tipo_caja='turno')
-                ahora = datetime.now()
-                for s in sesiones:
-                    fecha_str = s.get('fecha_ultima_venta') or s.get('fecha_apertura')
-                    if fecha_str:
-                        try:
-                            f_ult = datetime.strptime(fecha_str, "%Y-%m-%d %H:%M:%S")
-                            if (ahora - f_ult).total_seconds() > 1800:
-                                hay_alertas = True
-                                crear_alerta("💤", f"Caja {s.get('vendedor')} sin actividad por >30 min.", "#eff6ff" if ctk.get_appearance_mode()=="Light" else "#1e3a8a", "#2563eb" if ctk.get_appearance_mode()=="Light" else "#93c5fd")
-                        except: pass
-                        
         except Exception as e:
             logger.error(f"Error cargando alertas: {e}")
             

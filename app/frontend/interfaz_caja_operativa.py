@@ -85,12 +85,19 @@ def ui_caja_operativa(parent: tk.Misc, backend, usuario: dict):
     win.vendedores_full_list = backend.obtener_vendedores()
 
     win.title("📦 Control de Caja Operativa")
-    win.geometry("900x650")
+    win.geometry("900x680")
+    
+    # Footer fijo con botón Cerrar (visible siempre, independiente del estado de caja)
+    fr_footer_win = ctk.CTkFrame(win, fg_color="transparent")
+    fr_footer_win.pack(side="bottom", fill="x", padx=20, pady=(0, 15))
+    ctk.CTkButton(fr_footer_win, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 13, "bold"), width=120, height=40).pack(side="right")
+    
     _construir_panel_caja(win, backend, usuario)
 
     configurar_navegacion_ventana(win)
     centrar_y_mostrar_ventana(win)
     win.grab_set()
+
 
 def _construir_panel_caja(win, backend, usuario):
     body = ctk.CTkFrame(win, fg_color="transparent")
@@ -579,8 +586,17 @@ def _construir_panel_caja(win, backend, usuario):
 
             configurar_navegacion_ventana(top); top.grab_set()
 
-        ctk.CTkButton(fr_ops, text="➖ GASTO/RETIRO", command=lambda: modal_movimiento('egreso'), fg_color="#f59e0b", hover_color="#d97706", font=("Segoe UI", 13, "bold"), height=40).pack(side="left", padx=10)
-        ctk.CTkButton(fr_ops, text="➕ AJUSTE (+)", command=lambda: modal_movimiento('ingreso'), fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 13, "bold"), height=40).pack(side="left")
+        def intentar_modal_movimiento(tipo):
+            es_vendedor = usuario.get('id_rol') == 2
+            if es_vendedor:
+                def on_autorizado(autorizador):
+                    modal_movimiento(tipo)
+                solicitar_autorizacion_supervisor(win, backend, usuario, on_autorizado, roles_permitidos=(1, 3), motivo=f"Autorización para registrar {tipo.upper()}")
+            else:
+                modal_movimiento(tipo)
+
+        ctk.CTkButton(fr_ops, text="➖ GASTO/RETIRO", command=lambda: intentar_modal_movimiento('egreso'), fg_color="#f59e0b", hover_color="#d97706", font=("Segoe UI", 13, "bold"), height=40).pack(side="left", padx=10)
+        ctk.CTkButton(fr_ops, text="➕ AJUSTE (+)", command=lambda: intentar_modal_movimiento('ingreso'), fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 13, "bold"), height=40).pack(side="left")
     
     if puede_gestionar:
         ctk.CTkButton(fr_ops, text="🔒 CERRAR CAJA", command=iniciar_cierre, fg_color="#dc2626", hover_color="#b91c1c", font=("Segoe UI", 15, "bold"), height=48, width=200).pack(side="right", padx=10)

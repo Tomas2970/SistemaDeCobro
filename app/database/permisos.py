@@ -152,10 +152,11 @@ PERMISOS = {
         'gestionar_cuenta_corriente',  # Puede cobrar
         # NO: crear_clientes, editar_clientes, eliminar_clientes
         
-        # Caja (Individual, sin movimientos manuales)
+        # Caja (Individual, con movimientos manuales requeridos por autorización)
         'abrir_caja',
         'cerrar_caja',
-        # NO: movimientos_caja_manuales, ver_caja_todos, ver_historial_movimientos
+        'movimientos_caja_manuales',
+        # NO: ver_caja_todos, ver_historial_movimientos
     ]
 }
 

@@ -47,6 +47,19 @@ MAPEO_ACCIONES = {
 
 INV_MAPEO_ACCIONES = {v: k for k, v in MAPEO_ACCIONES.items()}
 
+# Grupos temáticos para el dropdown de filtro (más compacto que listar las 29 acciones)
+GRUPOS_ACCIONES = {
+    "Todas": [],
+    "➕ Altas": ["CREAR_USUARIO", "CREAR_PRODUCTO", "CREAR_CLIENTE", "CREAR_PROVEEDOR"],
+    "❌ Bajas": ["DESACTIVAR_USUARIO", "DESACTIVAR_PRODUCTO", "DESACTIVAR_CLIENTE", "DESACTIVAR_PROVEEDOR", "DESACTIVAR_CATEGORIA"],
+    "♻️ Reactivaciones": ["REACTIVAR_USUARIO", "REACTIVAR_CLIENTE", "REACTIVAR_PROVEEDOR", "REACTIVAR_CATEGORIA"],
+    "✏️ Modificaciones": ["MODIFICAR_USUARIO", "MODIFICAR_PRODUCTO", "MODIFICAR_LIMITE_CREDITO_CLIENTE", "EDITAR_PROVEEDOR", "RESETEAR_PASSWORD", "AJUSTE_STOCK_MANUAL"],
+    "🔒 Caja y Turnos": ["APERTURA_CAJA", "CIERRE_CAJA", "CIERRE_CAJA_SUPERVISOR"],
+    "💸 Movimientos de Dinero": ["TRANSFERENCIA_CAJA", "TRANSFERENCIA_TESORERIA", "APROBACION_TRANSFERENCIA", "CREAR_TESORERIA_AUTOMATICA"],
+    "🚫 Anulaciones": ["ANULAR_VENTA", "ANULAR_COMPRA"],
+    "📤 Exportaciones": ["EXPORTAR_HISTORIAL"],
+}
+
 class InterfazAuditoria:
     def __init__(self, parent, backend, usuario_actual: dict):
         self.parent = parent
@@ -71,6 +84,10 @@ class InterfazAuditoria:
         self.pag_aud = 0
         self.total_aud = 0
         
+        # Estado del selector de usuario
+        self.usuario_sel: dict = {"id": None, "nombre": "Todos"}
+        self.usuarios_raw: list = []
+        
         self.crear_widgets()
         self.cargar_filtros()
         self.cargar_datos()
@@ -93,8 +110,18 @@ class InterfazAuditoria:
         row1.pack(fill="x", padx=10, pady=(10, 5))
         
         ctk.CTkLabel(row1, text="Usuario:", font=("Segoe UI", 12)).pack(side="left", padx=(10, 5))
-        self.combo_usuario = ctk.CTkOptionMenu(row1, width=150, font=("Segoe UI", 12))
-        self.combo_usuario.pack(side="left", padx=5)
+        frm_usr = ctk.CTkFrame(row1, fg_color="transparent")
+        frm_usr.pack(side="left", padx=5)
+        self.lbl_usuario_sel = ctk.CTkLabel(
+            frm_usr, text="Todos", font=("Segoe UI", 12, "bold"),
+            text_color=get_color("text_primary"), width=150, anchor="w"
+        )
+        self.lbl_usuario_sel.pack(side="left", padx=(0, 5))
+        ctk.CTkButton(
+            frm_usr, text="🔍", width=35, height=28,
+            fg_color="#3b82f6", hover_color="#2563eb",
+            command=self._abrir_selector_usuario
+        ).pack(side="left")
         
         ctk.CTkLabel(row1, text="Acción:", font=("Segoe UI", 12)).pack(side="left", padx=(20, 5))
         self.combo_accion = ctk.CTkOptionMenu(row1, width=250, font=("Segoe UI", 12))
@@ -211,25 +238,120 @@ class InterfazAuditoria:
         
     def cargar_filtros(self):
         try:
-            # Cargar Usuarios
-            usuarios = self.backend.obtener_usuarios_con_rol()
-            nombres = ["Todos"] + [u['nombre'] for u in usuarios]
-            self.combo_usuario.configure(values=nombres)
-            self.combo_usuario.set("Todos")
+            # Cargar Usuarios (lista cruda para el popup de búsqueda)
+            self.usuarios_raw = self.backend.obtener_usuarios_con_rol()
             
-            # Mapeo id_usuario para buscar
-            self.map_usuarios = {u['nombre']: u['id_usuario'] for u in usuarios}
-            
-            # Cargar Acciones (amigables)
-            acciones_amigables = ["Todas"] + list(MAPEO_ACCIONES.values())
-            self.combo_accion.configure(values=acciones_amigables)
+            # Cargar grupos temáticos (más compacto que las 29 acciones individuales)
+            self.combo_accion.configure(values=list(GRUPOS_ACCIONES.keys()))
             self.combo_accion.set("Todas")
             
         except Exception as e:
             messagebox.showerror("Error", f"Error cargando filtros: {e}", parent=self.win)
+
+    def _abrir_selector_usuario(self):
+        """Abre un popup modal con Treeview y búsqueda en tiempo real para seleccionar usuario."""
+        popup = ctk.CTkToplevel(self.win)
+        preparar_ventana(popup)
+        popup.title("Seleccionar Usuario")
+        popup.geometry("500x530")
+        configurar_navegacion_ventana(popup)
+
+        var_pat = tk.StringVar()
+        ctk.CTkLabel(
+            popup, text="Buscar Usuario (ID/Nombre):",
+            font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")
+        ).pack(pady=(15, 5), padx=15, anchor="w")
+        ent = ctk.CTkEntry(
+            popup, textvariable=var_pat, font=("Segoe UI", 13),
+            height=40, placeholder_text="Nombre o ID..."
+        )
+        ent.pack(fill="x", padx=15, pady=5)
+
+        frame_list = ctk.CTkFrame(
+            popup, fg_color=self.col_card, corner_radius=10,
+            border_color=self.col_border, border_width=1
+        )
+        frame_list.pack(expand=True, fill="both", padx=15, pady=10)
+
+        cols = ("ID", "Nombre")
+        tree_sel = ttk.Treeview(frame_list, columns=cols, show="headings", style="Modern.Treeview", height=12)
+        sc = ctk.CTkScrollbar(frame_list, command=tree_sel.yview)
+        sc.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        tree_sel.configure(yscrollcommand=sc.set)
+        tree_sel.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        tree_sel.column("ID", width=70, anchor="center")
+        tree_sel.column("Nombre", width=350, anchor="w")
+        tree_sel.heading("ID", text="ID")
+        tree_sel.heading("Nombre", text="Nombre")
+        tree_sel.insert("", "end", iid="opt_all", values=["-", "(Todos)"])
+
+        def render(filas):
+            for i in tree_sel.get_children():
+                if i != "opt_all":
+                    tree_sel.delete(i)
+            for u in filas:
+                tree_sel.insert("", "end", values=[u.get('id_usuario', ''), u.get('nombre', '')])
+
+        render(self.usuarios_raw)
+
+        def filtrar(*_):
+            q = var_pat.get().strip().lower()
+            if not q:
+                render(self.usuarios_raw)
+                return
+            filtrados = [
+                u for u in self.usuarios_raw
+                if q in str(u.get('id_usuario', '')).lower() or q in u.get('nombre', '').lower()
+            ]
+            render(filtrados)
+
+        var_pat.trace_add("write", filtrar)
+
+        def tomar(event=None):
+            sel_id = tree_sel.focus()
+            if not sel_id:
+                return
+            if sel_id == "opt_all":
+                self.usuario_sel["id"] = None
+                self.usuario_sel["nombre"] = "Todos"
+            else:
+                vals = tree_sel.item(sel_id, "values")
+                if not vals:
+                    return
+                try:
+                    self.usuario_sel["id"] = int(vals[0])
+                except (ValueError, TypeError):
+                    self.usuario_sel["id"] = None
+                self.usuario_sel["nombre"] = vals[1]
+            self.lbl_usuario_sel.configure(text=self.usuario_sel["nombre"])
+            popup.destroy()
+
+        tree_sel.bind("<Double-1>", tomar)
+        tree_sel.bind("<Return>", tomar)
+
+        btn_frm = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_frm.pack(fill="x", side="bottom", padx=15, pady=(5, 15))
+        ctk.CTkButton(
+            btn_frm, text="Cancelar", command=popup.destroy,
+            fg_color="#ef4444", hover_color="#dc2626",
+            font=("Segoe UI", 13, "bold"), width=150, height=45
+        ).pack(side="left", padx=10)
+        ctk.CTkButton(
+            btn_frm, text="✓ Seleccionar", command=tomar,
+            fg_color="#10b981", hover_color="#059669",
+            font=("Segoe UI", 14, "bold"), width=180, height=45
+        ).pack(side="right", padx=10)
+
+        popup.after(100, lambda: ent.focus_set())
+        centrar_y_mostrar_ventana(popup)
+        popup.grab_set()
+        popup.transient(self.win)
+        self.win.wait_window(popup)
             
     def limpiar_filtros(self):
-        self.combo_usuario.set("Todos")
+        self.usuario_sel["id"] = None
+        self.usuario_sel["nombre"] = "Todos"
+        self.lbl_usuario_sel.configure(text="Todos")
         self.combo_accion.set("Todas")
         if hasattr(self.entry_desde.entrada, 'set_date'):
             # tkcalendar's DateEntry doesn't have an empty state easily, so we set to today
@@ -241,24 +363,53 @@ class InterfazAuditoria:
         self.cargar_datos()
         
     def procesar_resumen(self, accion: str, ant: str, nue: str) -> str:
-        if not nue and not ant: return "Sin detalles"
-        
+        """Genera el texto corto que aparece en la columna Resumen de la tabla."""
+        if not nue and not ant: return "Acción registrada"
         try:
             d_ant = json.loads(ant) if ant else {}
             d_nue = json.loads(nue) if nue else {}
-            
-            if accion == "MODIFICAR_LIMITE_CREDITO_CLIENTE":
-                o = d_ant.get('limite_credito', 0)
-                n = d_nue.get('limite_credito', 0)
-                return f"Límite: ${o:,.2f} → ${n:,.2f}"
-            
+            _map_roles = {1: 'Administrador', 2: 'Vendedor', 3: 'Supervisor'}
+
+            # ── Usuarios ──────────────────────────────────────
+            if accion == "CREAR_USUARIO":
+                rol_id = d_nue.get('id_rol', '?')
+                rol = _map_roles.get(int(rol_id), f'Rol #{rol_id}') if str(rol_id).isdigit() else f'Rol #{rol_id}'
+                nombre = d_nue.get('nombre', '')
+                return f"Nuevo usuario «{nombre}» registrado como {rol}"
+            if accion == "DESACTIVAR_USUARIO":
+                nombre = d_ant.get('nombre', '') or d_nue.get('nombre', '')
+                return f"Usuario «{nombre}» desactivado"
+            if accion == "REACTIVAR_USUARIO":
+                nombre = d_nue.get('nombre', '') or d_ant.get('nombre', '')
+                return f"Usuario «{nombre}» reactivado"
+            if accion == "RESETEAR_PASSWORD":
+                nombre = d_nue.get('nombre', '') or d_ant.get('nombre', '')
+                return f"Contraseña de «{nombre}» restablecida manualmente"
+            if accion == "MODIFICAR_USUARIO":
+                cambios_usr = []
+                for k, v in d_nue.items():
+                    if k in d_ant and str(d_ant[k]) != str(v):
+                        k_am = "Rol" if k == 'id_rol' else k.replace('_', ' ').capitalize()
+                        v_a = _map_roles.get(int(d_ant[k]), f'#{d_ant[k]}') if k == 'id_rol' and str(d_ant[k]).isdigit() else d_ant[k]
+                        v_n = _map_roles.get(int(v), f'#{v}') if k == 'id_rol' and str(v).isdigit() else v
+                        cambios_usr.append(f"{k_am}: {v_a} → {v_n}")
+                return " | ".join(cambios_usr) if cambios_usr else "Datos de usuario modificados"
+
+            # ── Productos ─────────────────────────────────────
+            if accion == "CREAR_PRODUCTO":
+                nombre = d_nue.get('nombre', 'Desconocido')
+                precio = d_nue.get('precio_venta', d_nue.get('precio', 0))
+                try: return f"Producto «{nombre}» creado · Precio: ${float(precio):,.2f}"
+                except: return f"Producto «{nombre}» creado"
             if accion == "MODIFICAR_PRODUCTO":
-                o = d_ant.get('precio_venta', '')
-                n = d_nue.get('precio_venta', '')
-                if str(o) != str(n):
-                    return f"Precio: ${o} → ${n}"
-                return "Datos de producto modificados"
-                
+                cambios = []
+                for campo, label in [('nombre','Nombre'),('precio_venta','Precio'),('stock_minimo','Stock mín.')]:
+                    v_a, v_n = d_ant.get(campo), d_nue.get(campo)
+                    if v_a is not None and v_n is not None and str(v_a) != str(v_n):
+                        cambios.append(f"Precio: ${float(v_a):,.2f} → ${float(v_n):,.2f}" if campo == 'precio_venta' else f"{label}: {v_a} → {v_n}")
+                return " | ".join(cambios) if cambios else "Datos del producto modificados"
+            if accion == "DESACTIVAR_PRODUCTO":
+                return f"Producto «{d_ant.get('nombre', '') or d_nue.get('nombre', '')}» dado de baja"
             if accion == "AJUSTE_STOCK_MANUAL":
                 cant_ant = d_ant.get('stock', d_ant.get('cantidad', 0))
                 cant_nue = d_nue.get('stock', d_nue.get('cantidad', 0))
@@ -267,85 +418,96 @@ class InterfazAuditoria:
                 if id_prod:
                     try:
                         prod = self.backend.buscar_producto_por_id(int(id_prod))
-                        if prod and prod.get("nombre"):
-                            nombre_prod = prod["nombre"]
-                    except:
-                        pass
-                return f"Stock de {nombre_prod}: {cant_ant} → {cant_nue}"
-                
-            if accion == "CREAR_USUARIO":
-                return f"Usuario creado con Rol #{d_nue.get('id_rol', '?')}"
-                
-            if accion == "RESETEAR_PASSWORD":
-                return "Contraseña restablecida"
-                
-            if accion == "MODIFICAR_USUARIO":
-                cambios_usr = []
-                for k, v in d_nue.items():
-                    if k in d_ant and str(d_ant[k]) != str(v):
-                        k_amigable = k.replace('_', ' ').capitalize()
-                        if k == 'id_rol':
-                            k_amigable = "Rol"
-                        cambios_usr.append(f"{k_amigable}: {d_ant[k]} → {v}")
-                if cambios_usr:
-                    return " | ".join(cambios_usr)
-                return "Datos de usuario modificados"
+                        if prod and prod.get("nombre"): nombre_prod = prod["nombre"]
+                    except: pass
+                try:
+                    diff = int(cant_nue) - int(cant_ant)
+                    return f"Stock «{nombre_prod}»: {cant_ant} → {cant_nue} ({'+' if diff>0 else ''}{diff})"
+                except: return f"Stock «{nombre_prod}»: {cant_ant} → {cant_nue}"
 
+            # ── Clientes ──────────────────────────────────────
+            if accion == "CREAR_CLIENTE":
+                nombre = d_nue.get('nombre', 'Desconocido')
+                try: return f"Cliente «{nombre}» registrado · Límite: ${float(d_nue.get('limite_credito',0)):,.2f}"
+                except: return f"Cliente «{nombre}» registrado"
+            if accion == "MODIFICAR_LIMITE_CREDITO_CLIENTE":
+                return f"Límite de crédito: ${float(d_ant.get('limite_credito',0)):,.2f} → ${float(d_nue.get('limite_credito',0)):,.2f}"
+            if accion == "DESACTIVAR_CLIENTE":
+                return f"Cliente «{d_ant.get('nombre','') or d_nue.get('nombre','')}» desactivado"
+            if accion == "REACTIVAR_CLIENTE":
+                return f"Cliente «{d_nue.get('nombre','') or d_ant.get('nombre','')}» reactivado"
+
+            # ── Proveedores ───────────────────────────────────
+            if accion == "CREAR_PROVEEDOR":
+                nombre = d_nue.get('nombre', 'Desconocido')
+                empresa = d_nue.get('empresa', '')
+                return f"Proveedor «{nombre}» ({empresa}) dado de alta" if empresa else f"Proveedor «{nombre}» dado de alta"
+            if accion == "DESACTIVAR_PROVEEDOR":
+                return f"Proveedor «{d_ant.get('nombre','') or d_nue.get('nombre','')}» desactivado"
+            if accion == "REACTIVAR_PROVEEDOR":
+                return f"Proveedor «{d_nue.get('nombre','') or d_ant.get('nombre','')}» reactivado"
+            if accion == "EDITAR_PROVEEDOR":
+                return f"Datos del proveedor «{d_ant.get('nombre','') or d_nue.get('nombre','')}» modificados"
+
+            # ── Categorías ────────────────────────────────────
+            if accion == "DESACTIVAR_CATEGORIA":
+                return f"Categoría «{d_ant.get('nombre','') or d_nue.get('nombre','')}» desactivada"
+            if accion == "REACTIVAR_CATEGORIA":
+                return f"Categoría «{d_nue.get('nombre','') or d_ant.get('nombre','')}» reactivada"
+
+            # ── Caja ──────────────────────────────────────────
+            if accion == "APERTURA_CAJA":
+                monto = d_nue.get('monto_inicial', d_nue.get('monto', 0))
+                try: return f"Caja abierta con fondo inicial de ${float(monto):,.2f}"
+                except: return "Apertura de caja registrada"
+            if accion in ("CIERRE_CAJA", "CIERRE_CAJA_SUPERVISOR"):
+                diferencia = d_nue.get('diferencia')
+                contado = d_nue.get('contado', d_nue.get('efectivo_contado'))
+                if diferencia is not None and contado is not None:
+                    dif_f = float(diferencia)
+                    estado = "✅ Sin diferencia" if dif_f == 0 else ("⬆️ Sobrante" if dif_f > 0 else "⬇️ Faltante")
+                    return f"Contado: ${float(contado):,.2f} | Diferencia: ${abs(dif_f):,.2f} {estado}"
+                if accion == "CIERRE_CAJA_SUPERVISOR":
+                    return f"Cierre forzado por supervisor · Motivo: {d_nue.get('motivo','Sin especificar')}"
+                return "Cierre de caja registrado"
+
+            # ── Ventas / Compras ──────────────────────────────
+            if accion == "ANULAR_VENTA":
+                id_v = d_nue.get('id_venta', d_ant.get('id_venta', '?'))
+                motivo = d_nue.get('motivo', 'Sin especificar')
+                return f"Venta #{id_v} anulada · Motivo: {motivo}"
+            if accion == "ANULAR_COMPRA":
+                id_c = d_nue.get('id_compra', d_ant.get('id_compra', '?'))
+                motivo = d_nue.get('motivo', 'Sin especificar')
+                return f"Compra #{id_c} anulada · Motivo: {motivo}"
+
+            # ── Transferencias / Tesorería ────────────────────
             if accion in ("TRANSFERENCIA_CAJA", "TRANSFERENCIA_TESORERIA", "APROBACION_TRANSFERENCIA"):
                 monto = d_nue.get('monto', 0)
-                origen = d_nue.get('origen', d_nue.get('id_session_origen', '?'))
-                destino = d_nue.get('destino', d_nue.get('id_session_destino', '?'))
-                
-                # Intentar resolver nombres de caja
-                def resolver_caja(id_caja):
-                    if str(id_caja) == '?': return "Caja Desconocida"
+                def _res_caja(id_caja):
+                    if not id_caja or str(id_caja) == '?': return "Caja desconocida"
                     try:
                         sess = self.backend.obtener_session_por_id(int(id_caja))
                         if sess:
-                            if sess.get('tipo_caja') == 'administrativa':
-                                return "Tesorería"
+                            if sess.get('tipo_caja') == 'administrativa': return "Tesorería"
                             id_u = sess.get('id_usuario')
                             if id_u:
-                                for u in getattr(self, 'map_usuarios', {}).items():
-                                    if u[1] == id_u:
-                                        return f"Caja de {u[0]}"
+                                for u in getattr(self, 'usuarios_raw', []):
+                                    if u.get('id_usuario') == id_u: return f"Caja de {u.get('nombre')}"
                         return f"Caja #{id_caja}"
-                    except:
-                        return f"Caja #{id_caja}"
-                
-                nom_origen = resolver_caja(origen)
-                nom_destino = resolver_caja(destino)
-                
-                if accion == "APROBACION_TRANSFERENCIA":
-                    return f"Transferencia de ${float(monto):,.2f} de {nom_origen} a {nom_destino}"
-                else:
-                    return f"Transferencia de ${float(monto):,.2f} a {nom_destino}"
+                    except: return f"Caja #{id_caja}"
+                origen = _res_caja(d_nue.get('origen', d_nue.get('id_session_origen', '?')))
+                destino = _res_caja(d_nue.get('destino', d_nue.get('id_session_destino', '?')))
+                return f"${float(monto):,.2f} · De: {origen} → A: {destino}"
+            if accion == "CREAR_TESORERIA_AUTOMATICA":
+                return "Tesorería del día creada automáticamente por el sistema"
+            if accion == "EXPORTAR_HISTORIAL":
+                return "Historial exportado a CSV"
 
-            if accion in ("CIERRE_CAJA", "CIERRE_CAJA_SUPERVISOR"):
-                if 'diferencia' in d_nue and 'contado' in d_nue:
-                    return f"Diferencia: ${d_nue['diferencia']:,.2f} | Contado: ${d_nue['contado']:,.2f}"
-                if 'cerrado_por' in d_nue:
-                    return f"Cerrado por #{d_nue['cerrado_por']} - Motivo: {d_nue.get('motivo', '')}"
-                
-            # Fallback a conteo de campos modificados
-            cambios = 0
-            for k, v in d_nue.items():
-                if k in d_ant and d_ant[k] != v:
-                    cambios += 1
-                elif k not in d_ant:
-                    cambios += 1
-            if cambios > 0:
-                return f"Se modificaron {cambios} campos."
-                
-            # Si no detectamos cambios, intentamos mostrar algo
-            keys = list(d_nue.keys())
-            if keys:
-                return f"Actualizado: {', '.join(keys)}"
-            
-            return "Modificación registrada"
-        except:
-            return "Datos complejos"
-
+            # Fallback
+            return "Acción registrada"
+        except Exception:
+            return "Acción registrada"
     def determinar_tag_accion(self, accion: str) -> str:
         if accion.startswith("CREAR"): return "tag_create"
         if accion.startswith("DESACTIVAR"): return "tag_delete"
@@ -379,9 +541,9 @@ class InterfazAuditoria:
                 pass
 
         elif tabla == "Usuario":
-            for nombre, id_u in getattr(self, 'map_usuarios', {}).items():
-                if id_u == id_num:
-                    return f"Usuario: {nombre}"
+            for u in getattr(self, 'usuarios_raw', []):
+                if u.get('id_usuario') == id_num:
+                    return f"Usuario: {u.get('nombre')}"
 
         elif tabla == "caja_session":
             try:
@@ -391,9 +553,9 @@ class InterfazAuditoria:
                         return "Tesorería"
                     id_u = sess.get('id_usuario')
                     if id_u:
-                        for nombre, id_u_map in getattr(self, 'map_usuarios', {}).items():
-                            if id_u_map == id_u:
-                                return f"Caja de {nombre}"
+                        for u in getattr(self, 'usuarios_raw', []):
+                            if u.get('id_usuario') == id_u:
+                                return f"Caja de {u.get('nombre')}"
             except Exception:
                 pass
 
@@ -404,17 +566,16 @@ class InterfazAuditoria:
             self.tree.delete(i)
         self.datos_crudos_tree.clear()
             
-        usr_sel = self.combo_usuario.get()
+        id_user = self.usuario_sel["id"]
         acc_sel = self.combo_accion.get()
         desde_str = self.entry_desde.get_date_str()
         hasta_str = self.entry_hasta.get_date_str()
         
-        id_user = self.map_usuarios.get(usr_sel) if usr_sel != "Todos" else None
-        
-        # Mapear accion amigable a tecnica
-        accion_tecnica = None
-        if acc_sel != "Todas":
-            accion_tecnica = INV_MAPEO_ACCIONES.get(acc_sel, acc_sel)
+        # Mapear grupo seleccionado a lista de acciones técnicas (o None para todas)
+        acciones_del_grupo = GRUPOS_ACCIONES.get(acc_sel, [])
+        # Para el backend, si el grupo tiene una sola acción la pasamos directo;
+        # si tiene varias, filtramos client-side después de traer todos los registros.
+        accion_tecnica = acciones_del_grupo[0] if len(acciones_del_grupo) == 1 else None
             
         try:
             fecha_desde = self.validar_y_convertir_fecha(desde_str)
@@ -433,6 +594,11 @@ class InterfazAuditoria:
             offset = self.pag_aud * self.pag_size
             self.total_aud = self.backend.contar_bitacora_acciones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, id_usuario=id_user, accion=accion_tecnica)
             registros = self.backend.obtener_bitacora_acciones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, id_usuario=id_user, accion=accion_tecnica, limit=limit, offset=offset)
+            
+            # Filtro client-side para grupos con múltiples acciones
+            acciones_del_grupo = GRUPOS_ACCIONES.get(acc_sel, [])
+            if len(acciones_del_grupo) > 1:
+                registros = [r for r in registros if r.get('accion') in acciones_del_grupo]
             
             for r in registros:
                 fecha = str(r.get('fecha'))[:16] # "2024-01-01 15:30"
@@ -458,6 +624,7 @@ class InterfazAuditoria:
                     "fecha": fecha,
                     "usuario": usr,
                     "accion": acc_amigable,
+                    "accion_raw": acc,  # código técnico para generar detalle
                     "entidad": entidad,
                     "datos_anteriores": r.get('datos_anteriores'),
                     "datos_nuevos": r.get('datos_nuevos')
@@ -513,142 +680,316 @@ class InterfazAuditoria:
         add_info_row(frame_info, "Fecha:", datos["fecha"])
         add_info_row(frame_info, "Entidad:", datos["entidad"])
         
-        ctk.CTkLabel(modal, text="Cambios realizados:", font=("Segoe UI", 14, "bold"), anchor="w", text_color=self.col_text).pack(fill="x", padx=20, pady=(15, 5))
-        
-        txt_cambios = ctk.CTkTextbox(modal, font=("Consolas", 12), fg_color=self.col_card, text_color=self.col_text, border_color=self.col_border, border_width=1)
+        ctk.CTkLabel(modal, text="📋 Detalle de la acción:", font=("Segoe UI", 14, "bold"), anchor="w", text_color=self.col_text).pack(fill="x", padx=20, pady=(15, 5))
+
+        txt_cambios = ctk.CTkTextbox(modal, font=("Segoe UI", 13), fg_color=self.col_card, text_color=self.col_text, border_color=self.col_border, border_width=1)
         txt_cambios.pack(fill="both", expand=True, padx=20, pady=5)
-        
-        # Formatear cambios
+
         try:
             d_ant = json.loads(datos["datos_anteriores"]) if datos["datos_anteriores"] else {}
             d_nue = json.loads(datos["datos_nuevos"]) if datos["datos_nuevos"] else {}
-            
-            lineas = []
-            todas_claves = set(list(d_ant.keys()) + list(d_nue.keys()))
-            
-            if not todas_claves:
-                lineas.append("No hay detalles adicionales.")
-            else:
-                map_id_to_user = {v: k for k, v in getattr(self, 'map_usuarios', {}).items()}
-                map_id_to_rol = {1: 'Administrador', 2: 'Vendedor', 3: 'Supervisor'}
-                
-                nombres_amigables = {
-                    "cerrado_por": "Cerrado por",
-                    "id_usuario": "Usuario",
-                    "abierto_por": "Abierto por",
-                    "autorizado_por": "Autorizado por",
-                    "id_autorizador": "Autorizado por",
-                    "id_cajero": "Cajero",
-                    "motivo": "Motivo",
-                    "estado": "Estado",
-                    "monto": "Monto",
-                    "fecha_apertura": "Fecha de apertura",
-                    "fecha_cierre": "Fecha de cierre",
-                    "id_rol": "Rol",
-                    "id_producto": "Producto",
-                    "id_categoria": "Categoría",
-                    "limite_credito": "Límite de crédito",
-                    "precio_venta": "Precio de venta",
-                    "precio_compra": "Precio de compra",
-                    "stock_minimo": "Stock mínimo",
-                    "codigo_barras": "Código de barras",
-                    "descripcion": "Descripción",
-                    "origen": "Origen",
-                    "destino": "Destino",
-                    "id_session_origen": "Origen",
-                    "id_session_destino": "Destino"
-                }
-
-                def resolver_valor(clave, valor):
-                    if valor is None:
-                        return valor
-                    
-                    if clave in ("cerrado_por", "id_usuario", "abierto_por", "autorizado_por", "id_autorizador", "id_cajero"):
-                        try:
-                            return map_id_to_user.get(int(valor), valor)
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    if clave in ("id_rol", "rol_id"):
-                        try:
-                            return map_id_to_rol.get(int(valor), valor)
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    if clave in ("id_producto", "producto_id"):
-                        try:
-                            p = self.backend.buscar_producto_por_id(int(valor))
-                            if p and p.get("nombre"):
-                                return p["nombre"]
-                        except Exception:
-                            pass
-                            
-                    if clave in ("id_categoria", "categoria_id"):
-                        try:
-                            c = self.backend.obtener_categoria_por_id(int(valor))
-                            if c and c.get("nombre"):
-                                return c["nombre"]
-                        except Exception:
-                            pass
-                            
-                    if clave in ("origen", "destino", "id_session_origen", "id_session_destino"):
-                        try:
-                            sess = self.backend.obtener_session_por_id(int(valor))
-                            if sess:
-                                if sess.get('tipo_caja') == 'administrativa':
-                                    return "Tesorería"
-                                id_u = sess.get('id_usuario')
-                                if id_u:
-                                    for u in getattr(self, 'map_usuarios', {}).items():
-                                        if u[1] == id_u:
-                                            return f"Caja de {u[0]}"
-                            return f"Caja #{valor}"
-                        except Exception:
-                            return f"Caja #{valor}"
-                    
-                    return valor
-
-                for k in sorted(todas_claves):
-                    v_ant = d_ant.get(k)
-                    v_nue = d_nue.get(k)
-                    
-                    v_ant_res = resolver_valor(k, v_ant)
-                    v_nue_res = resolver_valor(k, v_nue)
-                    
-                    k_amigable = nombres_amigables.get(k, k.replace('_', ' ').capitalize())
-                    
-                    if v_ant_res != v_nue_res:
-                        es_tecnico = k.startswith("id_") and k not in nombres_amigables
-                        es_sin_valor_ant = (k not in d_ant) or (v_ant_res is None or str(v_ant_res).strip() == "")
-                        es_sin_valor_nue = (k not in d_nue) or (v_nue_res is None or str(v_nue_res).strip() == "")
-                        
-                        if es_sin_valor_ant and es_tecnico:
-                            continue
-                        
-                        str_ant = "Sin valor previo" if es_sin_valor_ant else str(v_ant_res)
-                        str_nue = "Sin valor" if es_sin_valor_nue else str(v_nue_res)
-                        
-                        if str_ant != str_nue:
-                            if es_sin_valor_ant:
-                                lineas.append(f"{k_amigable}: {str_nue}")
-                            else:
-                                lineas.append(f"{k_amigable}:\n{str_ant} → {str_nue}\n")
-            
-            txt_cambios.insert("1.0", "\n".join(lineas))
+            accion_raw = datos.get("accion_raw", "")
+            fecha_evento = datos.get("fecha", "")
+            entidad_evento = datos.get("entidad", "")
+            texto = self._generar_texto_detalle(accion_raw, d_ant, d_nue, fecha_evento, entidad_evento)
+            txt_cambios.insert("1.0", texto)
         except Exception as e:
-            txt_cambios.insert("1.0", f"Error procesando JSON: {e}\n\nDatos Ant:\n{datos['datos_anteriores']}\n\nDatos Nue:\n{datos['datos_nuevos']}")
-            
+            txt_cambios.insert("1.0", f"Error al procesar los detalles: {e}")
+
         txt_cambios.configure(state="disabled")
-        
+
         ctk.CTkButton(modal, text="Cerrar", command=modal.destroy, fg_color="#4b5563", hover_color="#374151", width=100).pack(pady=15)
+            
+    def _generar_texto_detalle(self, accion_raw: str, d_ant: dict, d_nue: dict,
+                               fecha_evento: str = "", entidad_evento: str = "") -> str:
+        """Genera texto narrativo en lenguaje claro para el popup de detalle de la Bitácora."""
+        _map_roles = {1: 'Administrador', 2: 'Vendedor', 3: 'Supervisor'}
+        map_u = {u.get('id_usuario'): u.get('nombre') for u in getattr(self, 'usuarios_raw', [])}
+
+        def fmt_m(v):
+            try: return f"${float(v):,.2f}"
+            except: return str(v) if v is not None else "—"
+
+        def fmt_u(uid):
+            try: return map_u.get(int(uid), f"Usuario #{uid}")
+            except: return str(uid) if uid else "—"
+
+        def fmt_r(rid):
+            try: return _map_roles.get(int(rid), f"Rol #{rid}")
+            except: return str(rid) if rid else "—"
+
+        def res_caja(id_caja):
+            if not id_caja or str(id_caja) == '?': return "—"
+            try:
+                sess = self.backend.obtener_session_por_id(int(id_caja))
+                if sess:
+                    if sess.get('tipo_caja') == 'administrativa': return "Tesorería"
+                    id_u = sess.get('id_usuario')
+                    if id_u:
+                        n = map_u.get(id_u)
+                        if n: return f"Caja de {n}"
+                return f"Caja #{id_caja}"
+            except: return f"Caja #{id_caja}"
+
+        L = []
+
+        # ── USUARIOS ──────────────────────────────────────────────────────────
+        if accion_raw == "CREAR_USUARIO":
+            nombre = d_nue.get('nombre', '—')
+            rol = fmt_r(d_nue.get('id_rol'))
+            L += [f"Se creó el usuario «{nombre}» con el rol de {rol}.", "",
+                  f"  Nombre de usuario:  {nombre}",
+                  f"  Rol asignado:       {rol}"]
+
+        elif accion_raw == "DESACTIVAR_USUARIO":
+            nombre = d_ant.get('nombre', d_nue.get('nombre', '—'))
+            L += [f"El usuario «{nombre}» fue desactivado.", "",
+                  "  ⚠️  Este usuario no puede iniciar sesión hasta que sea reactivado."]
+
+        elif accion_raw == "REACTIVAR_USUARIO":
+            nombre = d_nue.get('nombre', d_ant.get('nombre', '—'))
+            L += [f"El usuario «{nombre}» fue reactivado.", "",
+                  "  ✅  El usuario puede volver a iniciar sesión con normalidad."]
+
+        elif accion_raw == "RESETEAR_PASSWORD":
+            # El nombre viene del campo entidad (ej: "Usuario: valentina") porque el JSON
+            # no siempre almacena el nombre directamente
+            nombre = d_nue.get('nombre', d_ant.get('nombre', ''))
+            if not nombre or nombre == '—':
+                # Extraer de entidad_evento: "Usuario: valentina" → "valentina"
+                if ':' in entidad_evento:
+                    nombre = entidad_evento.split(':', 1)[-1].strip()
+                else:
+                    nombre = entidad_evento.strip() or '—'
+            L += [f"La contraseña del usuario «{nombre}» fue restablecida por un administrador.", "",
+                  "  🔑  El usuario debe usar la nueva contraseña la próxima vez que inicie sesión."]
+
+        elif accion_raw == "MODIFICAR_USUARIO":
+            nombre = d_nue.get('nombre', d_ant.get('nombre', '—'))
+            L += [f"Se modificaron datos del usuario «{nombre}».", ""]
+            for k, label in [('nombre', 'Nombre'), ('id_rol', 'Rol')]:
+                v_a, v_n = d_ant.get(k), d_nue.get(k)
+                if v_a is not None and v_n is not None and str(v_a) != str(v_n):
+                    if k == 'id_rol':
+                        v_a, v_n = fmt_r(v_a), fmt_r(v_n)
+                    L.append(f"  {label}: {v_a}  →  {v_n}")
+            if len(L) == 2:
+                L.append("  (Sin cambios detectados en los campos registrados)")
+
+        # ── PRODUCTOS ─────────────────────────────────────────────────────────
+        elif accion_raw == "CREAR_PRODUCTO":
+            nombre = d_nue.get('nombre', '—')
+            precio = fmt_m(d_nue.get('precio_venta', d_nue.get('precio', 0)))
+            stock_min = d_nue.get('stock_minimo', '—')
+            L += [f"Se creó el producto «{nombre}».", "",
+                  f"  Precio de venta:  {precio}",
+                  f"  Stock mínimo:     {stock_min}"]
+
+        elif accion_raw == "MODIFICAR_PRODUCTO":
+            nombre = d_nue.get('nombre', d_ant.get('nombre', '—'))
+            L += [f"Se modificaron datos del producto «{nombre}».", ""]
+            for k, label in [('nombre','Nombre'),('precio_venta','Precio de venta'),('stock_minimo','Stock mínimo')]:
+                v_a, v_n = d_ant.get(k), d_nue.get(k)
+                if v_a is not None and v_n is not None and str(v_a) != str(v_n):
+                    L.append(f"  {label}: {fmt_m(v_a)}  →  {fmt_m(v_n)}" if k == 'precio_venta' else f"  {label}: {v_a}  →  {v_n}")
+            if len(L) == 2:
+                L.append("  (Sin cambios detectados en los campos registrados)")
+
+        elif accion_raw == "DESACTIVAR_PRODUCTO":
+            nombre = d_ant.get('nombre', d_nue.get('nombre', '—'))
+            L += [f"El producto «{nombre}» fue dado de baja del sistema.", "",
+                  "  ⚠️  El producto no aparecerá más en el punto de venta ni en búsquedas."]
+
+        elif accion_raw == "AJUSTE_STOCK_MANUAL":
+            cant_ant = d_ant.get('stock', d_ant.get('cantidad', '—'))
+            cant_nue = d_nue.get('stock', d_nue.get('cantidad', '—'))
+            id_prod = d_nue.get('id_producto')
+            nombre_prod = "—"
+            if id_prod:
+                try:
+                    prod = self.backend.buscar_producto_por_id(int(id_prod))
+                    if prod and prod.get("nombre"): nombre_prod = prod["nombre"]
+                except: pass
+            try:
+                diff = int(cant_nue) - int(cant_ant)
+                diff_str = f"+{diff}" if diff > 0 else str(diff)
+                diff_label = "⬆️  Ingreso de mercadería" if diff > 0 else "⬇️  Retiro o corrección de stock"
+            except:
+                diff_str, diff_label = "—", ""
+            L += [f"Se ajustó el stock del producto «{nombre_prod}».", "",
+                  f"  Stock anterior:  {cant_ant}",
+                  f"  Stock nuevo:     {cant_nue}",
+                  f"  Diferencia:      {diff_str}  {diff_label}"]
+
+        # ── CLIENTES ──────────────────────────────────────────────────────────
+        elif accion_raw == "CREAR_CLIENTE":
+            nombre = d_nue.get('nombre', '—')
+            limite = fmt_m(d_nue.get('limite_credito', 0))
+            L += [f"Se registró el cliente «{nombre}».", "",
+                  f"  Nombre:              {nombre}",
+                  f"  Límite de crédito:   {limite}"]
+
+        elif accion_raw == "MODIFICAR_LIMITE_CREDITO_CLIENTE":
+            o = fmt_m(d_ant.get('limite_credito', 0))
+            n = fmt_m(d_nue.get('limite_credito', 0))
+            L += ["Se modificó el límite de crédito del cliente.", "",
+                  f"  Límite anterior:  {o}",
+                  f"  Límite nuevo:     {n}"]
+
+        elif accion_raw == "DESACTIVAR_CLIENTE":
+            nombre = d_ant.get('nombre', d_nue.get('nombre', '—'))
+            L += [f"El cliente «{nombre}» fue desactivado.", "",
+                  "  ⚠️  El cliente no puede comprar en cuenta corriente mientras esté inactivo."]
+
+        elif accion_raw == "REACTIVAR_CLIENTE":
+            nombre = d_nue.get('nombre', d_ant.get('nombre', '—'))
+            L += [f"El cliente «{nombre}» fue reactivado.", "",
+                  "  ✅  El cliente puede operar con normalidad."]
+
+        # ── PROVEEDORES ───────────────────────────────────────────────────────
+        elif accion_raw == "CREAR_PROVEEDOR":
+            nombre = d_nue.get('nombre', '—')
+            empresa = d_nue.get('empresa', '')
+            L += [f"Se dio de alta al proveedor «{nombre}».", "",
+                  f"  Nombre de contacto:  {nombre}"]
+            if empresa: L.append(f"  Empresa:             {empresa}")
+
+        elif accion_raw == "DESACTIVAR_PROVEEDOR":
+            nombre = d_ant.get('nombre', d_nue.get('nombre', '—'))
+            L += [f"El proveedor «{nombre}» fue desactivado.", "",
+                  "  ⚠️  No aparece disponible para nuevas compras."]
+
+        elif accion_raw == "REACTIVAR_PROVEEDOR":
+            nombre = d_nue.get('nombre', d_ant.get('nombre', '—'))
+            L += [f"El proveedor «{nombre}» fue reactivado.", "",
+                  "  ✅  El proveedor puede volver a utilizarse para nuevas compras."]
+
+        elif accion_raw == "EDITAR_PROVEEDOR":
+            nombre = d_ant.get('nombre', d_nue.get('nombre', '—'))
+            L += [f"Se modificaron datos del proveedor «{nombre}».", ""]
+            for k, label in [('nombre','Nombre'),('empresa','Empresa'),('telefono','Teléfono'),('email','Email'),('direccion','Dirección')]:
+                v_a, v_n = d_ant.get(k), d_nue.get(k)
+                if v_a is not None and v_n is not None and str(v_a) != str(v_n):
+                    L.append(f"  {label}: {v_a}  →  {v_n}")
+            if len(L) == 2: L.append("  (Sin cambios detectados en los campos registrados)")
+
+        # ── CATEGORÍAS ────────────────────────────────────────────────────────
+        elif accion_raw == "DESACTIVAR_CATEGORIA":
+            nombre = d_ant.get('nombre', d_nue.get('nombre', '—'))
+            L += [f"La categoría «{nombre}» fue desactivada.", "",
+                  "  ⚠️  Los productos de esta categoría siguen activos."]
+
+        elif accion_raw == "REACTIVAR_CATEGORIA":
+            nombre = d_nue.get('nombre', d_ant.get('nombre', '—'))
+            L += [f"La categoría «{nombre}» fue reactivada."]
+
+        # ── CAJA ──────────────────────────────────────────────────────────────
+        elif accion_raw == "APERTURA_CAJA":
+            monto = fmt_m(d_nue.get('monto_inicial', d_nue.get('monto', 0)))
+            abierto_por = fmt_u(d_nue.get('abierto_por', d_nue.get('id_usuario')))
+            L += ["Se abrió una caja de turno.", "",
+                  f"  Fondo inicial:  {monto}",
+                  f"  Abierto por:    {abierto_por}"]
+
+        elif accion_raw in ("CIERRE_CAJA", "CIERRE_CAJA_SUPERVISOR"):
+            diferencia = d_nue.get('diferencia')
+            contado = d_nue.get('contado', d_nue.get('efectivo_contado'))
+            esperado = d_nue.get('esperado', d_nue.get('efectivo_esperado'))
+            cerrado_por = fmt_u(d_nue.get('cerrado_por'))
+            motivo_cierre = d_nue.get('motivo', '')
+            encabezado = "⚠️  Caja cerrada de forma forzada por el supervisor." if accion_raw == "CIERRE_CAJA_SUPERVISOR" else "Se cerró la caja del turno."
+            L += [encabezado, ""]
+            if esperado is not None: L.append(f"  Efectivo esperado:  {fmt_m(esperado)}")
+            if contado is not None:  L.append(f"  Efectivo contado:   {fmt_m(contado)}")
+            if diferencia is not None:
+                dif_f = float(diferencia)
+                estado = "✅ Sin diferencia" if dif_f == 0 else (f"⬆️ Sobrante de {fmt_m(abs(dif_f))}" if dif_f > 0 else f"⬇️ Faltante de {fmt_m(abs(dif_f))}")
+                L.append(f"  Diferencia:         {fmt_m(diferencia)}  ({estado})")
+            if cerrado_por and cerrado_por != "—":
+                L += ["", f"  Cerrado por:  {cerrado_por}"]
+            if motivo_cierre:
+                L.append(f"  Motivo:       {motivo_cierre}")
+
+        # ── VENTAS / COMPRAS ──────────────────────────────────────────────────
+        elif accion_raw == "ANULAR_VENTA":
+            motivo = d_nue.get('motivo', 'Sin especificar')
+            autorizado = fmt_u(d_nue.get('autorizado_por', d_nue.get('id_usuario')))
+            # Formatear la fecha del evento para que sea legible
+            fecha_legible = fecha_evento
+            try:
+                dt = datetime.strptime(fecha_evento, "%Y-%m-%d %H:%M")
+                fecha_legible = dt.strftime("%d/%m/%Y a las %H:%M")
+            except Exception:
+                pass
+            L += [f"Se anuló una venta realizada el {fecha_legible}.", "",
+                  f"  Motivo:          {motivo}",
+                  f"  Autorizado por:  {autorizado}",
+                  "",
+                  "  ℹ️  Podés encontrar esta operación en el Historial de Ventas",
+                  "      filtrando por esa fecha y hora.",
+                  "  ℹ️  El stock de los productos fue repuesto automáticamente."]
+
+        elif accion_raw == "ANULAR_COMPRA":
+            motivo = d_nue.get('motivo', 'Sin especificar')
+            autorizado = fmt_u(d_nue.get('autorizado_por', d_nue.get('id_usuario')))
+            fecha_legible = fecha_evento
+            try:
+                dt = datetime.strptime(fecha_evento, "%Y-%m-%d %H:%M")
+                fecha_legible = dt.strftime("%d/%m/%Y a las %H:%M")
+            except Exception:
+                pass
+            L += [f"Se anuló una compra registrada el {fecha_legible}.", "",
+                  f"  Motivo:          {motivo}",
+                  f"  Autorizado por:  {autorizado}",
+                  "",
+                  "  ℹ️  Podés encontrar esta operación en el Historial de Compras",
+                  "      filtrando por esa fecha y hora."]
+
+        # ── TRANSFERENCIAS / TESORERÍA ────────────────────────────────────────
+        elif accion_raw in ("TRANSFERENCIA_CAJA", "TRANSFERENCIA_TESORERIA", "APROBACION_TRANSFERENCIA"):
+            monto = fmt_m(d_nue.get('monto', 0))
+            origen = res_caja(d_nue.get('origen', d_nue.get('id_session_origen')))
+            destino = res_caja(d_nue.get('destino', d_nue.get('id_session_destino')))
+            autorizado = fmt_u(d_nue.get('autorizado_por', d_nue.get('id_autorizador')))
+            concepto = d_nue.get('concepto', d_nue.get('descripcion', ''))
+            encabezado = {
+                "APROBACION_TRANSFERENCIA": "Transferencia de dinero autorizada.",
+                "TRANSFERENCIA_TESORERIA":  "Dinero transferido a la Tesorería del sistema.",
+                "TRANSFERENCIA_CAJA":       "Transferencia de dinero entre cajas.",
+            }.get(accion_raw, "Transferencia de dinero.")
+            L += [encabezado, "",
+                  f"  Origen:   {origen}",
+                  f"  Destino:  {destino}",
+                  f"  Monto:    {monto}"]
+            if autorizado and autorizado != "—": L += ["", f"  Autorizado por:  {autorizado}"]
+            if concepto: L.append(f"  Concepto:        {concepto}")
+
+        elif accion_raw == "CREAR_TESORERIA_AUTOMATICA":
+            L += ["El sistema creó automáticamente la Tesorería del día.", "",
+                  "  ℹ️  Este proceso ocurre automáticamente al inicio de cada jornada operativa."]
+
+        elif accion_raw == "EXPORTAR_HISTORIAL":
+            L += ["Se exportó el historial de auditoría a un archivo CSV.", "",
+                  "  ℹ️  La exportación fue realizada desde la Bitácora del sistema."]
+
+        else:
+            L += ["Acción registrada en el sistema.", ""]
+            campos_mostrados = 0
+            for k, v in d_nue.items():
+                if v is not None and str(v).strip():
+                    L.append(f"  {k.replace('_',' ').capitalize()}: {v}")
+                    campos_mostrados += 1
+            if campos_mostrados == 0:
+                L.append("  (Sin detalles adicionales disponibles)")
+
+        return "\n".join(L)
 
     def exportar_csv(self):
-        usr_sel = self.combo_usuario.get()
+        id_user = self.usuario_sel["id"]
         acc_sel = self.combo_accion.get()
         desde_str = self.entry_desde.get_date_str()
         hasta_str = self.entry_hasta.get_date_str()
         
-        id_user = self.map_usuarios.get(usr_sel) if usr_sel != "Todos" else None
         accion_tecnica = None
         if acc_sel != "Todas":
             accion_tecnica = INV_MAPEO_ACCIONES.get(acc_sel, acc_sel)

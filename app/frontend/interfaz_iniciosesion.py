@@ -101,7 +101,7 @@ def ui_login(parent, backend):
 
     configurar_navegacion_teclado(win, [entry_usuario, entry_contrasena, btn_login, btn_salir])
     entry_contrasena.bind("<Return>", iniciar_sesion)
-    entry_usuario.focus_set()
+    win.after(100, entry_usuario.focus_set)
     
     win.protocol("WM_DELETE_WINDOW", salir)
     

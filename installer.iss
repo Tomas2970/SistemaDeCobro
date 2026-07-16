@@ -4,7 +4,7 @@
 ; =====================================================
 
 #define MyAppName "Sistema Cobros Don Atilio"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.5.0 Base Cargada"
 #define MyAppPublisher "Don Atilio Supermercado"
 #define MyAppExeName "SistemaCobrosDonAtilio.exe"
 
@@ -51,6 +51,11 @@ Source: "installer_scripts\.env.production"; DestDir: "{app}"; DestName: ".env";
 
 ; --- Script que instala/levanta MariaDB/MySQL embebido ---
 Source: "installer_scripts\setup_mysql.bat"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- Datos demo pre-generados (dump SQL) ---
+#ifexist "demo_data.sql"
+Source: "demo_data.sql"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
 ; --- MySQL/MariaDB portable (tu carpeta mysql...) ---
 Source: "mysql\*"; DestDir: "{app}\mysql"; Flags: ignoreversion recursesubdirs createallsubdirs

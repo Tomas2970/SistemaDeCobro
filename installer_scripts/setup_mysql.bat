@@ -119,4 +119,19 @@ if exist "%SCHEMA%" (
 )
 
 echo [SETUP] MariaDB OK (servicio RUNNING en puerto 3307).
+
+REM --- Cargar datos demo si existe el dump ---
+set "DEMO_SQL=%BASE%\demo_data.sql"
+if exist "%DEMO_SQL%" (
+  echo [SETUP] Cargando datos demo pre-generados...
+    "%MYSQL_CLIENT%" -u root --port=3307 --protocol=TCP supermercado_don_atilio < "%DEMO_SQL%"
+    if errorlevel 1 (
+      echo [WARN] Fallo al cargar demo_data.sql ^(no es fatal, la app arranca igual^)
+    ) else (
+      echo [SETUP] Datos demo cargados correctamente!
+    )
+) else (
+  echo [SETUP] No se encontro demo_data.sql, la base queda solo con el esquema.
+)
+
 exit /b 0

@@ -91,26 +91,50 @@ if not MODO_SEED:
 # 🌱 FUNCIÓN DE SEED (Usada solo por el instalador)
 # =========================================================
 def seed_database():
-    """Ejecuta la carga demo completa usada por el instalador."""
+    """Ejecuta la carga demo, respetando datos pre-cargados por el instalador (dump SQL)."""
     print("\n" + "="*70)
-    print("  CARGA DEMO COMPLETA - Sistema Don Atilio")
+    print("  CARGA INICIAL - Sistema Don Atilio")
     print("="*70 + "\n")
 
     try:
+        from app.database import DB
+
+        # ── Detectar si el dump ya pobló la base ──────────────────────────────
+        usuarios_existentes = 0
+        try:
+            conn = DB.conectar()
+            cur  = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM usuario")
+            usuarios_existentes = int(cur.fetchone()[0])
+            cur.close()
+            conn.close()
+        except Exception as e_check:
+            print(f"  (No se pudo verificar usuarios existentes: {e_check})")
+
+        if usuarios_existentes > 0:
+            print(f"  Base de datos ya contiene {usuarios_existentes} usuario(s).")
+            print("  Los datos del dump pre-generado están intactos.")
+            print("  Omitiendo seed destructivo — la base ya está lista.\n")
+            return True
+        # ──────────────────────────────────────────────────────────────────────
+
+        # Base vacía: ejecutar seed completo
         from app.tools.demo_seed import run_demo_seed
 
-        print("ADVERTENCIA: esta operacion limpia la base operativa y recrea datos demo.")
+        print("  Base vacía detectada. Ejecutando carga demo completa...")
+        print("  ADVERTENCIA: esta operacion limpia la base y recrea datos demo.\n")
         resumen = run_demo_seed()
         print("\nCarga demo exitosa.")
         print("\nResumen:")
         for clave, valor in resumen.items():
             print(f"   - {clave}: {valor}")
         print("\nCredenciales demo:")
-        print("   - admin / admin123")
-        print("   - supervisor / super123")
-        print("   - lucia / lucia123")
-        print("   - martin / martin123")
-        print("   - sofia / sofia123")
+        print("   - admin      / admin123")
+        print("   - valentina  / valentina10  (supervisora)")
+        print("   - lucia      / lucia10")
+        print("   - martin     / martin10")
+        print("   - sofia      / sofia10")
+        print("   - carlos     / carlos10")
         return True
 
     except Exception as e:

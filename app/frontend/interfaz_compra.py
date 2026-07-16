@@ -347,7 +347,7 @@ def ui_compra(parent: tk.Misc, backend, usuario: dict):
     ctk.CTkButton(frame_footer, text="🗑️ Quitar Item", command=quitar_producto_seleccionado, fg_color=col_card, border_color="#ef4444", border_width=1, hover_color="#fee2e2", text_color="#ef4444", font=("Segoe UI", 12, "bold"), width=150, height=45).pack(side="left", padx=5)
     
     ctk.CTkButton(frame_footer, text="✓ CONFIRMAR COMPRA", command=lambda: guardar_compra(), fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 16, "bold"), width=250, height=55).pack(side="right", padx=10)
-    ctk.CTkButton(frame_footer, text="Cancelar", command=win.destroy, fg_color="#6b7280", hover_color="#4b5563", font=("Segoe UI", 13, "bold"), width=150, height=55).pack(side="right", padx=5)
+    ctk.CTkButton(frame_footer, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 13, "bold"), width=150, height=55).pack(side="right", padx=5)
 
     def pedir_medio_pago():
         dialog = ctk.CTkToplevel(win)

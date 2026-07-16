@@ -44,7 +44,7 @@ def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_
     ctk.CTkLabel(frm_main, text="Credencial o Usuario Administrador/Supervisor:", font=("Segoe UI", 12), text_color=get_color("text_secondary")).pack(anchor="w", padx=40)
     entry_user = ctk.CTkEntry(frm_main, font=("Segoe UI", 13), width=280, height=35, placeholder_text="Escanee o escriba...")
     entry_user.pack(pady=(2, 10))
-    entry_user.focus_set()
+    popup.after(100, entry_user.focus_set)
     
     ctk.CTkLabel(frm_main, text="Contraseña / PIN:", font=("Segoe UI", 12), text_color=get_color("text_secondary")).pack(anchor="w", padx=40)
     entry_pass = ctk.CTkEntry(frm_main, show="●", font=("Segoe UI", 13), width=280, height=35, placeholder_text="••••••••")
@@ -82,7 +82,7 @@ def solicitar_autorizacion_supervisor(parent, backend, usuario_actual, callback_
             messagebox.showwarning("Atención", msg, parent=popup)
             return
         try:
-            autorizador = backend.verificar_contraseña(u_nom, u_pass)
+            autorizador = backend.verificar_contraseña(u_nom, u_pass, ignorar_sesion=True)
             if autorizador and autorizador.get('id_rol') in roles_permitidos:
                 procesar_aprobacion_local(autorizador)
             else:

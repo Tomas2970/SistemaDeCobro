@@ -157,7 +157,7 @@ def _obtener_totales_movimientos(cur, id_session: int) -> list:
 # ======================================================
 # AUTENTICACIÓN
 # ======================================================
-def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
+def verificar_contraseña(usuario: str, contraseña: str, ignorar_sesion: bool = False) -> Optional[dict]:
     conn = cur = None
     try:
         conn = conectar()
@@ -171,7 +171,7 @@ def verificar_contraseña(usuario: str, contraseña: str) -> Optional[dict]:
         if not row or not row["activo"]:
             return None
             
-        if row.get("token_sesion"):
+        if row.get("token_sesion") and not ignorar_sesion:
             from datetime import datetime
             if row.get("token_timestamp"):
                 time_diff = datetime.now() - row["token_timestamp"]
@@ -1200,8 +1200,7 @@ def obtener_vendedores() -> list[dict]:
             """
             SELECT u.id_usuario, u.nombre
             FROM Usuario u
-            JOIN Rol r ON r.id_rol = u.id_rol
-            WHERE u.activo = 1 AND r.nombre IN ('vendedor','admin','supervisor')
+            WHERE u.activo = 1 AND u.id_rol = 2
             ORDER BY u.nombre
             """
         )
@@ -1209,13 +1208,42 @@ def obtener_vendedores() -> list[dict]:
     except Exception as e:
         logger.error(f"obtener_vendedores: {e}")
         return []
-    finally:
-        try:
-            if cur: cur.close()
-            if conn: conn.close()
-        except Exception:
-            pass
 
+def obtener_compradores() -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT u.id_usuario, u.nombre
+            FROM Usuario u
+            WHERE u.activo = 1 AND u.id_rol IN (1, 3)
+            ORDER BY u.nombre
+            """
+        )
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_compradores: {e}")
+        return []
+
+def obtener_usuarios_operativos() -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT u.id_usuario, u.nombre
+            FROM Usuario u
+            WHERE u.activo = 1 AND u.id_rol IN (1, 2, 3)
+            ORDER BY u.nombre
+            """
+        )
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"obtener_usuarios_operativos: {e}")
+        return []
 def reporte_ventas_por_vendedor(desde: str, hasta: str, id_vendedor: Optional[int] = None) -> list[dict]:
     conn = cur = None
     try:

@@ -161,11 +161,12 @@ class DemoSeeder:
 
     def _seed_users(self) -> dict[str, int]:
         specs = [
-            ("admin", "admin123", 1, "10000001"),
-            ("supervisor", "super123", 3, "10000002"),
-            ("lucia", "lucia123", 2, "20000001"),
-            ("martin", "martin123", 2, "20000002"),
-            ("sofia", "sofia123", 2, "20000003"),
+            ("admin",     "admin123",    1, "10000001"),
+            ("valentina", "valentina10", 3, "10000002"),
+            ("lucia",     "lucia10",     2, "20000001"),
+            ("martin",    "martin10",    2, "20000002"),
+            ("sofia",     "sofia10",     2, "20000003"),
+            ("carlos",    "carlos10",    2, "20000004"),
         ]
         ids: dict[str, int] = {}
         for nombre, password, rol, codigo in specs:
@@ -360,10 +361,20 @@ class DemoSeeder:
                 ("Comedor Los Pinos", "cuenta_corriente", [("Pollo Entero kg", 4.8), ("Arroz Largo Fino 1kg", 6), ("Aceite Girasol 900ml", 4)]),
                 ("Valeria Castro", "tarjeta", [("Yogur Vainilla 1L", 2), ("Helado 1kg", 1), ("Chocolate 100g", 3)]),
             ]),
+            (-12, "carlos", [
+                (None, "efectivo", [("Leche Entera 1L", 3), ("Azucar 1kg", 2), ("Arroz Largo Fino 1kg", 1)]),
+                ("Valeria Castro", "tarjeta", [("Hamburguesas x4", 2), ("Helado 1kg", 1)]),
+                ("Nicolas Herrera", "efectivo", [("Detergente 750ml", 1), ("Lavandina 1L", 2), ("Papel Higienico x4", 1)]),
+            ]),
             (-9, "lucia", [
                 ("Nicolas Herrera", "efectivo", [("Hamburguesas x4", 2), ("Papel Higienico x4", 1), ("Agua Mineral 2L", 3)]),
                 ("Carlos Molina", "cuenta_corriente", [("Carne Molida kg", 1.4), ("Tomate kg", 2), ("Pan Frances kg", 1)]),
                 (None, "transferencia", [("Coca Cola 1.5L", 1), ("Medialunas unidad", 12)]),
+            ]),
+            (-5, "sofia", [
+                ("Ana Pereyra", "efectivo", [("Coca Cola 1.5L", 3), ("Fideos Tallarin 500g", 2)]),
+                ("Despensa El Molino", "cuenta_corriente", [("Leche Entera 1L", 12), ("Yogur Vainilla 1L", 6)]),
+                (None, "tarjeta", [("Chocolate 100g", 4), ("Caramelos surtidos 500g", 2)]),
             ]),
             (-3, "martin", [
                 ("Paula Sosa", "tarjeta", [("Leche Entera 1L", 4), ("Azucar 1kg", 2), ("Fideos Tallarin 500g", 2)]),
@@ -414,7 +425,7 @@ class DemoSeeder:
                     "transferencia_tesoreria_salida",
                     "transferencia_tesoreria_entrada",
                     "Transferencia de efectivo de turno a tesoreria",
-                    ctx.usuarios["supervisor"],
+                    ctx.usuarios["valentina"],
                 )
                 self._date_latest_movements(2, self._dt(day_offset, 15, 0))
 
@@ -434,7 +445,7 @@ class DemoSeeder:
             self._date_audit("CIERRE_CAJA", "caja_session", session_id, self._dt(day_offset, 17, 25))
 
         if venta_para_anular:
-            self.backend.anular_venta(venta_para_anular, ctx.usuarios["supervisor"], "Cliente informo error en medio de pago")
+            self.backend.anular_venta(venta_para_anular, ctx.usuarios["valentina"], "Cliente informo error en medio de pago")
             self._date_sale(venta_para_anular, self._dt(-2, 11, 10))
             self._date_audit("ANULAR_VENTA", "Venta", venta_para_anular, self._dt(-2, 11, 15))
 
@@ -453,9 +464,9 @@ class DemoSeeder:
 
     def _seed_history_exports(self, ctx: DemoContext) -> None:
         exports = [
-            (ctx.usuarios["admin"], -7, "EXPORTAR_HISTORIAL", "Venta", {"reporte": "ventas", "rango": "ultimos_30_dias"}),
-            (ctx.usuarios["supervisor"], -4, "EXPORTAR_HISTORIAL", "caja_movimiento", {"reporte": "caja", "rango": "semana"}),
-            (ctx.usuarios["admin"], -1, "EXPORTAR_HISTORIAL", "AuditoriaAcciones", {"reporte": "auditoria", "formato": "csv"}),
+            (ctx.usuarios["admin"],     -7, "EXPORTAR_HISTORIAL", "Venta",            {"reporte": "ventas",    "rango": "ultimos_30_dias"}),
+            (ctx.usuarios["valentina"], -4, "EXPORTAR_HISTORIAL", "caja_movimiento",  {"reporte": "caja",      "rango": "semana"}),
+            (ctx.usuarios["admin"],     -1, "EXPORTAR_HISTORIAL", "AuditoriaAcciones",{"reporte": "auditoria", "formato": "csv"}),
         ]
         for user_id, day_offset, action, table, data in exports:
             self.DB.registrar_auditoria(user_id, action, table, None, None, data)
@@ -682,14 +693,14 @@ class DemoSeeder:
                 cur.execute(sql)
                 result[key] = int(cur.fetchone()[0])
             required = {
-                "usuarios": 5,
+                "usuarios": 6,
                 "clientes": 8,
                 "proveedores": 4,
                 "productos": 20,
                 "compras": 4,
-                "ventas": 12,
+                "ventas": 18,
                 "pagos": 3,
-                "cajas": 5,
+                "cajas": 7,
                 "movimientos_caja": 20,
                 "clientes_con_deuda": 2,
                 "auditoria": 10,

@@ -373,6 +373,9 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
     btn_cancelar = ctk.CTkButton(frm_footer, text="🗑️ Cancelar", fg_color="#ef4444", hover_color="#dc2626", font=font_title, width=150, height=55)
     btn_cancelar.pack(side="left", padx=20, pady=20)
 
+    btn_cerrar = ctk.CTkButton(frm_footer, text="✖ Cerrar", fg_color="#4b5563", hover_color="#374151", font=font_title, width=120, height=55)
+    btn_cerrar.pack(side="left", padx=(0, 20), pady=20)
+
     btn_quitar = ctk.CTkButton(frm_footer, text="➖ Quitar Ítem", fg_color="#f59e0b", hover_color="#d97706", font=font_title, width=150, height=55)
     btn_quitar.pack(side="left", padx=(0, 20), pady=20)
 
@@ -884,13 +887,23 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             win.after(200, verificar_expulsion)
 
     def cancelar_venta():
+        """Limpia la venta activa sin cerrar la ventana (el POS queda listo para otra venta)."""
+        if not items:
+            return  # No hay nada que cancelar
+        if messagebox.askyesno("Confirmar", "¿Cancelar la venta actual y limpiar el carrito?", parent=win):
+            _reiniciar_venta_completa()
+
+    def cerrar_ventana():
+        """Cierra la ventana del POS. Pide confirmación solo si hay items cargados."""
         if items:
-            if not messagebox.askyesno("Confirmar", "Hay productos en el carrito.\n¿Seguro que desea cancelar la venta?", parent=win):
+            if not messagebox.askyesno("Confirmar", "Hay productos en el carrito.\n¿Seguro que desea cerrar el punto de venta?", parent=win):
                 return
         win.destroy()
 
     btn_confirmar.configure(command=confirmar_venta)
     btn_cancelar.configure(command=cancelar_venta)
+    btn_cerrar.configure(command=cerrar_ventana)
+
 
     _upd_cliente()
     
@@ -901,7 +914,7 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
 
     win.bind("<F2>", lambda e: abrir_selector_cliente())
     win.bind("<F12>", lambda e: confirmar_venta())
-    win.bind("<Escape>", lambda e: cancelar_venta())
+    win.bind("<Escape>", lambda e: cerrar_ventana())
     win.bind("<F5>", enfocar_cantidad)
     
     configurar_navegacion_ventana(win)

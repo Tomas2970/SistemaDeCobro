@@ -496,6 +496,8 @@ class Historiales:
             try:
                 # 1. Consultar base de datos en segundo plano
                 vends = self.backend.obtener_vendedores() or []
+                comps = self.backend.obtener_compradores() or []
+                ops = self.backend.obtener_usuarios_operativos() or []
                 clis = self.backend.listar_clientes() or []
                 provs = self.backend.obtener_proveedores(incluir_inactivos=True) or []
                 
@@ -517,6 +519,8 @@ class Historiales:
                 # 3. Asignar y actualizar la UI de forma segura en el hilo principal
                 def _update_ui():
                     self.vendedores_raw = vends
+                    self.compradores_raw = comps
+                    self.usuarios_operativos_raw = ops
                     self.clientes_raw = clis
                     self.proveedores_raw = provs
                     
@@ -620,11 +624,11 @@ class Historiales:
 
         # 1. Filtro Rango
         ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
-        cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
+        self.cb_rango_v = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_v, self.fecha_hasta_v),
                                      width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=3)
+        self.cb_rango_v.set("Personalizado")
+        self.cb_rango_v.grid(row=0, column=1, padx=3)
 
         # 2. Fecha Desde
         ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
@@ -640,7 +644,7 @@ class Historiales:
         self.fecha_hasta_v.widget_entrada.delete(0, tk.END)
         self.fecha_hasta_v.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
         
-        cb_rango.bind("<<ComboboxSelected>>", lambda e: _aplicar_filtro_rapido_logic(cb_rango.get(), self.fecha_desde_v.widget_entrada, self.fecha_hasta_v.widget_entrada))
+        self.cb_rango_v.bind("<<ComboboxSelected>>", lambda e: _aplicar_filtro_rapido_logic(self.cb_rango_v.get(), self.fecha_desde_v.widget_entrada, self.fecha_hasta_v.widget_entrada))
 
         # 4. Buscador Vendedor (Encapsulado en sub-frame)
         ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=6, padx=(10, 3), sticky="e")
@@ -1006,6 +1010,8 @@ class Historiales:
         except Exception: pass
 
     def _limpiar_filtros_ventas(self):
+        if hasattr(self, 'cb_rango_v'):
+            self.cb_rango_v.set("Personalizado")
         hoy = date.today()
         self.fecha_desde_v.widget_entrada.delete(0, tk.END)
         self.fecha_desde_v.widget_entrada.insert(0, f"01/{hoy.month:02d}/{hoy.year}")
@@ -1058,11 +1064,11 @@ class Historiales:
 
         # 1. Filtro Rango
         ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
-        cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
+        self.cb_rango_c = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_c, self.fecha_hasta_c),
                                      width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=3)
+        self.cb_rango_c.set("Personalizado")
+        self.cb_rango_c.grid(row=0, column=1, padx=3)
 
         # 2. Fecha Desde
         ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
@@ -1091,7 +1097,7 @@ class Historiales:
         btn_proveedor.pack(side="left")
 
         # 5. Buscador Vendedor (Encapsulado en sub-frame)
-        ctk.CTkLabel(frm, text="Vendedor:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
+        ctk.CTkLabel(frm, text="Usuario:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=8, padx=(10, 3), sticky="e")
         frm_usuario_c = ctk.CTkFrame(frm, fg_color="transparent")
         frm_usuario_c.grid(row=0, column=9, padx=3, sticky="w")
         
@@ -1107,7 +1113,7 @@ class Historiales:
             btn_usuario = ctk.CTkButton(frm_usuario_c, text="🔍", width=35, height=30, fg_color="gray", state="disabled")
         else:
             btn_usuario = ctk.CTkButton(frm_usuario_c, text="🔍", width=35, height=30, fg_color="#3b82f6", 
-                                        command=lambda: self._abrir_selector_entidad("Vendedor", self.usuario_c_sel, self.vendedores_raw, self.lbl_usuario_c))
+                                        command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_c_sel, self.compradores_raw, self.lbl_usuario_c))
         btn_usuario.pack(side="left")
 
         # 6. Botones de Acción (Grupo alineado a la derecha)
@@ -1120,7 +1126,7 @@ class Historiales:
         btn_limpiar = self.crear_boton_accion(frm_acciones, "🧹 Limpiar", self._limpiar_filtros_compras, "#6b7280", width=8)
         btn_limpiar.pack(side="left", padx=3)
 
-        cols = ("ID", "Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Vendedor")
+        cols = ("ID", "Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Usuario")
         
         # Frame contenedor para Compras Maestro + Scrollbar
         frm_maestro_c_cont = ctk.CTkFrame(self.bg_compras, fg_color="transparent")
@@ -1139,7 +1145,7 @@ class Historiales:
         
         for c in cols: self.tree_maestro_c.heading(c, text=c)
         self.tree_maestro_c.column("ID", width=0, stretch=False)
-        self.tree_maestro_c.configure(displaycolumns=("Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Vendedor"))
+        self.tree_maestro_c.configure(displaycolumns=("Fecha", "Empresa", "CUIT", "Total", "Estado", "Pago", "Usuario"))
         self.tree_maestro_c.column("Total", anchor="e")
         self.tree_maestro_c.column("Estado", width=100, anchor="center")
         self.tree_maestro_c.column("Pago", width=100, anchor="center")
@@ -1250,6 +1256,8 @@ class Historiales:
             self.buscar_compras()
 
     def _limpiar_filtros_compras(self):
+        if hasattr(self, 'cb_rango_c'):
+            self.cb_rango_c.set("Personalizado")
         hoy = date.today()
         self.fecha_desde_c.widget_entrada.delete(0, tk.END)
         self.fecha_desde_c.widget_entrada.insert(0, f"01/{hoy.month:02d}/{hoy.year}")
@@ -1280,11 +1288,11 @@ class Historiales:
 
         # 1. Filtro Rango
         ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
-        cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
+        self.cb_rango_p = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_p, self.fecha_hasta_p),
                                      width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=3)
+        self.cb_rango_p.set("Personalizado")
+        self.cb_rango_p.grid(row=0, column=1, padx=3)
 
         # 2. Fecha Desde
         ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
@@ -1321,7 +1329,7 @@ class Historiales:
         self.lbl_usuario_p.pack(side="left", padx=(0, 5))
         
         btn_usuario = ctk.CTkButton(frm_usuario_p, text="🔍", width=35, height=30, fg_color="#3b82f6", 
-                                    command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_p_sel, self.vendedores_raw, self.lbl_usuario_p))
+                                    command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_p_sel, self.usuarios_operativos_raw, self.lbl_usuario_p))
         btn_usuario.pack(side="left")
 
         # 6. Botones de Acción (Grupo alineado a la derecha)
@@ -1433,6 +1441,8 @@ class Historiales:
             self.buscar_pagos()
 
     def _limpiar_filtros_pagos(self):
+        if hasattr(self, 'cb_rango_p'):
+            self.cb_rango_p.set("Personalizado")
         hoy = date.today()
         self.fecha_desde_p.widget_entrada.delete(0, tk.END)
         self.fecha_desde_p.widget_entrada.insert(0, f"01/{hoy.month:02d}/{hoy.year}")
@@ -1461,11 +1471,11 @@ class Historiales:
 
         # 1. Filtro Rango
         ctk.CTkLabel(frm, text="Rango:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=0, padx=3, sticky="e")
-        cb_rango = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
+        self.cb_rango_cj = ctk.CTkOptionMenu(frm, values=["Personalizado", "Hoy", "Ayer", "Esta Semana", "Este Mes", "Mes Pasado"], 
                                      command=lambda v: self._on_rango_change(v, self.fecha_desde_cj, self.fecha_hasta_cj),
                                      width=130, fg_color=get_color("bg_pop"), button_color=get_color("bg_pop"))
-        cb_rango.set("Personalizado")
-        cb_rango.grid(row=0, column=1, padx=3)
+        self.cb_rango_cj.set("Personalizado")
+        self.cb_rango_cj.grid(row=0, column=1, padx=3)
 
         # 2. Fecha Desde
         ctk.CTkLabel(frm, text="Desde:", font=("Segoe UI", 12, "bold"), text_color=get_color("text_primary")).grid(row=0, column=2, padx=3, sticky="e")
@@ -1481,7 +1491,7 @@ class Historiales:
         self.fecha_hasta_cj.widget_entrada.delete(0, tk.END)
         self.fecha_hasta_cj.widget_entrada.insert(0, date.today().strftime("%d/%m/%Y"))
         
-        cb_rango.bind("<<ComboboxSelected>>", lambda e: _aplicar_filtro_rapido_logic(cb_rango.get(), self.fecha_desde_cj.widget_entrada, self.fecha_hasta_cj.widget_entrada))
+        self.cb_rango_cj.bind("<<ComboboxSelected>>", lambda e: _aplicar_filtro_rapido_logic(self.cb_rango_cj.get(), self.fecha_desde_cj.widget_entrada, self.fecha_hasta_cj.widget_entrada))
         
         # Definir diccionario de filtros de caja
         self.opciones_filtro_caja = {
@@ -1533,7 +1543,7 @@ class Historiales:
             self.btn_usuario_cj = ctk.CTkButton(frm_usuario_cj, text="🔍", width=35, height=30, fg_color="gray", state="disabled")
         else:
             self.btn_usuario_cj = ctk.CTkButton(frm_usuario_cj, text="🔍", width=35, height=30, fg_color="#3b82f6", 
-                                                command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_caja_sel, self.vendedores_raw, self.lbl_usuario_cj))
+                                                command=lambda: self._abrir_selector_entidad("Usuario", self.usuario_caja_sel, self.usuarios_operativos_raw, self.lbl_usuario_cj))
         self.btn_usuario_cj.pack(side="left")
         
         # 6. Botones de Acción
@@ -1769,6 +1779,8 @@ class Historiales:
             self.buscar_caja()
         
     def _limpiar_filtros_caja(self):
+        if hasattr(self, 'cb_rango_cj'):
+            self.cb_rango_cj.set("Personalizado")
         hoy = date.today()
         self.fecha_desde_cj.widget_entrada.delete(0, tk.END)
         self.fecha_desde_cj.widget_entrada.insert(0, hoy.strftime("%d/%m/%Y"))

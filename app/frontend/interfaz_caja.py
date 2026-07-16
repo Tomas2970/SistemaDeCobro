@@ -119,8 +119,14 @@ def ui_caja_supervisor(parent, backend, usuario):
     btn_actualizar.configure(command=cargar_cajas)
     cargar_cajas()
     
+    # Footer con botón Cerrar
+    fr_footer = ctk.CTkFrame(win, fg_color="transparent")
+    fr_footer.pack(fill="x", padx=20, pady=(0, 15))
+    ctk.CTkButton(fr_footer, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 13, "bold"), width=120, height=40).pack(side="right")
+
     centrar_y_mostrar_ventana(win)
     win.grab_set()
+
 
 def ui_caja_router(parent, backend, usuario, **kwargs):
     """

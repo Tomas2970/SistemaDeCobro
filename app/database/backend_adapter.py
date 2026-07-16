@@ -62,8 +62,8 @@ class BackendAdapter:
     
     
     # ---------- Auth ----------
-    def verificar_contraseña(self, usuario: str, contraseña: str) -> dict | None:
-        return DB.verificar_contraseña(usuario, contraseña)
+    def verificar_contraseña(self, usuario: str, contraseña: str, ignorar_sesion: bool = False) -> dict | None:
+        return DB.verificar_contraseña(usuario, contraseña, ignorar_sesion=ignorar_sesion)
 
     def buscar_usuario_por_codigo(self, codigo_barras: str) -> dict | None:
         fn = getattr(DB, "buscar_usuario_por_codigo", None)
@@ -996,6 +996,14 @@ class BackendAdapter:
     # ---------- Reportes ----------
     def obtener_vendedores(self) -> list[dict[str, Any]]:
         fn = getattr(DB, "obtener_vendedores", None)
+        return list(fn() or []) if callable(fn) else []
+
+    def obtener_compradores(self) -> list[dict[str, Any]]:
+        fn = getattr(DB, "obtener_compradores", None)
+        return list(fn() or []) if callable(fn) else []
+
+    def obtener_usuarios_operativos(self) -> list[dict[str, Any]]:
+        fn = getattr(DB, "obtener_usuarios_operativos", None)
         return list(fn() or []) if callable(fn) else []
     def reporte_ventas_por_vendedor(self, desde: str, hasta: str, id_vendedor: int | None = None) -> list[dict[str, Any]]:
         fn = getattr(DB, "reporte_ventas_por_vendedor", None)
