@@ -134,6 +134,15 @@ def ui_menu_principal(parent, backend, usuario):
         if mostrar_confirmacion("Cerrar Sesión", "¿Seguro que deseas salir del sistema?"):
             stock_events.desuscribir(check_stock)
             detener_polling_broadcast(win)
+            # Cancelar el timer de verificación de sesión para que no dispare
+            # el error "Sesión expirada" en la pantalla de login posterior
+            after_id = getattr(win, '_verificar_sesion_after_id', None)
+            if after_id:
+                try:
+                    win.after_cancel(after_id)
+                except Exception:
+                    pass
+            win._verificar_sesion_after_id = None
             win.quit()
 
     ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
@@ -286,11 +295,13 @@ def ui_menu_principal(parent, backend, usuario):
                         return
         except Exception as e:
             logger.error(f"Error al verificar estado del usuario: {e}")
-            
-        win.after(5000, verificar_estado_usuario)
 
-    # Iniciar ciclo de verificación
-    win.after(5000, verificar_estado_usuario)
+        # Guardar el ID del timer para poder cancelarlo limpiamente al cerrar sesión
+        if win.winfo_exists():
+            win._verificar_sesion_after_id = win.after(5000, verificar_estado_usuario)
+
+    # Iniciar ciclo de verificación y guardar su ID
+    win._verificar_sesion_after_id = win.after(5000, verificar_estado_usuario)
 
     win.protocol("WM_DELETE_WINDOW", cerrar_sesion)
     win.deiconify()

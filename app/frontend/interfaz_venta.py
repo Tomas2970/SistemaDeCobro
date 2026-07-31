@@ -77,17 +77,17 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
             w.focus_force()
             return
 
-    # 🔥 VALIDACIÓN DE CAJA ABIERTA
+    # 🔥 VALIDACIÓN DE CAJA ABIERTA (filtrada por el usuario actual)
     try:
-        session_actual = backend.obtener_session_activa()
+        session_actual = backend.obtener_session_abierta(id_usuario=usuario.get('id_usuario'))
     except Exception:
         session_actual = None
         
     if not session_actual:
         messagebox.showerror(
             "⚠️ Caja Cerrada",
-            "No se puede abrir el punto de venta porque la caja está cerrada.\n\n"
-            "Por favor, abra la caja antes de iniciar una venta.",
+            "No se puede abrir el punto de venta porque no tenés una caja abierta.\n\n"
+            "Por favor, abrí tu caja antes de iniciar una venta.",
             parent=parent.winfo_toplevel()
         )
         return
@@ -862,16 +862,12 @@ def ui_venta(parent: tk.Misc, backend, usuario: dict) -> None:
         except Exception as e:
             messagebox.showerror("Error", f"Venta revertida.\n{e}", parent=win); return
 
-        try:
-            from app.frontend.custom_dialogs import mostrar_confirmacion_exito
-            imprimir = mostrar_confirmacion_exito(
-                "✅ Venta Registrada", 
-                f"Venta #{id_venta} registrada con éxito.\nTotal: ${total_venta:,.2f}\n\n¿Desea imprimir el ticket?",
-                parent=win
-            )
-        except Exception as e:
-            print(f"Error en diálogo de confirmación: {e}")
-            imprimir = False
+        from app.frontend.custom_dialogs import mostrar_confirmacion_exito
+        imprimir = mostrar_confirmacion_exito(
+            "✅ Venta Registrada", 
+            f"Venta #{id_venta} registrada con éxito.\nTotal: ${total_venta:,.2f}\n\n¿Desea imprimir el ticket?",
+            parent=win
+        )
 
         if imprimir in (True, 'yes', 'True', '1'):
             try:

@@ -42,7 +42,8 @@ MAPEO_ACCIONES = {
     "APERTURA_CAJA": "🔓 Apertura de caja",
     "TRANSFERENCIA_CAJA": "🔄 Transferencia entre cajas",
     "TRANSFERENCIA_TESORERIA": "🏦 Transferencia a Tesorería",
-    "EDITAR_PROVEEDOR": "✏️ Proveedor modificado"
+    "EDITAR_PROVEEDOR": "✏️ Proveedor modificado",
+    "INGRESO_CAPITAL": "💰 Ingreso de capital a Tesorería"
 }
 
 INV_MAPEO_ACCIONES = {v: k for k, v in MAPEO_ACCIONES.items()}
@@ -55,7 +56,7 @@ GRUPOS_ACCIONES = {
     "♻️ Reactivaciones": ["REACTIVAR_USUARIO", "REACTIVAR_CLIENTE", "REACTIVAR_PROVEEDOR", "REACTIVAR_CATEGORIA"],
     "✏️ Modificaciones": ["MODIFICAR_USUARIO", "MODIFICAR_PRODUCTO", "MODIFICAR_LIMITE_CREDITO_CLIENTE", "EDITAR_PROVEEDOR", "RESETEAR_PASSWORD", "AJUSTE_STOCK_MANUAL"],
     "🔒 Caja y Turnos": ["APERTURA_CAJA", "CIERRE_CAJA", "CIERRE_CAJA_SUPERVISOR"],
-    "💸 Movimientos de Dinero": ["TRANSFERENCIA_CAJA", "TRANSFERENCIA_TESORERIA", "APROBACION_TRANSFERENCIA", "CREAR_TESORERIA_AUTOMATICA"],
+    "💸 Movimientos de Dinero": ["TRANSFERENCIA_CAJA", "TRANSFERENCIA_TESORERIA", "APROBACION_TRANSFERENCIA", "CREAR_TESORERIA_AUTOMATICA", "INGRESO_CAPITAL"],
     "🚫 Anulaciones": ["ANULAR_VENTA", "ANULAR_COMPRA"],
     "📤 Exportaciones": ["EXPORTAR_HISTORIAL"],
 }
@@ -468,6 +469,14 @@ class InterfazAuditoria:
                     estado = "✅ Sin diferencia" if dif_f == 0 else ("⬆️ Sobrante" if dif_f > 0 else "⬇️ Faltante")
                     return f"Contado: ${float(contado):,.2f} | Diferencia: ${abs(dif_f):,.2f} {estado}"
                 if accion == "CIERRE_CAJA_SUPERVISOR":
+                    id_usuario_caja = d_nue.get('id_usuario_caja')
+                    if id_usuario_caja:
+                        try:
+                            nombre_caja = next((u.get('nombre') for u in getattr(self, 'usuarios_raw', []) if u.get('id_usuario') == int(id_usuario_caja)), None)
+                            if nombre_caja:
+                                return f"Cierre forzado de caja de «{nombre_caja}» · Motivo: {d_nue.get('motivo','Sin especificar')}"
+                        except Exception:
+                            pass
                     return f"Cierre forzado por supervisor · Motivo: {d_nue.get('motivo','Sin especificar')}"
                 return "Cierre de caja registrado"
 
@@ -501,6 +510,11 @@ class InterfazAuditoria:
                 return f"${float(monto):,.2f} · De: {origen} → A: {destino}"
             if accion == "CREAR_TESORERIA_AUTOMATICA":
                 return "Tesorería del día creada automáticamente por el sistema"
+            if accion == "INGRESO_CAPITAL":
+                monto = d_nue.get('monto', 0)
+                obs   = d_nue.get('observacion', 'Sin detalle')
+                try: return f"El administrador ingresó ${float(monto):,.2f} al fondo del negocio · {obs}"
+                except: return f"Ingreso de capital al fondo del negocio · {obs}"
             if accion == "EXPORTAR_HISTORIAL":
                 return "Historial exportado a CSV"
 
@@ -805,14 +819,27 @@ class InterfazAuditoria:
             cant_nue = d_nue.get('stock', d_nue.get('cantidad', '—'))
             id_prod = d_nue.get('id_producto')
             nombre_prod = "—"
+
+            # Intentar obtener nombre desde el JSON de datos
             if id_prod:
                 try:
                     prod = self.backend.buscar_producto_por_id(int(id_prod))
                     if prod and prod.get("nombre"): nombre_prod = prod["nombre"]
                 except: pass
+
+            # Si no se encontró, extraerlo de entidad_evento (ej: "Producto: Coca Cola 1.5L")
+            if nombre_prod == "—" and entidad_evento:
+                if ":" in entidad_evento:
+                    nombre_prod = entidad_evento.split(":", 1)[-1].strip()
+                elif entidad_evento.strip():
+                    nombre_prod = entidad_evento.strip()
+
+            # Motivo del ajuste (guardado en datos_nuevos)
+            motivo_ajuste = d_nue.get('motivo', '')
+
             try:
-                diff = int(cant_nue) - int(cant_ant)
-                diff_str = f"+{diff}" if diff > 0 else str(diff)
+                diff = float(cant_nue) - float(cant_ant)
+                diff_str = f"+{diff:.3f}".rstrip('0').rstrip('.') if diff > 0 else f"{diff:.3f}".rstrip('0').rstrip('.')
                 diff_label = "⬆️  Ingreso de mercadería" if diff > 0 else "⬇️  Retiro o corrección de stock"
             except:
                 diff_str, diff_label = "—", ""
@@ -820,6 +847,8 @@ class InterfazAuditoria:
                   f"  Stock anterior:  {cant_ant}",
                   f"  Stock nuevo:     {cant_nue}",
                   f"  Diferencia:      {diff_str}  {diff_label}"]
+            if motivo_ajuste:
+                L.append(f"  Motivo:          {motivo_ajuste}")
 
         # ── CLIENTES ──────────────────────────────────────────────────────────
         elif accion_raw == "CREAR_CLIENTE":
@@ -905,8 +934,12 @@ class InterfazAuditoria:
                 dif_f = float(diferencia)
                 estado = "✅ Sin diferencia" if dif_f == 0 else (f"⬆️ Sobrante de {fmt_m(abs(dif_f))}" if dif_f > 0 else f"⬇️ Faltante de {fmt_m(abs(dif_f))}")
                 L.append(f"  Diferencia:         {fmt_m(diferencia)}  ({estado})")
+            if accion_raw == "CIERRE_CAJA_SUPERVISOR":
+                id_usuario_caja = d_nue.get('id_usuario_caja')
+                nombre_caja = fmt_u(id_usuario_caja) if id_usuario_caja else "—"
+                L += ["", f"  Caja de:      {nombre_caja}"]
             if cerrado_por and cerrado_por != "—":
-                L += ["", f"  Cerrado por:  {cerrado_por}"]
+                L += ["", f"  Cerrado por:  {cerrado_por}"] if accion_raw != "CIERRE_CAJA_SUPERVISOR" else [f"  Cerrado por:  {cerrado_por}"]
             if motivo_cierre:
                 L.append(f"  Motivo:       {motivo_cierre}")
 
@@ -967,6 +1000,23 @@ class InterfazAuditoria:
         elif accion_raw == "CREAR_TESORERIA_AUTOMATICA":
             L += ["El sistema creó automáticamente la Tesorería del día.", "",
                   "  ℹ️  Este proceso ocurre automáticamente al inicio de cada jornada operativa."]
+
+        elif accion_raw == "INGRESO_CAPITAL":
+            try:
+                monto_val = float(d_nue.get('monto', 0))
+                monto_fmt = f"${monto_val:,.2f}"
+            except Exception:
+                monto_fmt = str(d_nue.get('monto', '—'))
+            motivo_capital = d_nue.get('observacion', 'Sin especificar')
+            L += [
+                "El administrador ingresó dinero externo al Fondo Común del negocio.",
+                "",
+                f"  Monto ingresado:   {monto_fmt}",
+                f"  Motivo / Origen:   {motivo_capital}",
+                "",
+                "  ℹ️  Este dinero fue acreditado directamente en la Tesorería del día.",
+                "  ℹ️  Podés verlo reflejado en el saldo del Fondo Común Administrativo.",
+            ]
 
         elif accion_raw == "EXPORTAR_HISTORIAL":
             L += ["Se exportó el historial de auditoría a un archivo CSV.", "",

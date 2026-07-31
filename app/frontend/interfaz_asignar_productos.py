@@ -50,6 +50,10 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     
     ctk.CTkLabel(frame_top, text="(Espacio p/ marcar)", font=("Segoe UI", 11), text_color="#9ca3af").pack(side="left", padx=10)
 
+    # --- 3. Botones Inferiores (empacados PRIMERO para que no queden aplastados) ---
+    frame_btns = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
+    frame_btns.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=(5, 20))
+
     # --- 2. Lista Central (Treeview) ---
     frame_lista = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
     frame_lista.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
@@ -66,6 +70,10 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
     tree.column("ID", width=60, anchor="center")
     tree.column("Producto", width=350)
     tree.column("Categoría", width=180)
+
+    # Tags de color: verde suave para asignados, gris para no asignados
+    tree.tag_configure("asignado", background="#14532d", foreground="#bbf7d0")
+    tree.tag_configure("no_asignado", background="", foreground="#94a3b8")
     
     ys = ctk.CTkScrollbar(frame_lista, command=tree.yview)
     ys.pack(side="right", fill="y", padx=(0, 5), pady=5)
@@ -97,7 +105,12 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
         tree.delete(*tree.get_children())
         filtro = var_buscar.get().lower().strip()
         
-        ids_ordenados = sorted(memoria_productos.keys(), key=lambda k: memoria_productos[k]['nombre'].lower())
+        # Ordenar: primero asignados (SI), luego no asignados (NO), alfabético dentro de cada grupo
+        ids_ordenados = sorted(
+            memoria_productos.keys(),
+            key=lambda k: (0 if memoria_productos[k]['asignado_actual'] else 1,
+                           memoria_productos[k]['nombre'].lower())
+        )
         
         for pid in ids_ordenados:
             data = memoria_productos[pid]
@@ -107,8 +120,9 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
                 continue
             
             icono = "☑ SI" if data['asignado_actual'] else "☐ NO"
+            tag = "asignado" if data['asignado_actual'] else "no_asignado"
             
-            tree.insert("", tk.END, iid=str(pid), values=(
+            tree.insert("", tk.END, iid=str(pid), tags=(tag,), values=(
                 icono,
                 pid,
                 nombre,
@@ -130,8 +144,9 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
         
         data = memoria_productos[pid]
         icono = "☑ SI" if data['asignado_actual'] else "☐ NO"
+        tag = "asignado" if data['asignado_actual'] else "no_asignado"
         
-        tree.item(pid_str, values=(icono, pid, data['nombre'], data['categoria']))
+        tree.item(pid_str, values=(icono, pid, data['nombre'], data['categoria']), tags=(tag,))
 
     tree.bind("<Double-1>", toggle_seleccion)
     tree.bind("<space>", toggle_seleccion)
@@ -172,12 +187,9 @@ def ui_asignar_productos(parent: tk.Misc, backend, id_proveedor: int, nombre_pro
         except Exception as e:
             messagebox.showerror("Error crítico", f"Falló el guardado: {e}", parent=win)
 
-    # --- 3. Botones Inferiores ---
-    frame_btns = ctk.CTkFrame(win, fg_color=col_card, corner_radius=10, border_color=col_border, border_width=1)
-    frame_btns.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=(5, 20))
-    
-    ctk.CTkButton(frame_btns, text="✓ Guardar Cambios", command=guardar_cambios, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 15, "bold"), width=200, height=45).pack(side="left", padx=20, pady=20)
-    ctk.CTkButton(frame_btns, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 14, "bold"), width=120, height=45).pack(side="right", padx=20, pady=20)
+    # --- Botones (el frame ya fue empacado arriba, solo agregamos los botones) ---
+    ctk.CTkButton(frame_btns, text="✓ Guardar Cambios", command=guardar_cambios, fg_color="#10b981", hover_color="#059669", font=("Segoe UI", 15, "bold"), width=200, height=45).pack(side="left", padx=20, pady=15)
+    ctk.CTkButton(frame_btns, text="Cerrar", command=win.destroy, fg_color="#4b5563", hover_color="#374151", font=("Segoe UI", 14, "bold"), width=140, height=45).pack(side="right", padx=20, pady=15)
 
     cargar_datos_iniciales()
     configurar_navegacion_ventana(win)

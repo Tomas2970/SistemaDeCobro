@@ -92,7 +92,42 @@ def ui_login(parent, backend):
     def salir(*_):
         if mostrar_confirmacion("Confirmar", "¿Desea salir del sistema?"):
             win.quit()
-        
+
+    # ── Botón mágico demo (Ctrl+Shift+D) ─────────────────────────────────────
+    def _activar_modo_demo(*_):
+        """Inyecta datos de hoy en segundo plano. Atajo oculto para presentaciones."""
+        btn_login.configure(state="disabled", text="Preparando entorno...")
+        entry_usuario.configure(state="disabled")
+        entry_contrasena.configure(state="disabled")
+        win.update()
+
+        def _on_done(ok: bool, mensaje: str):
+            """Callback desde el hilo worker — volvemos al hilo Tk con after()."""
+            def _restore():
+                btn_login.configure(state="normal", text="Ingresar al Sistema")
+                entry_usuario.configure(state="normal")
+                entry_contrasena.configure(state="normal")
+                if ok:
+                    try:
+                        from app.frontend.custom_dialogs import ToastNotification
+                        ToastNotification(win, "✅ Demo listo", mensaje, "exito")
+                    except Exception:
+                        mostrar_advertencia("Demo listo", mensaje)
+                else:
+                    mostrar_error("Error demo", mensaje)
+            if win.winfo_exists():
+                win.after(0, _restore)
+
+        try:
+            from app.tools.demo_catchup import run_catchup
+            run_catchup(backend, on_done=_on_done)
+        except Exception as e:
+            btn_login.configure(state="normal", text="Ingresar al Sistema")
+            entry_usuario.configure(state="normal")
+            entry_contrasena.configure(state="normal")
+            logger.error(f"Error activando modo demo: {e}")
+    # ─────────────────────────────────────────────────────────────────────────
+
     btn_login = ctk.CTkButton(card, text="Ingresar al Sistema", fg_color="#3b82f6", hover_color="#2563eb", font=("Segoe UI", 13, "bold"), command=iniciar_sesion)
     btn_login.pack(fill="x", padx=20, pady=(0, 10), ipady=5)
     
@@ -101,6 +136,7 @@ def ui_login(parent, backend):
 
     configurar_navegacion_teclado(win, [entry_usuario, entry_contrasena, btn_login, btn_salir])
     entry_contrasena.bind("<Return>", iniciar_sesion)
+    win.bind("<Control-Shift-D>", _activar_modo_demo)
     win.after(100, entry_usuario.focus_set)
     
     win.protocol("WM_DELETE_WINDOW", salir)

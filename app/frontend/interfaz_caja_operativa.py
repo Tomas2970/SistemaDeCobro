@@ -230,7 +230,9 @@ def _construir_panel_caja(win, backend, usuario):
     lbl_status.pack(pady=(15, 5))
     
     fr_totales = ctk.CTkFrame(fr_head, fg_color="transparent")
-    fr_totales.pack(pady=(5, 15))
+    # 🔒 CIERRE CIEGO: Vendedor no ve las tarjetas de resumen (muestran $ ***)
+    if not es_vendedor:
+        fr_totales.pack(pady=(5, 15))
     
     lbls_val = {}
     def mk_ind(parent, txt, col=0, color="#1f2937", dark_color="#f9fafb"):

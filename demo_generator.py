@@ -1022,6 +1022,30 @@ def main():
 
     demo.simular()
 
+    # Re-aplicar datos fijos (barras impresas + admin scan code)
+    # El demo_generator pudo haber pisado o creado los productos recién ahora.
+    try:
+        from app.tools.seed_initial_data import ensure_datos_fijos, CODIGOS_BARRAS_FIJOS, CODIGO_ADMIN_SCAN
+        import mysql.connector
+        from dotenv import load_dotenv
+        load_dotenv()
+        conn = mysql.connector.connect(
+            host=os.getenv("DB_HOST", "localhost"),
+            port=int(os.getenv("DB_PORT", "3307")),
+            user=os.getenv("DB_USER", "root"),
+            password=os.getenv("DB_PASSWORD", ""),
+            database=os.getenv("DB_NAME", "supermercado_don_atilio"),
+            charset="utf8mb4",
+        )
+        cur = conn.cursor()
+        ensure_datos_fijos(cur)
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("✅ Datos fijos (barras + admin scan) aplicados al finalizar demo.")
+    except Exception as e:
+        logger.warning(f"No se pudieron aplicar datos fijos post-demo: {e}")
+
 
 if __name__ == "__main__":
     main()

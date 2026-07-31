@@ -147,6 +147,8 @@ class InterfazDashboardAdmin:
         self.win = parent
         self._polling_job = None
         self.alertas_mostradas = set()
+        self._cajas_ids_anteriores = None   # None = primera ejecución, fuerza redibujado completo
+        self._cajas_widgets = {}             # { id_session: {'lbl_monto': widget, 'lbl_ventas': widget} }
         self.crear_interfaz()
 
     def crear_interfaz(self):
@@ -181,15 +183,14 @@ class InterfazDashboardAdmin:
 
         # Empaquetamos el botón de cerrar sesión primero (side="bottom") para que siempre esté visible
         ctk.CTkButton(sidebar, text="⛔ Cerrar Sesión", fg_color="#ef4444", hover_color="#b91c1c", 
-                      font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=20)
+                      font=("Segoe UI", 13, "bold"), height=40, command=self.cerrar_sesion).pack(side="bottom", fill="x", padx=20, pady=10)
 
-        ctk.CTkLabel(sidebar, text="👑", font=("Segoe UI", 60), text_color="white").pack(pady=(30, 0))
-        ctk.CTkLabel(sidebar, text="Administrador Global", font=("Segoe UI", 16, "bold"), text_color="white").pack()
-        ctk.CTkLabel(sidebar, text=f"👤 {self.usuario.get('nombre')}", font=("Segoe UI", 14), text_color="#bfdbfe").pack(pady=(5, 30))
+        ctk.CTkLabel(sidebar, text="👑", font=("Segoe UI", 48), text_color="white").pack(pady=(15, 0))
+        ctk.CTkLabel(sidebar, text="Administrador Global", font=("Segoe UI", 14, "bold"), text_color="white").pack()
+        ctk.CTkLabel(sidebar, text=f"👤 {self.usuario.get('nombre')}", font=("Segoe UI", 13), text_color="#bfdbfe").pack(pady=(3, 15))
 
-        # Opciones del admin solicitadas (estilo supervisor, sin scrollbar)
+        # Opciones del admin (Tesorería eliminada: Ingreso de Capital la reemplaza con mejor integración)
         modulos = [
-            ("🏦 Tesorería", 'ver_tesoreria', ui_tesoreria, {}),
             ("📦 Inventario", "ver_inventario", ui_inventario, {}),
             ("🛒 Registrar Compra", "registrar_compras", ui_compra, {}),
             ("📚 Cuenta Corriente", 'gestionar_cuenta_corriente', ui_cuenta_corriente, {}),
@@ -199,7 +200,7 @@ class InterfazDashboardAdmin:
             ("📊 Reportes", 'ver_reportes', ui_reportes, {'modo_vista': 'reportes'}),
             ("🧾 Historiales", 'ver_ventas', ui_historiales, {}),
             ("⚙️ Usuarios", 'ver_usuarios', ui_gestion_usuarios, {}),
-            ("🔒 Bitácora", 'ver_usuarios', ui_auditoria, {})
+            ("🔒 Bitácora", 'ver_usuarios', ui_auditoria, {}),
         ]
 
         for texto, permiso, fn, kw in modulos:
@@ -208,10 +209,12 @@ class InterfazDashboardAdmin:
                 ctk.CTkButton(sidebar, text=texto, fg_color="transparent", hover_color="#2563eb",
                               font=("Segoe UI", 13, "bold"), anchor="w", height=40, command=cmd).pack(fill="x", padx=10, pady=2)
 
+        # Ingreso de Capital: solo admin (id_rol=1), dentro del flujo del sidebar para no quedar tapado
         if self.usuario.get("id_rol") == 1:
-            ctk.CTkFrame(sidebar, fg_color="#3b82f6", height=1).pack(fill="x", padx=20, pady=10)
+            ctk.CTkFrame(sidebar, fg_color="#334155", height=1).pack(fill="x", padx=20, pady=6)
             ctk.CTkButton(sidebar, text="💰 Ingreso de Capital", fg_color="#10b981", hover_color="#059669",
-                          font=("Segoe UI", 13, "bold"), height=40, command=self._abrir_ingreso_capital).pack(fill="x", padx=10, pady=2)
+                          font=("Segoe UI", 13, "bold"), anchor="w", height=40,
+                          command=self._abrir_ingreso_capital).pack(fill="x", padx=10, pady=2)
 
         # ====== CONTENEDOR PRINCIPAL ======
         main_container = ctk.CTkFrame(self.win, fg_color="transparent")
@@ -523,123 +526,202 @@ class InterfazDashboardAdmin:
 
     def _actualizar_cajas_y_kpis(self):
         try:
-            for widget in self.container_tarjetas_cajas.winfo_children():
-                widget.destroy()
-        except Exception:
-            return
-            
-        try:
             if hasattr(self.backend, "obtener_sesiones_abiertas_con_totales"):
                 sesiones = self.backend.obtener_sesiones_abiertas_con_totales()
             else:
                 sesiones = []
 
             logger.debug("_actualizar_cajas_y_kpis ejecutado. Cajas encontradas: %d", len(sesiones))
-            
+
             cajas_turno = [s for s in sesiones if s.get('tipo_caja') != 'administrativa']
             tesoreria = next((s for s in sesiones if s.get('tipo_caja') == 'administrativa'), None)
 
             self.kpi_cajas_var.set(str(len(cajas_turno)))
-            ahora = datetime.now()
 
-            if not cajas_turno:
-                ctk.CTkLabel(self.container_tarjetas_cajas, text="No hay cajas de turno abiertas.",
-                             font=("Segoe UI", 14, "italic"), text_color=get_color("text_secondary")).pack(pady=40)
+            # --- Calcular el identificador del estado actual de cajas ---
+            # Incluye la tesorería para detectar si aparece o desaparece
+            ids_turno = sorted([s.get('id_session') for s in cajas_turno])
+            id_tes = tesoreria.get('id_session') if tesoreria else None
+            ids_set_actual = tuple(ids_turno + ([id_tes] if id_tes is not None else []))
 
-            for s in cajas_turno:
-                vendedor = s.get('vendedor', 'Desconocido')
-                str_apertura = s.get('fecha_apertura', '---')
-                monto = float(s.get('monto_acumulado', 0.0))
-                ventas = int(s.get('cantidad_ventas', 0))
-                id_session = s.get('id_session')
-                
-                # --- ALERTA PROACTIVA (Exceso de efectivo) ---
-                if monto > LIMITE_EFECTIVO_CAJA:
-                    alerta_id = f"efectivo_{id_session}_{monto}"
-                    if alerta_id not in self.alertas_mostradas:
-                        ToastNotification(self.win, "⚠️ Alerta Crítica - Efectivo", f"La Caja de {vendedor} excedió el límite seguro (${monto:,.2f}). Solicite un retiro.", "critico")
-                        self.alertas_mostradas.add(alerta_id)
-                
-                # --- RENDERIZAR TARJETA DE CAJA ESTILO SUPERVISOR ---
-                frm_card = ctk.CTkFrame(self.container_tarjetas_cajas, fg_color="#1e3a8a", corner_radius=10, 
-                                        border_color="#d1d5db" if ctk.get_appearance_mode()=="Light" else "#475569", border_width=1)
-                frm_card.pack(fill="x", pady=8, ipady=5)
-                
-                frm_header = ctk.CTkFrame(frm_card, fg_color="transparent")
-                frm_header.pack(fill="x", padx=15, pady=(10, 5))
-                
-                ctk.CTkLabel(frm_header, text=f"👤 {vendedor}", font=("Segoe UI", 16, "bold"), text_color="#ffffff").pack(side="left")
-                
+            if self._cajas_ids_anteriores == ids_set_actual:
+                # =====================================================
+                # FAST PATH: mismas cajas activas → solo actualizar texto
+                # No se destruye ni recrea ningún widget → sin parpadeo
+                # =====================================================
+                for s in cajas_turno:
+                    id_session = s.get('id_session')
+                    monto = float(s.get('monto_acumulado', 0.0))
+                    ventas = int(s.get('cantidad_ventas', 0))
+                    vendedor = s.get('vendedor', 'Desconocido')
+
+                    # Alertas proactivas (siguen corriendo en fast path)
+                    if monto > LIMITE_EFECTIVO_CAJA:
+                        alerta_id = f"efectivo_{id_session}_{monto}"
+                        if alerta_id not in self.alertas_mostradas:
+                            ToastNotification(self.win, "⚠️ Alerta Crítica - Efectivo",
+                                              f"La Caja de {vendedor} excedió el límite seguro (${monto:,.2f}). Solicite un retiro.", "critico")
+                            self.alertas_mostradas.add(alerta_id)
+
+                    # Actualizar solo los valores numéricos en los labels existentes
+                    if id_session in self._cajas_widgets:
+                        try:
+                            lbl_m = self._cajas_widgets[id_session]['lbl_monto']
+                            lbl_v = self._cajas_widgets[id_session]['lbl_ventas']
+                            if lbl_m.winfo_exists():
+                                lbl_m.configure(text=f"${monto:,.2f}")
+                            if lbl_v.winfo_exists():
+                                lbl_v.configure(text=str(ventas))
+                        except Exception:
+                            pass
+
+                # Actualizar saldo de tesorería si existe
+                if tesoreria and id_tes in self._cajas_widgets:
+                    try:
+                        lbl_tes = self._cajas_widgets[id_tes]['lbl_monto']
+                        if lbl_tes.winfo_exists():
+                            monto_tes = float(tesoreria.get('monto_acumulado', 0.0))
+                            lbl_tes.configure(text=f"${monto_tes:,.2f}")
+                    except Exception:
+                        pass
+
+            else:
+                # =====================================================
+                # SLOW PATH: cambió la composición de cajas → redibujar
+                # Igual que antes, pero guarda referencias a los labels
+                # =====================================================
                 try:
-                    if hasattr(str_apertura, 'strftime'):
-                        texto_apertura = str_apertura.strftime('%d/%m/%Y %H:%M:%S')
-                    else:
-                        texto_apertura = datetime.strptime(str(str_apertura), "%Y-%m-%d %H:%M:%S").strftime('%d/%m/%Y %H:%M:%S')
+                    for widget in self.container_tarjetas_cajas.winfo_children():
+                        widget.destroy()
                 except Exception:
-                    texto_apertura = str(str_apertura)
-                ctk.CTkLabel(frm_header, text=f"Apertura: {texto_apertura}", font=("Segoe UI", 11), text_color="#ffffff").pack(side="right", padx=10)
-                
-                frm_body = ctk.CTkFrame(frm_card, fg_color="transparent")
-                frm_body.pack(fill="x", padx=15, pady=(5, 10))
-                
-                frm_monto = ctk.CTkFrame(frm_body, fg_color="transparent")
-                frm_monto.pack(side="left", fill="both", expand=True)
-                ctk.CTkLabel(frm_monto, text="Efectivo en Caja", font=("Segoe UI", 11), text_color="#ffffff").pack()
-                ctk.CTkLabel(frm_monto, text=f"${monto:,.2f}", font=("Segoe UI", 20, "bold"), text_color="#10b981").pack()
-                
-                frm_ventas = ctk.CTkFrame(frm_body, fg_color="transparent")
-                frm_ventas.pack(side="left", fill="both", expand=True)
-                ctk.CTkLabel(frm_ventas, text="Operaciones", font=("Segoe UI", 11), text_color="#ffffff").pack()
-                ctk.CTkLabel(frm_ventas, text=f"{ventas}", font=("Segoe UI", 20, "bold"), text_color="#60a5fa").pack()
-                
-                frm_acciones_caja = ctk.CTkFrame(frm_body, fg_color="transparent")
-                frm_acciones_caja.pack(side="right", fill="both", expand=False)
-                
-                def cmd_forzar_cierre(id_sess=id_session, vend=vendedor):
-                    if messagebox.mostrar_confirmacion("⚠️ Forzar Cierre", f"¿Estás seguro que deseas cerrar forzosamente la caja de {vend}?\n\nEl sistema la marcará como cerrada y el usuario no podrá realizar más ventas hasta que abra una caja nueva.", parent=self.win):
-                        if hasattr(self.backend, "cerrar_caja_por_supervisor"):
-                            exito = self.backend.cerrar_caja_por_supervisor(id_sess, self.usuario.get('id_usuario'), "Cierre Forzado por Administrador")
-                            if exito:
-                                messagebox.mostrar_exito("Éxito", f"La caja de {vend} ha sido cerrada.", parent=self.win)
-                                self.refresh_dashboard()
-                            else:
-                                messagebox.mostrar_error("Error", "No se pudo cerrar la caja.", parent=self.win)
+                    return
+
+                self._cajas_widgets = {}  # Limpiar referencias anteriores
+                ahora = datetime.now()
+
+                if not cajas_turno:
+                    ctk.CTkLabel(self.container_tarjetas_cajas, text="No hay cajas de turno abiertas.",
+                                 font=("Segoe UI", 14, "italic"), text_color=get_color("text_secondary")).pack(pady=40)
+
+                for s in cajas_turno:
+                    vendedor = s.get('vendedor', 'Desconocido')
+                    str_apertura = s.get('fecha_apertura', '---')
+                    monto = float(s.get('monto_acumulado', 0.0))
+                    ventas = int(s.get('cantidad_ventas', 0))
+                    id_session = s.get('id_session')
+
+                    # --- ALERTA PROACTIVA (Exceso de efectivo) ---
+                    if monto > LIMITE_EFECTIVO_CAJA:
+                        alerta_id = f"efectivo_{id_session}_{monto}"
+                        if alerta_id not in self.alertas_mostradas:
+                            ToastNotification(self.win, "⚠️ Alerta Crítica - Efectivo",
+                                              f"La Caja de {vendedor} excedió el límite seguro (${monto:,.2f}). Solicite un retiro.", "critico")
+                            self.alertas_mostradas.add(alerta_id)
+
+                    # --- RENDERIZAR TARJETA DE CAJA ESTILO SUPERVISOR ---
+                    frm_card = ctk.CTkFrame(self.container_tarjetas_cajas, fg_color="#1e3a8a", corner_radius=10,
+                                            border_color="#d1d5db" if ctk.get_appearance_mode()=="Light" else "#475569", border_width=1)
+                    frm_card.pack(fill="x", pady=8, ipady=5)
+
+                    frm_header = ctk.CTkFrame(frm_card, fg_color="transparent")
+                    frm_header.pack(fill="x", padx=15, pady=(10, 5))
+
+                    ctk.CTkLabel(frm_header, text=f"👤 {vendedor}", font=("Segoe UI", 16, "bold"), text_color="#ffffff").pack(side="left")
+
+                    try:
+                        if hasattr(str_apertura, 'strftime'):
+                            texto_apertura = str_apertura.strftime('%d/%m/%Y %H:%M:%S')
                         else:
-                            messagebox.mostrar_error("Error", "Función no disponible en el backend.", parent=self.win)
+                            texto_apertura = datetime.strptime(str(str_apertura), "%Y-%m-%d %H:%M:%S").strftime('%d/%m/%Y %H:%M:%S')
+                    except Exception:
+                        texto_apertura = str(str_apertura)
+                    ctk.CTkLabel(frm_header, text=f"Apertura: {texto_apertura}", font=("Segoe UI", 11), text_color="#ffffff").pack(side="right", padx=10)
 
-                ctk.CTkButton(frm_acciones_caja, text="⛔ Forzar Cierre", font=("Segoe UI", 12, "bold"), 
-                              fg_color="#ef4444", hover_color="#b91c1c", width=110, height=35, 
-                              command=cmd_forzar_cierre).pack(side="right", pady=5)
+                    frm_body = ctk.CTkFrame(frm_card, fg_color="transparent")
+                    frm_body.pack(fill="x", padx=15, pady=(5, 10))
 
-            # --- RENDERIZAR TESORERÍA APARTE ---
-            if tesoreria:
-                ctk.CTkFrame(self.container_tarjetas_cajas, height=2, fg_color="#cbd5e1" if ctk.get_appearance_mode()=="Light" else "#334155").pack(fill="x", pady=20, padx=20)
-                ctk.CTkLabel(self.container_tarjetas_cajas, text="🏦 Tesorería del Día", font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(pady=(0, 10))
-                
-                frm_tes_card = ctk.CTkFrame(self.container_tarjetas_cajas, fg_color="#10b981", corner_radius=10)
-                frm_tes_card.pack(fill="x", pady=8, ipady=5)
-                
-                monto_tes = float(tesoreria.get('monto_acumulado', 0.0))
-                str_apertura_tes = tesoreria.get('fecha_apertura', '---')
-                try:
-                    if hasattr(str_apertura_tes, 'strftime'):
-                        txt_ap_tes = str_apertura_tes.strftime('%d/%m/%Y')
-                    else:
-                        txt_ap_tes = datetime.strptime(str(str_apertura_tes), "%Y-%m-%d %H:%M:%S").strftime('%d/%m/%Y')
-                except Exception:
-                    txt_ap_tes = str(str_apertura_tes)
+                    frm_monto = ctk.CTkFrame(frm_body, fg_color="transparent")
+                    frm_monto.pack(side="left", fill="both", expand=True)
+                    ctk.CTkLabel(frm_monto, text="Efectivo en Caja", font=("Segoe UI", 11), text_color="#ffffff").pack()
+                    # Guardar referencia al label de monto para actualizarlo sin redibujar
+                    lbl_monto_ref = ctk.CTkLabel(frm_monto, text=f"${monto:,.2f}", font=("Segoe UI", 20, "bold"), text_color="#10b981")
+                    lbl_monto_ref.pack()
 
-                frm_tes_head = ctk.CTkFrame(frm_tes_card, fg_color="transparent")
-                frm_tes_head.pack(fill="x", padx=15, pady=(10, 5))
-                ctk.CTkLabel(frm_tes_head, text="Fondo Común Administrativo", font=("Segoe UI", 16, "bold"), text_color="#ffffff").pack(side="left")
-                ctk.CTkLabel(frm_tes_head, text=f"Día: {txt_ap_tes}", font=("Segoe UI", 11), text_color="#ffffff").pack(side="right", padx=10)
-                
-                frm_tes_body = ctk.CTkFrame(frm_tes_card, fg_color="transparent")
-                frm_tes_body.pack(fill="x", padx=15, pady=(5, 10))
-                ctk.CTkLabel(frm_tes_body, text="Saldo Disponible", font=("Segoe UI", 11), text_color="#ffffff").pack()
-                ctk.CTkLabel(frm_tes_body, text=f"${monto_tes:,.2f}", font=("Segoe UI", 24, "bold"), text_color="#ffffff").pack()
+                    frm_ventas = ctk.CTkFrame(frm_body, fg_color="transparent")
+                    frm_ventas.pack(side="left", fill="both", expand=True)
+                    ctk.CTkLabel(frm_ventas, text="Operaciones", font=("Segoe UI", 11), text_color="#ffffff").pack()
+                    # Guardar referencia al label de ventas para actualizarlo sin redibujar
+                    lbl_ventas_ref = ctk.CTkLabel(frm_ventas, text=str(ventas), font=("Segoe UI", 20, "bold"), text_color="#60a5fa")
+                    lbl_ventas_ref.pack()
 
-            # 2. ACTUALIZAR KPIs
+                    # Guardar ambas referencias indexadas por id_session
+                    self._cajas_widgets[id_session] = {
+                        'lbl_monto':  lbl_monto_ref,
+                        'lbl_ventas': lbl_ventas_ref,
+                    }
+
+                    frm_acciones_caja = ctk.CTkFrame(frm_body, fg_color="transparent")
+                    frm_acciones_caja.pack(side="right", fill="both", expand=False)
+
+                    def cmd_forzar_cierre(id_sess=id_session, vend=vendedor):
+                        if messagebox.mostrar_confirmacion("⚠️ Forzar Cierre",
+                                f"¿Estás seguro que deseas cerrar forzosamente la caja de {vend}?\n\nEl sistema la marcará como cerrada y el usuario no podrá realizar más ventas hasta que abra una caja nueva.",
+                                parent=self.win):
+                            if hasattr(self.backend, "cerrar_caja_por_supervisor"):
+                                exito = self.backend.cerrar_caja_por_supervisor(id_sess, self.usuario.get('id_usuario'), "Cierre Forzado por Administrador")
+                                if exito:
+                                    messagebox.mostrar_exito("Éxito", f"La caja de {vend} ha sido cerrada.", parent=self.win)
+                                    self.refresh_dashboard()
+                                else:
+                                    messagebox.mostrar_error("Error", "No se pudo cerrar la caja.", parent=self.win)
+                            else:
+                                messagebox.mostrar_error("Error", "Función no disponible en el backend.", parent=self.win)
+
+                    ctk.CTkButton(frm_acciones_caja, text="⛔ Forzar Cierre", font=("Segoe UI", 12, "bold"),
+                                  fg_color="#ef4444", hover_color="#b91c1c", width=110, height=35,
+                                  command=cmd_forzar_cierre).pack(side="right", pady=5)
+
+                # --- RENDERIZAR TESORERÍA APARTE ---
+                if tesoreria:
+                    ctk.CTkFrame(self.container_tarjetas_cajas, height=2,
+                                 fg_color="#cbd5e1" if ctk.get_appearance_mode()=="Light" else "#334155").pack(fill="x", pady=20, padx=20)
+                    ctk.CTkLabel(self.container_tarjetas_cajas, text="🏦 Tesorería del Día",
+                                 font=("Segoe UI", 16, "bold"), text_color=get_color("text_primary")).pack(pady=(0, 10))
+
+                    frm_tes_card = ctk.CTkFrame(self.container_tarjetas_cajas, fg_color="#10b981", corner_radius=10)
+                    frm_tes_card.pack(fill="x", pady=8, ipady=5)
+
+                    monto_tes = float(tesoreria.get('monto_acumulado', 0.0))
+                    str_apertura_tes = tesoreria.get('fecha_apertura', '---')
+                    try:
+                        if hasattr(str_apertura_tes, 'strftime'):
+                            txt_ap_tes = str_apertura_tes.strftime('%d/%m/%Y')
+                        else:
+                            txt_ap_tes = datetime.strptime(str(str_apertura_tes), "%Y-%m-%d %H:%M:%S").strftime('%d/%m/%Y')
+                    except Exception:
+                        txt_ap_tes = str(str_apertura_tes)
+
+                    frm_tes_head = ctk.CTkFrame(frm_tes_card, fg_color="transparent")
+                    frm_tes_head.pack(fill="x", padx=15, pady=(10, 5))
+                    ctk.CTkLabel(frm_tes_head, text="Fondo Común Administrativo",
+                                 font=("Segoe UI", 16, "bold"), text_color="#ffffff").pack(side="left")
+                    ctk.CTkLabel(frm_tes_head, text=f"Día: {txt_ap_tes}",
+                                 font=("Segoe UI", 11), text_color="#ffffff").pack(side="right", padx=10)
+
+                    frm_tes_body = ctk.CTkFrame(frm_tes_card, fg_color="transparent")
+                    frm_tes_body.pack(fill="x", padx=15, pady=(5, 10))
+                    ctk.CTkLabel(frm_tes_body, text="Saldo Disponible",
+                                 font=("Segoe UI", 11), text_color="#ffffff").pack()
+                    # Guardar referencia al label del saldo de tesorería
+                    lbl_tes_monto = ctk.CTkLabel(frm_tes_body, text=f"${monto_tes:,.2f}",
+                                                 font=("Segoe UI", 24, "bold"), text_color="#ffffff")
+                    lbl_tes_monto.pack()
+                    self._cajas_widgets[id_tes] = {'lbl_monto': lbl_tes_monto}
+
+                # Guardar el estado actual para comparar en el próximo ciclo
+                self._cajas_ids_anteriores = ids_set_actual
+
+            # --- ACTUALIZAR KPIs (siempre, en ambos caminos) ---
             if hasattr(self.backend, "obtener_kpis_admin"):
                 kpis = self.backend.obtener_kpis_admin()
                 self.kpi_ventas_var.set(f"${kpis.get('ventas_dia', 0):,.2f}")
@@ -649,9 +731,9 @@ class InterfazDashboardAdmin:
                 self.kpi_ventas_var.set("$0.00")
                 self.kpi_efectivo_var.set("$0.00")
                 self.kpi_tickets_var.set("0")
-                
+
         except Exception as e:
-            logger.error(f"Error actualizando cajas de admin: {e}")
+            logger.debug(f"_actualizar_cajas_y_kpis: widget ya destruido o error menor: {e}")
 
     def _on_filtro_usuario_changed(self, valor):
         if valor == "Usuario específico":

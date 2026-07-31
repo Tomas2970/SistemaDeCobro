@@ -205,7 +205,7 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
     # Pagos <= UMBRAL_PAGO_SIN_AUTH → Supervisor directo.
     # Pagos > UMBRAL_PAGO_SIN_AUTH → requiere autorización de Admin.
     # =========================================================
-    def _ejecutar_pago(id_prov, nombre_empresa):
+    def _ejecutar_pago(id_prov, nombre_empresa, saldo_actual: float = 0.0):
         pop = ctk.CTkToplevel(win)
         preparar_ventana(pop)
         pop.title(f"Registrar Pago a {nombre_empresa}")
@@ -219,13 +219,25 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
         ent_monto.pack(pady=5)
         ent_monto.focus_set()
         
-        lbl_umbral = ctk.CTkLabel(
-            pop,
-            text=f"⚠️ Pagos > $ {UMBRAL_PAGO_SIN_AUTH:,.0f} requieren autorización de Admin",
-            font=("Segoe UI", 10, "italic"),
-            text_color="#f59e0b"
-        )
-        lbl_umbral.pack(pady=(0, 6))
+        # Aviso de umbral: solo se muestra a usuarios que NO son Admin
+        id_rol_actual = usuario_actual.get('id_rol') if usuario_actual else 2
+        if id_rol_actual != 1:
+            ctk.CTkLabel(
+                pop,
+                text=f"⚠️ Pagos > $ {UMBRAL_PAGO_SIN_AUTH:,.0f} requieren autorización de Admin",
+                font=("Segoe UI", 10, "italic"),
+                text_color="#f59e0b"
+            ).pack(pady=(0, 6))
+
+        # Mostrar deuda actual si existe
+        deuda_actual = -saldo_actual  # saldo < 0 = le debemos al proveedor
+        if deuda_actual > 0.01:
+            ctk.CTkLabel(
+                pop,
+                text=f"Deuda pendiente: $ {deuda_actual:,.2f}",
+                font=("Segoe UI", 12, "bold"),
+                text_color="#f87171"
+            ).pack(pady=(0, 6))
         
         ctk.CTkLabel(pop, text="Medio de Pago:", font=("Segoe UI", 12)).pack(pady=(6, 2))
         cb_medio = ctk.CTkOptionMenu(pop, values=["efectivo", "transferencia", "cheque"], width=180, height=35)
@@ -276,6 +288,25 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             if monto <= 0:
                 messagebox.showerror("Error", "El monto debe ser mayor a cero.", parent=pop)
                 return
+
+            # Validar que no se pague más de la deuda actual
+            deuda_actual = -saldo_actual  # saldo negativo = deuda
+            if deuda_actual <= 0.01:
+                messagebox.showwarning(
+                    "Sin deuda",
+                    "Este proveedor no tiene deuda pendiente. No se puede registrar un pago.",
+                    parent=pop
+                )
+                return
+            if monto > deuda_actual + 0.01:
+                messagebox.showerror(
+                    "Monto excede la deuda",
+                    f"El monto ingresado ($ {monto:,.2f}) supera la deuda actual\n"
+                    f"con el proveedor ($ {deuda_actual:,.2f}).\n\n"
+                    f"Solo se puede pagar hasta cubrir la deuda existente.",
+                    parent=pop
+                )
+                return
             
             id_rol = usuario_actual.get('id_rol') if usuario_actual else 2
             # Admin siempre puede pagar directamente
@@ -308,7 +339,14 @@ def ui_gestion_proveedores(parent: tk.Misc, backend, usuario_actual: dict = None
             messagebox.showwarning("Atención", "Seleccione una empresa.", parent=win)
             return
         item_vals = tree.item(sel[0], "values")
-        _ejecutar_pago(int(item_vals[0]), item_vals[1])
+        # item_vals: (ID, Empresa, CUIT, Tel, Email, Dir, Saldo_vis, Activo)
+        # Recuperar saldo numérico desde todos_proveedores usando el ID
+        id_prov = int(item_vals[0])
+        saldo_actual = next(
+            (float(p.get('saldo', 0.0)) for p in todos_proveedores if p.get('id_proveedor') == id_prov),
+            0.0
+        )
+        _ejecutar_pago(id_prov, item_vals[1], saldo_actual)
 
     # =========================================================
     # ASIGNAR PRODUCTOS

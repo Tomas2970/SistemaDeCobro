@@ -3835,9 +3835,10 @@ def cerrar_caja_por_supervisor(id_session: int, id_supervisor: int, obs: str) ->
             (id_supervisor, efectivo_esperado, efectivo_esperado, obs, id_session)
         )
         
+        id_usuario_caja = row.get('id_usuario_apertura')
         cur.execute(
             "INSERT INTO AuditoriaAcciones (id_usuario, accion, tabla_afectada, id_registro, datos_nuevos) VALUES (%s, 'CIERRE_CAJA_SUPERVISOR', 'caja_session', %s, %s)",
-            (id_supervisor, id_session, json.dumps({'cerrado_por': id_supervisor, 'motivo': obs}))
+            (id_supervisor, id_session, json.dumps({'cerrado_por': id_supervisor, 'id_usuario_caja': id_usuario_caja, 'motivo': obs}))
         )
         
         conn.commit()
@@ -4158,7 +4159,9 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
                 cm.monto,
                 cm.descripcion,
                 u.nombre AS usuario_nombre,
-                'movimiento' as origen
+                'movimiento' as origen,
+                cm.id_movimiento as id_orden,
+                NULL as usuario_apertura
             FROM caja_movimiento cm
             LEFT JOIN Usuario u ON cm.id_usuario = u.id_usuario
             WHERE cm.motivo IN (
@@ -4174,11 +4177,14 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
                 cs.efectivo_contado as monto,
                 'Cierre de caja' as descripcion,
                 u.nombre as usuario_nombre,
-                'cierre' as origen
+                'cierre' as origen,
+                0 as id_orden,
+                ua.nombre as usuario_apertura
             FROM caja_session cs
             LEFT JOIN Usuario u ON cs.id_usuario_cierre = u.id_usuario
+            LEFT JOIN Usuario ua ON cs.id_usuario_apertura = ua.id_usuario
             WHERE cs.fecha_cierre IS NOT NULL AND cs.fecha_cierre >= %s AND cs.fecha_cierre < %s{sql_cond_cs}
-            ORDER BY fecha_hora DESC
+            ORDER BY fecha_hora DESC, id_orden DESC
             LIMIT %s
         """
         if id_usuario is not None:
@@ -4211,8 +4217,14 @@ def obtener_feed_eventos(limit: int = 30, id_usuario: int | None = None) -> list
                 msg = f"Venta cancelada o error por {usuario} (${monto:,.2f})"
             elif motivo in ('apertura_caja', 'cierre_caja'):
                 tipo = 'caja'
-                accion = "Apertura" if motivo == 'apertura_caja' else "Cierre"
-                msg = f"{accion} de caja por {usuario}"
+                if motivo == 'apertura_caja':
+                    msg = f"Apertura de caja por {usuario}"
+                else:
+                    usuario_apertura = fila.get('usuario_apertura') or ''
+                    if usuario_apertura and usuario_apertura != usuario:
+                        msg = f"Cierre de caja de {usuario_apertura} por {usuario}"
+                    else:
+                        msg = f"Cierre de caja por {usuario}"
             else:
                 tipo = 'info'
                 msg = f"Evento de {usuario}"

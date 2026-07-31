@@ -173,6 +173,44 @@ def ensure_categorias(cur) -> None:
         print(f"\n   ℹ Todas las categorías ya estaban cargadas")
 
 # ==========================================
+# 4. DATOS FIJOS (Barras impresas + Admin scan)
+# ==========================================
+CODIGOS_BARRAS_FIJOS = [
+    ("Coca Cola 2.25L",            "77631707777"),
+    ("Alfajor Jorgito",            "77830426006"),
+    ("Leche Entera 1L",            "77625422828"),
+    ("Arroz Gallo Oro 1Kg",        "77171568101"),
+    ("Detergente Magistral 750ml", "77933437419"),
+]
+CODIGO_ADMIN_SCAN = "ADM-001"
+
+def ensure_datos_fijos(cur) -> None:
+    """Fija los 5 códigos de barras impresos y el código de escaneo del admin.
+    Se ejecuta siempre al final del seed, incluso después del demo_generator.
+    Si el producto no existe aún (la base está recién creada) lo omite sin error.
+    """
+    print("\n🏷️  Fijando códigos de barras impresos...")
+    for nombre_prod, codigo in CODIGOS_BARRAS_FIJOS:
+        cur.execute(
+            "UPDATE Producto SET codigo_barras = %s WHERE nombre = %s",
+            (codigo, nombre_prod)
+        )
+        if cur.rowcount:
+            print(f"   ✓ {nombre_prod}: {codigo}")
+        else:
+            print(f"   ℹ No encontrado aún: '{nombre_prod}' (se fijará cuando se cree el producto)")
+
+    print(f"\n🔑  Fijando código de acceso del admin ({CODIGO_ADMIN_SCAN})...")
+    cur.execute(
+        "UPDATE Usuario SET codigo_barras = %s WHERE nombre = 'admin'",
+        (CODIGO_ADMIN_SCAN,)
+    )
+    if cur.rowcount:
+        print(f"   ✓ Admin scan code: {CODIGO_ADMIN_SCAN}")
+    else:
+        print("   ⚠ Usuario 'admin' no encontrado.")
+
+# ==========================================
 # MAIN
 # ==========================================
 def main() -> None:
@@ -199,6 +237,9 @@ def main() -> None:
         # 3. Categorías (para agilizar carga de productos)
         ensure_categorias(cur)
 
+        # 4. Datos fijos: barras impresas + admin scan
+        ensure_datos_fijos(cur)
+
         # Commit
         conn.commit()
         
@@ -208,11 +249,14 @@ def main() -> None:
         print("\n📌 Datos cargados:")
         print("   • Roles: admin, vendedor, supervisor")
         print("   • Usuario: admin / admin123")
+        print(f"   • Admin scan code: {CODIGO_ADMIN_SCAN}")
         print("   • Categorías: 10 categorías predefinidas")
+        print("   • Códigos de barras fijos: 5 productos")
         print("\n💡 El sistema está listo para usarse")
         print("\n🔐 Credenciales de acceso:")
         print("   Usuario: admin")
         print("   Contraseña: admin123")
+        print(f"   Scan code:  {CODIGO_ADMIN_SCAN}")
 
     except mysql.connector.Error as e:
         if conn: conn.rollback()

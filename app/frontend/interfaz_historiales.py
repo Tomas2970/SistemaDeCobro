@@ -882,7 +882,9 @@ class Historiales:
             return
 
         def _ejecutar_anulacion(autorizador=None):
-            id_actor = self.usuario['id_usuario']
+            # Si hay autorizador (supervisión presencial), operar con su ID para evitar
+            # el rechazo del backend al detectar el rol del vendedor logueado.
+            id_actor = (autorizador or self.usuario)['id_usuario']
             motivo_final = motivo_resultado["valor"]
             if autorizador:
                 motivo_final += f" (Autorizado por: {autorizador.get('nombre')})"

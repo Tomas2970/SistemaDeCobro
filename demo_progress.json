@@ -31,7 +31,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77168072883"
+        "codigo_barras": "77503749279"
       },
       "2": {
         "nombre": "Coca Cola 1.5L",
@@ -40,7 +40,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77378277347"
+        "codigo_barras": "77399501561"
       },
       "3": {
         "nombre": "Sprite 2.25L",
@@ -49,7 +49,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77186319184"
+        "codigo_barras": "77234809763"
       },
       "4": {
         "nombre": "Fanta 2.25L",
@@ -58,7 +58,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77894484911"
+        "codigo_barras": "77756601274"
       },
       "5": {
         "nombre": "Agua Mineral 1.5L",
@@ -67,7 +67,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77649539119"
+        "codigo_barras": "77311612103"
       },
       "6": {
         "nombre": "Agua Saborizada 1.5L",
@@ -76,7 +76,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77691438020"
+        "codigo_barras": "77144379915"
       },
       "7": {
         "nombre": "Jugo Cepita 1L",
@@ -85,7 +85,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77695841161"
+        "codigo_barras": "77550345643"
       },
       "8": {
         "nombre": "Gatorade 500ml",
@@ -94,7 +94,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77765129046"
+        "codigo_barras": "77219286976"
       },
       "9": {
         "nombre": "Powerade 500ml",
@@ -103,7 +103,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77651569511"
+        "codigo_barras": "77483278290"
       },
       "10": {
         "nombre": "Soda Siphon 1L",
@@ -112,7 +112,7 @@
         "id_categoria": 2,
         "id_proveedor": 2,
         "es_pesable": false,
-        "codigo_barras": "77206108808"
+        "codigo_barras": "77328971476"
       },
       "11": {
         "nombre": "Alfajor Jorgito",
@@ -121,7 +121,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77355875560"
+        "codigo_barras": "77596912803"
       },
       "12": {
         "nombre": "Alfajor Guaymallén",
@@ -130,7 +130,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77824147895"
+        "codigo_barras": "77357215416"
       },
       "13": {
         "nombre": "Turrón Arcor",
@@ -139,7 +139,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77668667255"
+        "codigo_barras": "77881374323"
       },
       "14": {
         "nombre": "Caramelos Media Hora",
@@ -148,7 +148,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77992103172"
+        "codigo_barras": "77936317702"
       },
       "15": {
         "nombre": "Chocolate Águila",
@@ -157,7 +157,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77237315805"
+        "codigo_barras": "77952249621"
       },
       "16": {
         "nombre": "Chocolate Bon o Bon",
@@ -166,7 +166,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77766530741"
+        "codigo_barras": "77539059766"
       },
       "17": {
         "nombre": "Mantecol",
@@ -175,7 +175,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77733168249"
+        "codigo_barras": "77343629903"
       },
       "18": {
         "nombre": "Bizcochos Don Satur",
@@ -184,7 +184,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77806333532"
+        "codigo_barras": "77476362350"
       },
       "19": {
         "nombre": "Obleas Tita",
@@ -193,7 +193,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77687583655"
+        "codigo_barras": "77328607157"
       },
       "20": {
         "nombre": "Chicles Beldent",
@@ -202,7 +202,7 @@
         "id_categoria": 12,
         "id_proveedor": 4,
         "es_pesable": false,
-        "codigo_barras": "77291734617"
+        "codigo_barras": "77549853943"
       },
       "21": {
         "nombre": "Yogur Danone Frutilla",
@@ -211,7 +211,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77147869876"
+        "codigo_barras": "77253055636"
       },
       "22": {
         "nombre": "Yogur Danone Vainilla",
@@ -220,7 +220,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77436838458"
+        "codigo_barras": "77692037461"
       },
       "23": {
         "nombre": "Yogur Bebible Serenito",
@@ -229,7 +229,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77885252725"
+        "codigo_barras": "77155897170"
       },
       "24": {
         "nombre": "Queso Cremoso x Kg",
@@ -238,7 +238,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": true,
-        "codigo_barras": "77184170763"
+        "codigo_barras": "77312404979"
       },
       "25": {
         "nombre": "Queso Rallado x Kg",
@@ -247,7 +247,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": true,
-        "codigo_barras": "77634052986"
+        "codigo_barras": "77785445126"
       },
       "26": {
         "nombre": "Manteca La Serenísima",
@@ -256,7 +256,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77905941611"
+        "codigo_barras": "77785685594"
       },
       "27": {
         "nombre": "Crema de Leche",
@@ -265,7 +265,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77354664208"
+        "codigo_barras": "77959366388"
       },
       "28": {
         "nombre": "Leche Entera 1L",
@@ -274,7 +274,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77206538353"
+        "codigo_barras": "77691506498"
       },
       "29": {
         "nombre": "Leche Descremada 1L",
@@ -283,7 +283,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77882451935"
+        "codigo_barras": "77233149823"
       },
       "30": {
         "nombre": "Dulce de Leche Ser.",
@@ -292,7 +292,7 @@
         "id_categoria": 8,
         "id_proveedor": 1,
         "es_pesable": false,
-        "codigo_barras": "77235371253"
+        "codigo_barras": "77418227730"
       },
       "31": {
         "nombre": "Arroz Gallo Oro 1Kg",
@@ -301,7 +301,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77286025680"
+        "codigo_barras": "77418023892"
       },
       "32": {
         "nombre": "Fideos Matarazzo 500g",
@@ -310,7 +310,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77797524295"
+        "codigo_barras": "77732627406"
       },
       "33": {
         "nombre": "Aceite Natura 900ml",
@@ -319,7 +319,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77782189402"
+        "codigo_barras": "77678536968"
       },
       "34": {
         "nombre": "Puré de Tomate Arcor",
@@ -328,7 +328,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77795384898"
+        "codigo_barras": "77580067547"
       },
       "35": {
         "nombre": "Yerba Playadito 1Kg",
@@ -337,7 +337,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77277271510"
+        "codigo_barras": "77494787211"
       },
       "36": {
         "nombre": "Azúcar Ledesma 1Kg",
@@ -346,7 +346,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77315157705"
+        "codigo_barras": "77562154791"
       },
       "37": {
         "nombre": "Harina Pureza 1Kg",
@@ -355,7 +355,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77618342446"
+        "codigo_barras": "77815411103"
       },
       "38": {
         "nombre": "Sal Fina Celusal 500g",
@@ -364,7 +364,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77174163208"
+        "codigo_barras": "77890143438"
       },
       "39": {
         "nombre": "Café La Virginia 250g",
@@ -373,7 +373,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77112948441"
+        "codigo_barras": "77970195698"
       },
       "40": {
         "nombre": "Polenta Pampa 500g",
@@ -382,7 +382,7 @@
         "id_categoria": 1,
         "id_proveedor": 3,
         "es_pesable": false,
-        "codigo_barras": "77496009630"
+        "codigo_barras": "77523675396"
       },
       "41": {
         "nombre": "Detergente Magistral 750ml",
@@ -391,7 +391,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77587977359"
+        "codigo_barras": "77618607882"
       },
       "42": {
         "nombre": "Lavandina Ayudín 1L",
@@ -400,7 +400,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77512108181"
+        "codigo_barras": "77732085510"
       },
       "43": {
         "nombre": "Jabón Polvo Skip 800g",
@@ -409,7 +409,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77556257163"
+        "codigo_barras": "77190496697"
       },
       "44": {
         "nombre": "Suavizante Vivere 900ml",
@@ -418,7 +418,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77956018557"
+        "codigo_barras": "77945088488"
       },
       "45": {
         "nombre": "Papel Higiénico x4",
@@ -427,7 +427,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77946150049"
+        "codigo_barras": "77543751627"
       },
       "46": {
         "nombre": "Esponja Scotch Brite",
@@ -436,7 +436,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77215236594"
+        "codigo_barras": "77514967904"
       },
       "47": {
         "nombre": "Trapo de Piso",
@@ -445,7 +445,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77903310548"
+        "codigo_barras": "77778419107"
       },
       "48": {
         "nombre": "Limpiador Cif 500ml",
@@ -454,7 +454,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77794231151"
+        "codigo_barras": "77654820511"
       },
       "49": {
         "nombre": "Desodorante Glade",
@@ -463,7 +463,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77578103731"
+        "codigo_barras": "77938127181"
       },
       "50": {
         "nombre": "Bolsas de Residuos x10",
@@ -472,7 +472,7 @@
         "id_categoria": 4,
         "id_proveedor": 5,
         "es_pesable": false,
-        "codigo_barras": "77828081951"
+        "codigo_barras": "77381037206"
       }
     },
     "compras_iniciales": [
@@ -485,23 +485,6 @@
     "capital_inicial": true
   },
   "dias_completados": [
-    "2026-01-14",
-    "2026-01-15",
-    "2026-01-16",
-    "2026-01-17",
-    "2026-01-18",
-    "2026-01-19",
-    "2026-01-20",
-    "2026-01-21",
-    "2026-01-22",
-    "2026-01-23",
-    "2026-01-24",
-    "2026-01-25",
-    "2026-01-26",
-    "2026-01-27",
-    "2026-01-28",
-    "2026-01-29",
-    "2026-01-30",
     "2026-01-31",
     "2026-02-01",
     "2026-02-02",
@@ -665,19 +648,41 @@
     "2026-07-10",
     "2026-07-11",
     "2026-07-12",
-    "2026-07-13"
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-16",
+    "2026-07-17",
+    "2026-07-18",
+    "2026-07-19",
+    "2026-07-20",
+    "2026-07-21",
+    "2026-07-22",
+    "2026-07-23",
+    "2026-07-24",
+    "2026-07-25",
+    "2026-07-26",
+    "2026-07-27",
+    "2026-07-28",
+    "2026-07-29",
+    "2026-07-30"
   ],
   "dia_actual": null,
   "estado_dia_actual": {},
   "clientes_creados": {
-    "Carlos Alberto Fernández": 1,
-    "Lucía Romina Sosa": 2,
+    "Juan Manuel Pérez": 1,
+    "Yamila Esther Molina": 2,
     "Gisela Andrea Torres": 3,
-    "Matías Ezequiel López": 4,
-    "Romina Vanesa Díaz": 5,
-    "Nicolás Ariel Herrera": 6,
-    "Juan Manuel Pérez": 7,
+    "Diego Martín Rodríguez": 4,
+    "Antonella Soledad Vega": 5,
+    "Federico Andrés Castro": 6,
+    "Romina Vanesa Díaz": 7,
     "Florencia Noemí Acosta": 8,
-    "Yamila Esther Molina": 9
+    "Lucía Romina Sosa": 9,
+    "Matías Ezequiel López": 10,
+    "Nicolás Ariel Herrera": 11,
+    "Pablo Ezequiel Medina": 12,
+    "Sebastián Nicolás Ríos": 13,
+    "Carlos Alberto Fernández": 14
   }
 }
