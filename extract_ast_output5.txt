@@ -1,0 +1,29 @@
+--- buscar_producto_por_nombre in app/database/DB.py ---
+def buscar_producto_por_nombre(patron: str) -> list[dict]:
+    conn = cur = None
+    try:
+        conn = conectar()
+        cur = conn.cursor(dictionary=True)
+        
+        base_sql = _select_producto_campos() + _select_producto_joins() + " WHERE p.activo = 1"
+        
+        if not patron:
+            cur.execute(base_sql + " ORDER BY p.id_producto")
+            return list(cur.fetchall() or [])
+            
+        # --- CAMBIO: Usamos LOWER() en ambos lados ---
+        like = f"%{patron}%"
+        cur.execute(base_sql + " AND LOWER(p.nombre) LIKE LOWER(%s) ORDER BY p.nombre", (like,))
+        # --- FIN CAMBIO ---
+        
+        return list(cur.fetchall() or [])
+    except Exception as e:
+        logger.error(f"buscar_producto_por_nombre: {e}")
+        return []
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+

@@ -1,0 +1,45 @@
+# =====================================
+# DEPENDENCIAS DEL PROYECTO
+# Sistema de Cobro - Supermercado Don Atilio
+# =====================================
+
+# Base de datos
+mysql-connector-python==8.2.0
+
+# Seguridad y Configuración
+bcrypt==4.1.2
+python-dotenv==1.0.0
+
+# Utilidades
+python-dateutil==2.8.2
+pytz>=2024.1
+
+# Interfaz gráfica (NUEVO)
+customtkinter>=5.2.2
+darkdetect>=0.8.0
+tkcalendar>=1.6.1
+
+# Impresora térmica (OPCIONAL - solo si tienes impresora física)
+# Descomenta la siguiente línea si vas a usar impresora:
+python-escpos>=3.0.0
+
+# Imágenes (para cargar el logo)
+Pillow>=10.4.0
+
+pywin32
+# Interfaz gráfica (Tkinter viene con Python, pero por si acaso)
+# tkinter - incluido en Python estándar
+
+# =====================================
+# INSTALACIÓN
+# =====================================
+# pip install -r requirements.txt
+#
+# Para compilar el ejecutable:
+# pyinstaller build_spec.py
+#
+# =====================================
+# NOTAS IMPORTANTES
+# =====================================
+# - Flask y Flask-CORS removidos (no son necesarios para app de escritorio)
+# - pymysql removido (usamos mysql-connector-python)

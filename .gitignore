@@ -1,0 +1,156 @@
+# =====================================
+# PYTHON
+# =====================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos virtuales
+env/
+venv/
+ENV/
+.venv
+virtualenv/
+
+# Distribución / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =====================================
+# CONFIGURACIÓN Y SECRETOS
+# =====================================
+.env
+.env.local
+.env.*.local
+config.local.py
+secrets.json
+credentials.json
+
+# Claves y certificados
+*.key
+*.pem
+*.crt
+*.cer
+
+# =====================================
+# BASE DE DATOS
+# =====================================
+*.db
+*.sqlite
+*.sqlite3
+*.sql.backup
+backups/
+
+# Archivos temporales de MySQL
+*.mwb.bak
+*.mwb.beforefix
+
+# =====================================
+# IDE Y EDITORES
+# =====================================
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# =====================================
+# SISTEMA OPERATIVO
+# =====================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Linux
+.directory
+.Trash-*
+
+# =====================================
+# LOGS Y TEMPORALES
+# =====================================
+*.log
+logs/
+*.tmp
+*.temp
+temp/
+tmp/
+
+# =====================================
+# TESTING
+# =====================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+
+# =====================================
+# JUPYTER NOTEBOOKS
+# =====================================
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# =====================================
+# DOCUMENTACIÓN
+# =====================================
+docs/_build/
+site/
+
+# =====================================
+# ARCHIVOS ESPECÍFICOS DEL PROYECTO
+# =====================================
+# Datos de prueba sensibles
+datos_produccion.sql
+usuarios_reales.sql
+
+# Backups locales
+backup_*.sql
+
+# Archivos de configuración local
+local_config.py

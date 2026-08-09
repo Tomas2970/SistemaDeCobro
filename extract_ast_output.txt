@@ -1,0 +1,278 @@
+--- Imports in app/database/backend_adapter.py ---
+from app.database import DB
+from app.database import DB
+from app.database import DB
+
+--- crear_usuario in app/database/backend_adapter.py ---
+def crear_usuario(self, nombre: str, password_plana: str, id_rol: int, codigo_barras: Optional[str] = None, id_usuario_admin: int | None = None) -> int | None:
+        fn = getattr(DB, "crear_usuario", None)
+        nuevo_id = fn(nombre, password_plana, id_rol, codigo_barras=codigo_barras) if callable(fn) else None
+        if nuevo_id:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="CREAR_USUARIO",
+                tabla_afectada="Usuario",
+                id_registro=nuevo_id,
+                datos_nuevos={"nombre": nombre, "id_rol": id_rol, "codigo_barras": codigo_barras}
+            )
+        return nuevo_id
+
+--- obtener_usuarios_con_rol in app/database/backend_adapter.py ---
+def obtener_usuarios_con_rol(self) -> list[dict[str, Any]]:
+        fn = getattr(DB, "obtener_usuarios_con_rol", None)
+        return list(fn() or []) if callable(fn) else []
+
+--- crear_categoria in app/database/backend_adapter.py ---
+def crear_categoria(self, nombre: str, margen: float, es_pesable: bool = False) -> bool:
+            fn = getattr(DB, "crear_categoria", None)
+            return bool(fn(nombre, margen, es_pesable)) if callable(fn) else False
+
+--- crear_proveedor in app/database/backend_adapter.py ---
+def crear_proveedor(self, nombre: str, empresa: str, cuit_empresa: str, dni_vendedor: str, telefono: str,
+                            email: str, direccion: str,
+                            id_usuario_admin: int | None = None,
+                            usuario_actual: dict | None = None) -> int | None:
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'crear_proveedores'):
+            raise PermissionError("Sin permiso: crear_proveedores")
+        fn = getattr(DB, "crear_proveedor", None)
+        if not callable(fn):
+            return None
+        nuevo_id = fn(
+            nombre=nombre,
+            empresa=empresa,
+            cuit_empresa=cuit_empresa,
+            dni_vendedor=dni_vendedor,
+            telefono=telefono,
+            email=email,
+            direccion=direccion
+        )
+        if nuevo_id:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="CREAR_PROVEEDOR",
+                tabla_afectada="Proveedor",
+                id_registro=nuevo_id,
+                datos_nuevos={"empresa": empresa, "cuit_empresa": cuit_empresa}
+            )
+        return nuevo_id
+
+--- crear_producto_completo in app/database/backend_adapter.py ---
+def crear_producto_completo(
+        self,
+        nombre: str,
+        categoria_id: Optional[int],
+        codigo_barras: Optional[str],
+        precio: float,
+        stock_inicial: int,
+        stock_minimo: int = 10,
+        es_pesable: bool = False,
+        id_usuario: int | None = None
+    ) -> int | None:
+        # VALIDACIONES DE SEGURIDAD Y NEGOCIO
+        if precio < 0:
+            raise ValueError("El precio no puede ser negativo.")
+            
+        if id_usuario is not None:
+            usuarios = DB.obtener_usuarios_con_rol()
+            user = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+            if user and user.get('rol_nombre') == 'vendedor':
+                raise PermissionError("Acceso denegado: Los vendedores no tienen permisos para crear productos.")
+
+        pid = DB.crear_producto_completo(nombre, precio, categoria_id, stock_inicial, stock_minimo, es_pesable)
+        # Auditoría de Creación
+        if pid:
+            self._registrar_auditoria(
+                id_usuario=id_usuario,
+                accion="CREAR_PRODUCTO",
+                tabla_afectada="Producto",
+                id_registro=pid,
+                datos_nuevos={"nombre": nombre, "precio": precio, "stock": stock_inicial, "es_pesable": es_pesable}
+            )
+            # Asignar código de barras (esto también debería auditarse si quisiéramos)
+            if codigo_barras:
+                fn = getattr(DB, "actualizar_producto", None)
+                if callable(fn):
+                    try:
+                        fn(id_producto=pid, codigo_barras=codigo_barras)
+                    except Exception as e:
+                        logger.error(f"Fallo al setear codigo_barras post-creación: {e}")
+                        pass
+        return pid
+
+--- asignar_producto_a_proveedor in app/database/backend_adapter.py ---
+def asignar_producto_a_proveedor(self, id_proveedor: int, id_producto: int) -> bool:
+        fn = getattr(DB, "asignar_producto_a_proveedor", None)
+        return bool(fn(id_proveedor, id_producto)) if callable(fn) else False
+
+--- obtener_productos_full in app/database/backend_adapter.py ---
+def obtener_productos_full(self) -> list[dict[str, Any]]:
+        """DEPRECATED: Alias de conveniencia. Usar obtener_productos()."""
+        return self.obtener_productos()
+
+--- abrir_caja_session in app/database/backend_adapter.py ---
+def abrir_caja_session(self, id_usuario: int, monto_inicial: float, tipo_caja: str = 'turno') -> bool:
+        fn = getattr(DB, "abrir_caja_session", None)
+        if not callable(fn): return False
+        try:
+            return bool(fn(id_usuario, monto_inicial, tipo_caja))
+        except ValueError as e:
+            # Re-lanzar errores de validación (ej: "Usuario ya tiene caja abierta" o "Tesorería ya abierta")
+            raise
+
+--- cerrar_caja_session in app/database/backend_adapter.py ---
+def cerrar_caja_session(self, id_session: int, id_usuario_cierre: int, efectivo_esperado: float, efectivo_contado: float, diferencia: float, obs: str) -> bool:
+        fn = getattr(DB, "cerrar_caja_session", None)
+        return bool(fn(id_session, id_usuario_cierre, efectivo_esperado, efectivo_contado, diferencia, obs)) if callable(fn) else False
+
+--- obtener_session_abierta in app/database/backend_adapter.py ---
+def obtener_session_abierta(self, id_usuario: int) -> dict | None:
+        """
+        Obtiene la sesión de caja abierta DEL USUARIO ESPECÍFICO.
+        Sistema individual: cada usuario tiene su propia caja.
+        """
+        fn = getattr(DB, "obtener_session_abierta", None)
+        if not callable(fn): return None
+        
+        # Pasar el id_usuario para obtener SU caja
+        return fn(id_usuario)
+
+--- obtener_o_crear_tesoreria_hoy in app/database/backend_adapter.py ---
+def obtener_o_crear_tesoreria_hoy(self, id_usuario: int) -> dict | None:
+        conn = None
+        try:
+            conn = DB.conectar()
+            cur = conn.cursor(dictionary=True)
+            conn.start_transaction()
+            res = DB.obtener_o_crear_tesoreria_hoy(cur, id_usuario)
+            conn.commit()
+            return res
+        except Exception as e:
+            if conn: conn.rollback()
+            logger.error(f"Error en obtener_o_crear_tesoreria_hoy: {e}")
+            return None
+        finally:
+            if conn: conn.close()
+
+--- registrar_ingreso_capital in app/database/backend_adapter.py ---
+def registrar_ingreso_capital(self, monto: float, observacion: str, id_usuario: int) -> bool:
+        fn = getattr(DB, "registrar_ingreso_capital", None)
+        return bool(fn(monto, observacion, id_usuario)) if callable(fn) else False
+
+--- transferir_entre_cajas in app/database/backend_adapter.py ---
+def transferir_entre_cajas(self, origen: int, destino: int, monto: float, id_usuario: int, motivo_salida: str, motivo_entrada: str, obs: str, id_autorizador: int = None) -> bool:
+        fn = getattr(DB, "transferir_entre_cajas", None)
+        return bool(fn(origen, destino, monto, id_usuario, motivo_salida, motivo_entrada, obs, id_autorizador)) if callable(fn) else False
+
+--- registrar_movimiento_manual in app/database/backend_adapter.py ---
+def registrar_movimiento_manual(self, id_session: int, tipo: str, monto: float, motivo: str, descripcion: str, id_usuario: int) -> bool:
+        fn = getattr(DB, "registrar_movimiento_manual", None)
+        return bool(fn(id_session, tipo, monto, motivo, descripcion, id_usuario)) if callable(fn) else False
+
+--- registrar_compra in app/database/backend_adapter.py ---
+def registrar_compra(self, id_usuario: int, id_proveedor: int, items: list[dict] | None = None,
+                         medio_pago: str = 'efectivo',
+                         usuario_actual: dict | None = None) -> int | None:
+        """
+        Registra compra permitiendo seleccionar medio de pago.
+        """
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'registrar_compras'):
+            raise PermissionError("Sin permiso: registrar_compras")
+        fn = getattr(DB, "registrar_compra", None)
+        if not callable(fn):
+            return None
+
+        try:
+            # Llamamos a la nueva firma de DB.registrar_compra
+            if items is not None:
+                return fn(id_usuario, id_proveedor, items, medio_pago)
+            else:
+                return fn(id_usuario, id_proveedor)
+        except TypeError:
+            # Fallback por si DB no se actualizó
+            if items is not None:
+                return fn(id_usuario, id_proveedor, items)
+            return fn(id_usuario, id_proveedor)
+
+--- registrar_venta_completa in app/database/backend_adapter.py ---
+def registrar_venta_completa(
+        self, 
+        id_usuario: int, 
+        id_cliente: int | None, 
+        items: list, 
+        tipo_pago: str,
+        id_session: int | None = None  # 🔥 NUEVO PARÁMETRO
+    ) -> int | None:
+        try:
+            # La lógica de auditoría de Venta ya está en el Trigger de Inventario,
+            # pero podríamos agregar una auditoría de 'ACCIÓN' aquí si quisiéramos.
+            return DB.registrar_venta_completa(id_usuario, id_cliente, items, tipo_pago, id_session)
+        except Exception as e:
+            logger.error(f"Error en registrar_venta_completa: {e}")
+            raise
+
+--- anular_venta in app/database/backend_adapter.py ---
+def anular_venta(self, id_venta: int, id_usuario: int, motivo: str | None = None) -> bool:
+        """
+        Anula una venta de forma atómica: cambia el estado a 'cancelada',
+        restituye stock y revierte la cuenta corriente si corresponde.
+
+        Raises:
+            ValueError: Si la venta ya está anulada o no está completada.
+            Exception: Error de base de datos.
+            PermissionError: Si un vendedor intenta anular una venta.
+        """
+        from app.database import DB
+        usuarios = DB.obtener_usuarios_con_rol()
+        user = next((u for u in usuarios if u.get('id_usuario') == id_usuario), None)
+        if user and user.get('rol_nombre') == 'vendedor':
+            raise PermissionError("No tienes permisos para anular ventas.")
+
+        fn = getattr(DB, "anular_venta", None)
+        if not callable(fn):
+            raise RuntimeError("DB.anular_venta no está implementado.")
+        return bool(fn(id_venta, id_usuario, motivo))
+
+--- crear_cliente in app/database/backend_adapter.py ---
+def crear_cliente(self, nombre: str, dni: str, cuit: str, direccion: str, telefono: str, email: str, limite_credito: float = 50000.00, id_usuario_admin: int | None = None) -> int | None:
+        try:
+            limite_valido = float(limite_credito)
+        except (ValueError, TypeError):
+            limite_valido = 50000.00
+        # Incluye CUIT
+        nuevo_id = DB.crear_cliente(nombre, dni, cuit, direccion, telefono, email, limite_valido)
+        if nuevo_id:
+            self._registrar_auditoria(
+                id_usuario=id_usuario_admin,
+                accion="CREAR_CLIENTE",
+                tabla_afectada="Cliente",
+                id_registro=nuevo_id,
+                datos_nuevos={"nombre": nombre, "limite_credito": limite_valido}
+            )
+        return nuevo_id
+
+--- crear_cuenta_corriente_si_no_existe in app/database/backend_adapter.py ---
+def crear_cuenta_corriente_si_no_existe(self, id_cliente: int) -> bool:
+        fn = getattr(DB, "crear_cuenta_corriente_si_no_existe", None)
+        return bool(fn(id_cliente)) if callable(fn) else False
+
+--- registrar_pago_cuenta_corriente in app/database/backend_adapter.py ---
+def registrar_pago_cuenta_corriente(self, id_cuenta: int, monto: float, metodo: str, id_usuario: int) -> bool:
+        fn = getattr(DB, "registrar_pago_cuenta_corriente", None)
+        return bool(fn(id_cuenta, monto, metodo, id_usuario)) if callable(fn) else False
+
+--- registrar_pago_proveedor in app/database/backend_adapter.py ---
+def registrar_pago_proveedor(self, id_proveedor: int, monto: float, medio: str, id_usuario: int, obs: str,
+                                   usuario_actual: dict | None = None) -> bool:
+        from app.database.permisos import tiene_permiso
+        if usuario_actual and not tiene_permiso(usuario_actual, 'registrar_pagos_proveedores'):
+            raise PermissionError("Sin permiso: registrar_pagos_proveedores")
+        fn = getattr(DB, "registrar_pago_proveedor", None)
+        if callable(fn):
+            return fn(id_proveedor, monto, medio, id_usuario, obs)
+        return False
+
+--- obtener_deuda_cliente in app/database/backend_adapter.py ---
+NOT FOUND
+
